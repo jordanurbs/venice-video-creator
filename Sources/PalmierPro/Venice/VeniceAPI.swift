@@ -105,6 +105,24 @@ struct VeniceAPI: Sendable {
         }
     }
 
+    // MARK: - Cost quotes (USD)
+
+    /// Estimated USD cost for a video generation, via Venice's `/video/quote`.
+    func videoQuote(model: String, duration: Int, resolution: String?, aspectRatio: String) async -> Double? {
+        var body: [String: Any] = ["model": model, "duration": "\(max(1, duration))s"]
+        if let resolution, !resolution.isEmpty { body["resolution"] = resolution }
+        if !aspectRatio.isEmpty { body["aspect_ratio"] = aspectRatio }
+        return (try? await postJSON(path: "video/quote", body: body))?["quote"] as? Double
+    }
+
+    /// Estimated USD cost for an audio generation, via Venice's `/audio/quote`.
+    func audioQuote(model: String, durationSeconds: Int?, characterCount: Int?) async -> Double? {
+        var body: [String: Any] = ["model": model]
+        if let durationSeconds, durationSeconds > 0 { body["duration_seconds"] = durationSeconds }
+        if let characterCount, characterCount > 0 { body["character_count"] = characterCount }
+        return (try? await postJSON(path: "audio/quote", body: body))?["quote"] as? Double
+    }
+
     /// Pulls a human-readable message out of Venice's error envelopes.
     static func extractError(from data: Data) -> String {
         guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {

@@ -15,6 +15,8 @@ struct GenerationView: View {
     @State private var selectedResolution = "1080p"
     @State private var selectedQuality = "high"
     @State private var selectedNumImages = 1
+    /// Live USD cost estimate (Venice quote for video/audio, static for image).
+    @State private var estimatedUSD: Double?
 
     // Audio extras
     @State private var selectedVoice = ""
@@ -840,13 +842,44 @@ struct GenerationView: View {
         HStack(spacing: AppTheme.Spacing.xs) {
             Image(systemName: "dollarsign.circle.fill")
                 .font(.system(size: AppTheme.FontSize.sm))
-            Text(estimatedCost.map { $0.formatted() } ?? "—")
+            Text(estimatedUSD.map { CostEstimator.formatUSD($0) } ?? "—")
                 .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
                 .monospacedDigit()
                 .lineLimit(1)
         }
-        .foregroundStyle(hasInsufficientCredits ? .red : AppTheme.Text.secondaryColor)
-        .help(costHelpText)
+        .foregroundStyle(AppTheme.Text.secondaryColor)
+        .help("Estimated cost from Venice. Actual usage is billed to your Venice account.")
+        .task(id: costSignature) { await refreshEstimatedUSD() }
+    }
+
+    /// Changes to any of these re-fetch the cost estimate.
+    private var costSignature: String {
+        "\(selectedType.rawValue)|\(currentModelId)|\(effectiveVideoSeconds)|\(effectiveResolution ?? "")|\(selectedAspectRatio)|\(selectedNumImages)|\(selectedAudioDuration)"
+    }
+
+    /// Live USD estimate: Venice quote for video/audio, static per-image price for images.
+    private func refreshEstimatedUSD() async {
+        guard let api = VeniceAPI.fromKeychain() else { estimatedUSD = nil; return }
+        switch selectedType {
+        case .video:
+            estimatedUSD = await api.videoQuote(
+                model: currentModelId,
+                duration: effectiveVideoSeconds,
+                resolution: effectiveResolution,
+                aspectRatio: selectedAspectRatio
+            )
+        case .audio:
+            let secs: Int? = audioModel.durations != nil
+                ? selectedAudioDuration
+                : (audioModel.inputs.contains(.video) && audioVideoSource != nil ? effectiveAudioVideoSeconds : nil)
+            estimatedUSD = await api.audioQuote(model: currentModelId, durationSeconds: secs, characterCount: nil)
+        case .image:
+            if let cents = imageModel.creditsPerImage[""], cents > 0 {
+                estimatedUSD = (cents / 100.0) * Double(max(1, selectedNumImages))
+            } else {
+                estimatedUSD = nil
+            }
+        }
     }
 
     private var voicePicker: some View {

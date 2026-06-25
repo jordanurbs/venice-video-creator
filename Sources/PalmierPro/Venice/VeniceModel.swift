@@ -75,11 +75,13 @@ enum VeniceModelMapper {
             supportsImageReference: (constraints["combineImages"] as? Bool) ?? true,
             maxImages: 4
         )
+        // Image price is a flat per-image USD under pricing.generation.usd.
+        let perImageCents = (nestedUSD(pricing, "generation") ?? 0) * 100
         return CatalogEntry(
             id: id, kind: .image, displayName: name,
             allowedEndpoints: ["image/generate"], responseShape: .images,
             uiCapabilities: .image(caps),
-            creditsPerImage: ["": usdPrice(pricing)]
+            creditsPerImage: ["": perImageCents]
         )
     }
 
@@ -171,13 +173,16 @@ enum VeniceModelMapper {
     }
 
     private static func upscaleEntry(id: String, name: String, pricing: [String: Any]) -> CatalogEntry {
-        // Venice's upscaler is image-only (no video upscaling).
+        // Venice's upscaler is image-only (no video upscaling). Price is a flat
+        // per-image USD (2x). The editor multiplies by duration (1 for images).
+        let upscale = pricing["upscale"] as? [String: Any]
+        let perCents = ((upscale?["2x"] as? [String: Any])?["usd"] as? Double ?? 0.02) * 100
         let caps = UpscaleCaps(speed: "Medium", p75DurationSeconds: 30, supportedTypes: ["image"])
         return CatalogEntry(
             id: id, kind: .upscale, displayName: name,
             allowedEndpoints: ["image/upscale"], responseShape: .upscaledImage,
             uiCapabilities: .upscale(caps),
-            creditsPerSecondUpscale: usdPrice(pricing)
+            creditsPerSecondUpscale: perCents
         )
     }
 
@@ -186,6 +191,11 @@ enum VeniceModelMapper {
     /// Venice durations arrive as strings like "5s"; convert to integer seconds.
     private static func parseDurations(_ raw: [String]?) -> [Int] {
         (raw ?? []).compactMap { Int($0.replacingOccurrences(of: "s", with: "")) }
+    }
+
+    /// USD price nested under `pricing.<key>.usd` (e.g. "generation").
+    private static func nestedUSD(_ pricing: [String: Any], _ key: String) -> Double? {
+        (pricing[key] as? [String: Any])?["usd"] as? Double
     }
 
     /// Pull a representative USD price out of Venice's pricing object so the app's

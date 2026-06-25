@@ -89,11 +89,15 @@ enum CostEstimator {
         }
     }
 
+    /// Internal cost values are USD cents (derived from Venice pricing), so format
+    /// them as a USD estimate.
     static func format(_ credits: Int?) -> String {
-        guard let credits else { return "—" }
-        if credits <= 0 { return "0 credits" }
-        if credits == 1 { return "1 credit" }
-        return "\(credits) credits"
+        guard let credits, credits > 0 else { return "—" }
+        return formatUSD(Double(credits) / 100.0)
+    }
+
+    static func formatUSD(_ usd: Double) -> String {
+        usd.formatted(.currency(code: "USD"))
     }
 
     private static func resolvedRate(_ dict: [String: Double], key: String?) -> Double? {

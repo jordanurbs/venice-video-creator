@@ -1,0 +1,12 @@
+# Always keep OUR version of brand-only files when merging upstream.
+# The `ours` driver is defined by scripts/sync-upstream.sh (git config merge.ours.driver true).
+# Only list files that are 100% Venice-owned — never shared logic. Things like
+# Info.plist are intentionally NOT here, because upstream may add permission keys
+# we actually need; those should be resolved by hand.
+
+Sources/PalmierPro/Resources/AppIcon.icns merge=ours
+Sources/PalmierPro/Resources/AppIcon.png  merge=ours
+
+# Treat icon assets as binary so git never attempts a line merge.
+*.icns binary
+*.png  binary

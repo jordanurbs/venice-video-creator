@@ -1,0 +1,80 @@
+name: Sync upstream
+
+# Opens (or updates) a pull request that merges palmier-io/palmier-pro's `main`
+# into our `venice-integration` branch. GitHub surfaces any conflicts on the PR,
+# so syncs become reviewable instead of surprise breakage. Nothing is merged
+# automatically — a human reviews and merges the PR.
+
+on:
+  schedule:
+    - cron: "0 13 * * 1" # Mondays 13:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  open-sync-pr:
+    # Only run on the fork itself, never on the upstream repo.
+    if: github.repository == 'jordanurbs/venice-video-editor'
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM_URL: https://github.com/palmier-io/palmier-pro.git
+      UPSTREAM_BRANCH: main
+      WORK_BRANCH: venice-integration
+      SYNC_BRANCH: automated/upstream-sync
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.WORK_BRANCH }}
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch upstream "$UPSTREAM_BRANCH" --tags
+
+      - name: Check whether we are behind upstream
+        id: check
+        run: |
+          behind="$(git rev-list --count "origin/$WORK_BRANCH..upstream/$UPSTREAM_BRANCH")"
+          echo "behind=$behind" >> "$GITHUB_OUTPUT"
+          echo "WORK_BRANCH is behind upstream by $behind commit(s)."
+
+      - name: Publish upstream tip to sync branch
+        if: steps.check.outputs.behind != '0'
+        run: |
+          git push origin "upstream/$UPSTREAM_BRANCH:refs/heads/$SYNC_BRANCH" --force
+
+      - name: Open or update sync PR
+        if: steps.check.outputs.behind != '0'
+        run: |
+          behind="${{ steps.check.outputs.behind }}"
+          title="Sync upstream: merge palmier-io/main ($behind new commit(s))"
+          body=$(cat <<EOF
+          Automated upstream sync.
+
+          Merges \`palmier-io/palmier-pro@$UPSTREAM_BRANCH\` into \`$WORK_BRANCH\`
+          (**$behind** new upstream commit(s)).
+
+          - If GitHub reports conflicts, resolve them locally:
+            \`scripts/sync-upstream.sh\` then push.
+          - Review the diff, make sure \`swift build\` passes, then merge.
+
+          _Do not squash — use a merge commit so history stays linear with upstream._
+          EOF
+          )
+
+          existing="$(gh pr list --head "$SYNC_BRANCH" --base "$WORK_BRANCH" --state open --json number --jq '.[0].number')"
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "$title" --body "$body"
+            echo "Updated existing PR #$existing."
+          else
+            gh pr create --head "$SYNC_BRANCH" --base "$WORK_BRANCH" --title "$title" --body "$body"
+          fi

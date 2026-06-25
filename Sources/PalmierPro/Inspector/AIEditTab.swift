@@ -300,7 +300,11 @@ struct AIEditTab: View {
             .fixedSize()
             .controlSize(.small)
             .disabled(!isEnabled)
-        case .edit, .generateMusic, .generateSFX, .rerun:
+        case .generateMusic:
+            audioMenu(kind: .music, title: title, isEnabled: isEnabled)
+        case .generateSFX:
+            audioMenu(kind: .sfx, title: title, isEnabled: isEnabled)
+        case .edit, .rerun:
             Button(title) {
                 present(action)
             }
@@ -308,6 +312,26 @@ struct AIEditTab: View {
             .controlSize(.small)
             .disabled(!isEnabled)
         }
+    }
+
+    private func audioModels(for kind: VideoToAudioEditKind) -> [AudioModelConfig] {
+        AudioModelConfig.allModels.filter {
+            $0.category == kind.category && ModelPreferences.shared.isEnabled($0.id)
+        }
+    }
+
+    @ViewBuilder
+    private func audioMenu(kind: VideoToAudioEditKind, title: String, isEnabled: Bool) -> some View {
+        Menu(title) {
+            ForEach(audioModels(for: kind)) { model in
+                Button(model.displayName) { presentVideoAudio(kind: kind, model: model) }
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .controlSize(.small)
+        .disabled(!isEnabled || !account.aiAllowed)
+        .help(account.aiAllowed ? "" : "Add your Venice API key to generate")
     }
 
     private func sendToVideo(asReference: Bool) {
@@ -347,6 +371,16 @@ struct AIEditTab: View {
 
     private func presentVideoAudio(kind: VideoToAudioEditKind) {
         guard let stored = EditSubmitter.videoAudioSeed(for: asset, kind: kind) else { return }
+        seedPanel(
+            stored: stored,
+            trimmed: trimmedSourceIfEnabled(),
+            allowsReplacement: false,
+            audioPlacement: pendingAudioPlacement(actionName: kind.timelineActionName)
+        )
+    }
+
+    private func presentVideoAudio(kind: VideoToAudioEditKind, model: AudioModelConfig) {
+        guard let stored = EditSubmitter.videoAudioSeed(for: asset, model: model) else { return }
         seedPanel(
             stored: stored,
             trimmed: trimmedSourceIfEnabled(),

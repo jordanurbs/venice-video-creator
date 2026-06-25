@@ -89,11 +89,16 @@ enum CostEstimator {
         }
     }
 
-    /// Internal cost values are USD cents (derived from Venice pricing), so format
-    /// them as a USD estimate.
+    /// Internal cost values are USD cents, and 1 credit = $0.01, so the cent value
+    /// equals the credit count.
     static func format(_ credits: Int?) -> String {
         guard let credits, credits > 0 else { return "—" }
-        return formatUSD(Double(credits) / 100.0)
+        return credits == 1 ? "1 credit" : "\(credits) credits"
+    }
+
+    /// Convert a USD amount (e.g. a Venice quote) into credits at 1 credit = $0.01.
+    static func creditsFromUSD(_ usd: Double) -> Int {
+        max(0, Int((usd * 100).rounded(.up)))
     }
 
     static func formatUSD(_ usd: Double) -> String {

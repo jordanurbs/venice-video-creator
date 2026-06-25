@@ -838,17 +838,22 @@ struct GenerationView: View {
         }
     }
 
+    private var estimatedCredits: Int? {
+        estimatedUSD.map { CostEstimator.creditsFromUSD($0) }
+    }
+
     private var costEstimateLabel: some View {
         HStack(spacing: AppTheme.Spacing.xs) {
-            Image(systemName: "dollarsign.circle.fill")
+            Image(systemName: "creditcard.circle.fill")
                 .font(.system(size: AppTheme.FontSize.sm))
-            Text(estimatedUSD.map { CostEstimator.formatUSD($0) } ?? "—")
+            Text(estimatedCredits.map { "\($0)" } ?? "—")
                 .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
                 .monospacedDigit()
                 .lineLimit(1)
         }
         .foregroundStyle(AppTheme.Text.secondaryColor)
-        .help("Estimated cost from Venice. Actual usage is billed to your Venice account.")
+        .help(estimatedCredits.map { "\(CostEstimator.format($0)) · billed to your Venice account (1 credit = $0.01)" }
+            ?? "Estimated cost is shown once a model and settings are selected.")
         .task(id: costSignature) { await refreshEstimatedUSD() }
     }
 

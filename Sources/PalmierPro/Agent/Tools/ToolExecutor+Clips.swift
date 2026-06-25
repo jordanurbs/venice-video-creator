@@ -174,6 +174,8 @@ extension ToolExecutor {
             throw ToolError("Mixed trackIndex: \(omittedCount) of \(specs.count) entries omitted trackIndex. Either set it on every entry or omit it on every entry (to auto-create shared tracks).")
         }
 
+        let settingsNote = applySettingsIfNeededForAgent(editor, assets: specs.map(\.asset))
+
         let actionName = specs.count == 1 ? "Add Clip (Agent)" : "Add Clips (Agent)"
         let (createdTracks, summaries) = try withUndoGroup(editor, actionName: actionName) { () -> ([String], [String]) in
             var createdTracks: [String] = []
@@ -255,7 +257,8 @@ extension ToolExecutor {
         }
         editor.notifyTimelineChanged()
 
-        let prefix = createdTracks.isEmpty ? "" : "Created \(createdTracks.joined(separator: ", ")). "
+        var prefix = createdTracks.isEmpty ? "" : "Created \(createdTracks.joined(separator: ", ")). "
+        if let note = settingsNote { prefix = "\(note) \(prefix)" }
         return .ok("\(prefix)Added \(specs.count) clip\(specs.count == 1 ? "" : "s"): \(summaries.joined(separator: "; "))")
     }
 
@@ -277,22 +280,32 @@ extension ToolExecutor {
         guard input.atFrame >= 0 else { throw ToolError("atFrame must be >= 0 (got \(input.atFrame))") }
         let targetType = editor.timeline.tracks[input.trackIndex].type
 
-        var specs: [EditorViewModel.RippleInsertSpec] = []
-        specs.reserveCapacity(input.entries.count)
+        // Apply settings before deriving durations: it may change FPS, which clipDurationFrames depends on.
+        var resolvedAssets: [MediaAsset] = []
+        resolvedAssets.reserveCapacity(input.entries.count)
         for (idx, entry) in input.entries.enumerated() {
             let asset = try asset(entry.mediaRef, editor: editor)
             guard asset.type.isCompatible(with: targetType) else {
                 throw ToolError("entries[\(idx)]: asset type \(asset.type.rawValue) is not compatible with \(targetType.rawValue) track at index \(input.trackIndex)")
-            }
-            let duration = entry.durationFrames ?? editor.clipDurationFrames(for: asset, segment: nil)
-            guard duration >= 1 else {
-                throw ToolError("entries[\(idx)]: durationFrames must be >= 1 (got \(duration))")
             }
             if let t = entry.trimStartFrame, t < 0 {
                 throw ToolError("entries[\(idx)]: trimStartFrame must be >= 0 (got \(t))")
             }
             if let t = entry.trimEndFrame, t < 0 {
                 throw ToolError("entries[\(idx)]: trimEndFrame must be >= 0 (got \(t))")
+            }
+            resolvedAssets.append(asset)
+        }
+
+        let settingsNote = applySettingsIfNeededForAgent(editor, assets: resolvedAssets)
+
+        var specs: [EditorViewModel.RippleInsertSpec] = []
+        specs.reserveCapacity(input.entries.count)
+        for (idx, entry) in input.entries.enumerated() {
+            let asset = resolvedAssets[idx]
+            let duration = entry.durationFrames ?? editor.clipDurationFrames(for: asset, segment: nil)
+            guard duration >= 1 else {
+                throw ToolError("entries[\(idx)]: durationFrames must be >= 1 (got \(duration))")
             }
             specs.append(.init(asset: asset, durationFrames: duration, trimStartFrame: entry.trimStartFrame, trimEndFrame: entry.trimEndFrame))
         }
@@ -305,7 +318,8 @@ extension ToolExecutor {
         }
         let audioNote = editor.timeline.tracks.count > tracksBefore
             ? " Created an audio track (appended) for the linked audio." : ""
-        return .ok("Inserted \(specs.count) clip\(specs.count == 1 ? "" : "s") at frame \(input.atFrame) on track \(input.trackIndex), pushed later clips +\(totalPush)f: \(ids.joined(separator: ", ")).\(audioNote)")
+        let settingsPrefix = settingsNote.map { "\($0) " } ?? ""
+        return .ok("\(settingsPrefix)Inserted \(specs.count) clip\(specs.count == 1 ? "" : "s") at frame \(input.atFrame) on track \(input.trackIndex), pushed later clips +\(totalPush)f: \(ids.joined(separator: ", ")).\(audioNote)")
     }
 
     // MARK: remove_clips
@@ -424,6 +438,21 @@ extension ToolExecutor {
         }
         if let df = input.durationFrames, df < 1 {
             throw ToolError("durationFrames must be >= 1 (got \(df))")
+        }
+        if let s = input.speed, s <= 0 {
+            throw ToolError("speed must be > 0 (got \(s))")
+        }
+        if let v = input.volume, !(0...1).contains(v) {
+            throw ToolError("volume must be between 0 and 1 (got \(v))")
+        }
+        if let o = input.opacity, !(0...1).contains(o) {
+            throw ToolError("opacity must be between 0 and 1 (got \(o))")
+        }
+        if let t = input.trimStartFrame, t < 0 {
+            throw ToolError("trimStartFrame must be >= 0 (got \(t))")
+        }
+        if let t = input.trimEndFrame, t < 0 {
+            throw ToolError("trimEndFrame must be >= 0 (got \(t))")
         }
         let color = try parseColorHex(input.color, path: "set_clip_properties")
         let alignment = try parseAlignment(input.alignment, path: "set_clip_properties")
@@ -551,6 +580,7 @@ extension ToolExecutor {
                     width: t.width ?? cur.width,
                     height: t.height ?? cur.height
                 )
+                next.rotation = cur.rotation
                 next.flipHorizontal = t.flipHorizontal ?? cur.flipHorizontal
                 next.flipVertical = t.flipVertical ?? cur.flipVertical
                 clip.transform = next

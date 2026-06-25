@@ -2,21 +2,13 @@
   "changelogURL": "https://github.com/palmier-io/palmier-pro/releases",
   "entries": [
     {
-      "version": "0.3.6",
-      "date": "2026-06-22",
+      "version": "0.4.2",
+      "date": "2026-06-25",
       "sections": [
         {
-          "heading": "Improved",
+          "heading": "New",
           "items": [
-            "Improve app hang performance",
-            "Pressing Play at the end of a video now starts playback from the beginning"
-          ]
-        },
-        {
-          "heading": "Fixed",
-          "items": [
-            "Fixed incorrect 720p HEVC export behavior",
-            "Fixed text color parsing when pasted hex values include line breaks"
+            "New set_project_settings tool - Agent can now set project settings (fps, resolution, aspect ratio) for you."
           ]
         }
       ]

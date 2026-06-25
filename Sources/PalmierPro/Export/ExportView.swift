@@ -2,28 +2,12 @@ import AVFoundation
 import SwiftUI
 import UniformTypeIdentifiers
 
-enum ExportMode: String, CaseIterable, Identifiable {
-    case video = "Video (.mp4)"
-    case xml = "Timeline (.xml)"
-    case palmierProject = "Venice Project (.palmier)"
-
-    var id: String { rawValue }
-}
-
-enum VideoCodec: String, CaseIterable, Identifiable {
-    case h264 = "H.264"
-    case h265 = "H.265"
-    case prores = "ProRes"
-
-    var id: String { rawValue }
-}
-
 struct ExportView: View {
     @Environment(EditorViewModel.self) var editor
     @State private var service = ExportService()
     @State private var mode: ExportMode = .video
     @State private var codec: VideoCodec = .h264
-    @State private var resolution: ExportResolution = .r1080p
+    @State private var resolution: ExportResolution = .matchTimeline
     @State private var preview: NSImage?
     @State private var palmierResult: String?
     @State private var palmierSummary: (collect: Int, missing: Int, bytes: Int64) = (0, 0, 0)
@@ -46,8 +30,8 @@ struct ExportView: View {
                 .background(.ultraThinMaterial)
         }
         .task {
-            loadPreview()
-            palmierSummary = computePalmierSummary()
+            await loadPreview()
+            palmierSummary = await computePalmierSummary()
         }
     }
 
@@ -140,7 +124,7 @@ struct ExportView: View {
                             .font(.system(size: AppTheme.FontSize.xs))
                             .foregroundStyle(AppTheme.Text.tertiaryColor)
 
-                        Text("Text overlays, flips, and keyframe easing aren't included.")
+                        Text("Text overlays, flips, adjustments, effects, and keyframe easing aren't included.")
                             .font(.system(size: AppTheme.FontSize.xs))
                             .foregroundStyle(AppTheme.Text.tertiaryColor)
                     }
@@ -256,68 +240,68 @@ struct ExportView: View {
 
     private var estimatedFileSize: String {
         let seconds = Double(editor.timeline.totalFrames) / Double(max(1, editor.timeline.fps))
-        let bytesPerSec: Double = switch (codec, resolution) {
-        case (.h264, .r720p):    0.85e6
-        case (.h264, .r1080p):   1.3e6
-        case (.h264, .r4k):      2.8e6
-        case (.h265, .r720p):    0.45e6
-        case (.h265, .r1080p):   0.65e6
-        case (.h265, .r4k):      2.2e6
-        case (.prores, .r720p):  8.0e6
-        case (.prores, .r1080p): 18.5e6
-        case (.prores, .r4k):    65.0e6
+        // Bitrate scales with output pixel area, so any resolution is covered.
+        let out = resolution.renderSize(for: CGSize(width: editor.timeline.width, height: editor.timeline.height))
+        let megapixels = Double(out.width * out.height) / 1_000_000
+        let bytesPerSecPerMP: Double = switch codec {
+        case .h264:   0.63e6
+        case .h265:   0.32e6
+        case .prores: 9.0e6
         }
+        let bytesPerSec = bytesPerSecPerMP * max(0.1, megapixels)
         return ByteCountFormatter.string(fromByteCount: Int64(bytesPerSec * seconds), countStyle: .file)
     }
 
     private var exportFormat: ExportFormat {
         switch mode {
         case .xml, .palmierProject: .xml   // palmierProject has its own path; never rendered
-        case .video:
-            switch codec {
-            case .h264: .h264
-            case .h265: .h265
-            case .prores: .prores
-            }
+        case .video: codec.exportFormat
         }
     }
 
     /// Quick estimate for exporting a Palmier Project
-    private func computePalmierSummary() -> (collect: Int, missing: Int, bytes: Int64) {
-        var collect = 0, missing = 0
-        var bytes: Int64 = 0
-        for entry in editor.mediaManifest.entries {
-            let url: URL? = switch entry.source {
-            case .external(let path): URL(fileURLWithPath: path)
-            case .project(let rel): editor.projectURL?.appendingPathComponent(rel)
+    private func computePalmierSummary() async -> (collect: Int, missing: Int, bytes: Int64) {
+        let entries = editor.mediaManifest.entries
+        let projectURL = editor.projectURL
+        return await Task.detached(priority: .utility) {
+            var collect = 0, missing = 0
+            var bytes: Int64 = 0
+            for entry in entries {
+                let url: URL? = switch entry.source {
+                case .external(let path): URL(fileURLWithPath: path)
+                case .project(let rel): projectURL?.appendingPathComponent(rel)
+                }
+                guard let url, FileManager.default.fileExists(atPath: url.path) else { missing += 1; continue }
+                if case .external = entry.source { collect += 1 }
+                bytes += Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
             }
-            guard let url, FileManager.default.fileExists(atPath: url.path) else { missing += 1; continue }
-            if case .external = entry.source { collect += 1 }
-            bytes += Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-        }
-        return (collect, missing, bytes)
+            return (collect, missing, bytes)
+        }.value
     }
 
-    private func loadPreview() {
-        for track in editor.timeline.tracks where track.type == .video {
-            for clip in track.clips {
-                guard let url = editor.mediaResolver.resolveURL(for: clip.mediaRef) else { continue }
-                let asset = AVURLAsset(url: url)
-                guard !asset.tracks(withMediaType: .video).isEmpty else { continue }
-                let generator = AVAssetImageGenerator(asset: asset)
-                generator.maximumSize = CGSize(width: 480, height: 270)
-                generator.appliesPreferredTrackTransform = true
-                let time = CMTime(value: CMTimeValue(clip.trimStartFrame), timescale: CMTimeScale(editor.timeline.fps))
-                generator.generateCGImagesAsynchronously(forTimes: [NSValue(time: time)]) { _, image, _, _, _ in
-                    if let image {
-                        Task { @MainActor in
-                            preview = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
-                        }
-                    }
+    private func loadPreview() async {
+        let timeline = editor.timeline
+        let mediaURLs = editor.mediaResolver.expectedURLMap()
+        let missingMediaRefs = editor.missingMediaRefs
+        let image = await Task.detached(priority: .utility) { () async -> CGImage? in
+            for track in timeline.tracks where track.type == .video {
+                for clip in track.clips {
+                    guard !missingMediaRefs.contains(clip.mediaRef),
+                          let url = mediaURLs[clip.mediaRef] else { continue }
+                    let asset = AVURLAsset(url: url)
+                    guard (try? await asset.loadTracks(withMediaType: .video).first) != nil else { continue }
+                    let generator = AVAssetImageGenerator(asset: asset)
+                    generator.maximumSize = CGSize(width: 480, height: 270)
+                    generator.appliesPreferredTrackTransform = true
+                    let time = CMTime(value: CMTimeValue(clip.trimStartFrame), timescale: CMTimeScale(timeline.fps))
+                    guard let image = try? await generator.image(at: time).image else { continue }
+                    return image
                 }
-                return
             }
-        }
+            return nil
+        }.value
+        guard let image, !Task.isCancelled else { return }
+        preview = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
     }
 
     private func startExport() {
@@ -339,6 +323,7 @@ struct ExportView: View {
                     resolver: editor.mediaResolver,
                     format: format,
                     resolution: resolution,
+                    missingMediaRefs: editor.missingMediaRefs,
                     outputURL: url
                 )
                 if service.error == nil {

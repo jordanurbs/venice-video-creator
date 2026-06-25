@@ -1393,9 +1393,9 @@ struct GenerationView: View {
     private var submitButton: some View {
         Button {
             if aiAllowed { submitGeneration() }
-            else if !account.isMisconfigured { Task { await account.signInWithGoogle() } }
+            else if !account.isMisconfigured { SettingsWindowController.shared.show(tab: .account) }
         } label: {
-            Image(systemName: aiAllowed ? "arrow.up" : "person.crop.circle")
+            Image(systemName: aiAllowed ? "arrow.up" : "key.horizontal")
                 .font(.system(size: AppTheme.FontSize.sm, weight: .bold))
                 .frame(width: AppTheme.IconSize.sm, height: AppTheme.IconSize.sm)
         }
@@ -1404,8 +1404,8 @@ struct GenerationView: View {
         .controlSize(.regular)
         .tint(AppTheme.Accent.primary)
         .disabled(aiAllowed ? !canSubmit : account.isMisconfigured)
-        .opacity((aiAllowed ? canSubmit : !account.isMisconfigured) ? 1 : AppTheme.Opacity.strong)
-        .help(aiAllowed ? "" : (account.isMisconfigured ? "AI is unavailable" : "Sign in to generate"))
+        .opacity((aiAllowed ? canSubmit : !account.isMisconfigured) ? AppTheme.Opacity.opaque : AppTheme.Opacity.strong)
+        .help(aiAllowed ? "" : (account.isMisconfigured ? "AI is unavailable" : "Add your Venice key to generate"))
     }
 
     // MARK: - Type picker

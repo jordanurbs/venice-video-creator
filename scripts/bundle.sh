@@ -38,7 +38,6 @@ NOTARY_PROFILE="${NOTARY_PROFILE:-palmier-notary}"
 SENTRY_DSN="${SENTRY_DSN:-}"
 PROVISION_PROFILE="${PROVISION_PROFILE:-$ROOT/scripts/Palmier_Pro_Developer_ID.provisionprofile}"
 ENTITLEMENTS="$ROOT/scripts/PalmierPro.entitlements"
-KEYCHAIN_ACCESS_GROUP="${KEYCHAIN_ACCESS_GROUP:-MMFLRC7562.io.palmier.pro}"
 RESOURCES="$ROOT/Sources/PalmierPro/Resources"
 # User-facing app + executable names (the Swift module stays "PalmierPro").
 EXE="VeniceVideoEditor"
@@ -65,20 +64,6 @@ else
   echo "==> SENTRY_DSN not set — telemetry will be a no-op in this build"
 fi
 
-inject_plist() {
-  local key="$1" value="$2"
-  if [ -z "$value" ]; then
-    echo "!! $key not set in $ENV_FILE — app will fatalError on launch" >&2
-    return
-  fi
-  /usr/libexec/PlistBuddy -c "Delete :$key" "$APP/Contents/Info.plist" 2>/dev/null || true
-  /usr/libexec/PlistBuddy -c "Add :$key string $value" "$APP/Contents/Info.plist"
-}
-
-echo "==> Injecting backend config into Info.plist"
-inject_plist PalmierClerkPublishableKey "${CLERK_PUBLISHABLE_KEY:-}"
-inject_plist PalmierConvexDeploymentURL "${CONVEX_DEPLOYMENT_URL:-}"
-inject_plist PalmierConvexHttpURL "${CONVEX_HTTP_URL:-}"
 cp "$RESOURCES/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 cp -R "$SPARKLE_FW" "$APP/Contents/Frameworks/Sparkle.framework"
 
@@ -105,6 +90,12 @@ else
   echo "!! missing Changelog/ in SwiftPM resource bundle at $RES_BUNDLE" >&2
   exit 1
 fi
+
+if ! ls "$RES_BUNDLE"/*.metallib >/dev/null 2>&1; then
+  echo "!! no .metallib in SwiftPM resource bundle at $RES_BUNDLE — Metal effects would be missing" >&2
+  exit 1
+fi
+cp "$RES_BUNDLE"/*.metallib "$APP/Contents/Resources/"
 
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/$EXE"
 touch "$APP"
@@ -167,7 +158,6 @@ if [ ! -f "$PROVISION_PROFILE" ]; then
   exit 1
 fi
 cp "$PROVISION_PROFILE" "$APP/Contents/embedded.provisionprofile"
-inject_plist PalmierClerkKeychainAccessGroup "$KEYCHAIN_ACCESS_GROUP"
 
 echo "==> Codesigning main app"
 codesign --force --options runtime --timestamp \

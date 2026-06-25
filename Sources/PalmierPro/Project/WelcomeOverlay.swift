@@ -72,7 +72,10 @@ struct WelcomeOverlay: View {
                 .buttonStyle(.capsule(.prominent, size: .regular))
                 .keyboardShortcut(.defaultAction)
         } else {
-            Button("Sign In") { Task { await account.signInWithGoogle() } }
+            Button("Add Venice Key") {
+                SettingsWindowController.shared.show(tab: .account)
+                onDismiss()
+            }
                 .buttonStyle(.capsule(.prominent, size: .regular))
                 .keyboardShortcut(.defaultAction)
         }

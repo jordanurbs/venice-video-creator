@@ -22,7 +22,7 @@ struct AccountPopoverCard: View {
             if let error = account.lastError {
                 Text(error)
                     .font(.system(size: AppTheme.FontSize.xs))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(AppTheme.Status.errorColor)
             }
         }
         .padding(AppTheme.Spacing.md)
@@ -198,17 +198,6 @@ struct AccountPopoverCard: View {
             footerButton(label: "Feedback", systemImage: "bubble.left.and.bubble.right") {
                 FeedbackWindowController.shared.show()
                 dismiss()
-            }
-            if account.isSignedIn {
-                footerButton(label: "Sign out", systemImage: "rectangle.portrait.and.arrow.right") {
-                    Task { await account.signOut() }
-                    dismiss()
-                }
-            } else {
-                footerButton(label: "Sign in", systemImage: "person.crop.circle") {
-                    Task { await account.signInWithGoogle() }
-                    dismiss()
-                }
             }
         }
     }

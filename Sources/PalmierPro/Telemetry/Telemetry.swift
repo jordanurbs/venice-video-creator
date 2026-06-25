@@ -30,6 +30,8 @@ enum Telemetry {
 
     static func shortId(_ id: String) -> String { String(id.prefix(8)) }
 
+    static func setUser(id: String?) {}
+
     static func setExtra(value: Any?, key: String) {}
 
     static func captureMessage(_ message: String, level: TelemetryLevel = .warning) {}

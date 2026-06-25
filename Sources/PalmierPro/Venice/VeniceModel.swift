@@ -90,7 +90,11 @@ enum VeniceModelMapper {
         let resolutions = constraints["resolutions"] as? [String]
         let durations = parseDurations(constraints["durations"] as? [String]) 
         let modelType = (constraints["model_type"] as? String) ?? "text-to-video"
-        let isImageToVideo = modelType == "image-to-video"
+        let isImageToVideo = modelType == "image-to-video" || modelType == "reference-to-video"
+        // Venice exposes the same model under several variants that share a name
+        // (text-to-video / image-to-video / reference-to-video). Append the
+        // variant so the picker shows distinct, self-explanatory entries.
+        let displayName = "\(name) (\(variantLabel(modelType)))"
         let caps = VideoCaps(
             durations: durations.isEmpty ? [5] : durations,
             resolutions: resolutions,
@@ -109,11 +113,22 @@ enum VeniceModelMapper {
             requiresReferenceImage: isImageToVideo
         )
         return CatalogEntry(
-            id: id, kind: .video, displayName: name,
+            id: id, kind: .video, displayName: displayName,
             allowedEndpoints: ["video/queue"], responseShape: .video,
             uiCapabilities: .video(caps),
             creditsPerSecond: ["": usdPrice(pricing)]
         )
+    }
+
+    /// Human-readable label for a Venice video model variant.
+    private static func variantLabel(_ modelType: String) -> String {
+        switch modelType {
+        case "text-to-video": return "Text→Video"
+        case "image-to-video": return "Image→Video"
+        case "reference-to-video": return "Reference→Video"
+        case "video": return "Video→Video"
+        default: return modelType
+        }
     }
 
     private static func audioEntry(

@@ -72,19 +72,20 @@ enum VeniceGenerationRunner {
         }
         let downloadURL = queued["download_url"] as? String
 
-        return [try await pollVideo(queueId: queueId, downloadURL: downloadURL, api: api)]
+        return [try await pollVideo(queueId: queueId, model: model, downloadURL: downloadURL, api: api)]
     }
 
     /// Polls `/video/retrieve` until the video is ready, returning a downloadable URL.
+    /// Venice requires both `queue_id` and `model` on the retrieve call.
     private static func pollVideo(
-        queueId: String, downloadURL: String?, api: VeniceAPI
+        queueId: String, model: String, downloadURL: String?, api: VeniceAPI
     ) async throws -> String {
         let deadline = Date().addingTimeInterval(15 * 60)
         while Date() < deadline {
             let request = api.makeRequest(
                 path: "video/retrieve",
                 accept: "video/mp4",
-                body: try api.jsonBody(["queue_id": queueId])
+                body: try api.jsonBody(["queue_id": queueId, "model": model])
             )
             let (data, response) = try await api.data(for: request)
             try VeniceAPI.assertOK(data: data, response: response)

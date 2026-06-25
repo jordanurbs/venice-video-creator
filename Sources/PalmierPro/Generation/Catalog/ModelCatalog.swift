@@ -71,6 +71,7 @@ final class ModelCatalog {
                 guard !Task.isCancelled else { return }
                 self?.apply(catalog.entries)
                 self?.textModels = catalog.textModels
+                Log.generation.notice("venice catalog loaded: video=\(self?.video.count ?? 0) image=\(self?.image.count ?? 0) audio=\(self?.audio.count ?? 0) upscale=\(self?.upscale.count ?? 0) text=\(catalog.textModels.count) entries=\(catalog.entries.count)")
             } catch {
                 Log.generation.error("Venice catalog load failed: \(error.localizedDescription)")
                 self?.lastError = error.localizedDescription

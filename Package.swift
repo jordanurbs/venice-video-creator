@@ -6,7 +6,9 @@ let package = Package(
     name: "PalmierPro",
     platforms: [.macOS(.v26)],
     products: [
-        .executable(name: "PalmierPro", targets: ["PalmierPro"]),
+        // User-facing executable name. The target/module stays "PalmierPro" so
+        // internal resource-bundle paths (PalmierPro_PalmierPro.bundle) are unchanged.
+        .executable(name: "VeniceVideoEditor", targets: ["PalmierPro"]),
     ],
     dependencies: [
         .package(url: "https://github.com/dmrschmidt/DSWaveformImage", from: "14.2.2"),

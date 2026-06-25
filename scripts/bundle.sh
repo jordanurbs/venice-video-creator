@@ -40,19 +40,21 @@ PROVISION_PROFILE="${PROVISION_PROFILE:-$ROOT/scripts/Palmier_Pro_Developer_ID.p
 ENTITLEMENTS="$ROOT/scripts/PalmierPro.entitlements"
 KEYCHAIN_ACCESS_GROUP="${KEYCHAIN_ACCESS_GROUP:-MMFLRC7562.io.palmier.pro}"
 RESOURCES="$ROOT/Sources/PalmierPro/Resources"
-APP="$ROOT/.build/PalmierPro.app"
-ZIP="$ROOT/.build/PalmierPro.zip"
-DMG="$ROOT/.build/PalmierPro.dmg"
+# User-facing app + executable names (the Swift module stays "PalmierPro").
+EXE="VeniceVideoEditor"
+APP="$ROOT/.build/Venice Video Editor.app"
+ZIP="$ROOT/.build/Venice Video Editor.zip"
+DMG="$ROOT/.build/Venice Video Editor.dmg"
 
 echo "==> Building ($CONFIG)"
 swift build -c "$CONFIG"
-BIN="$(swift build -c "$CONFIG" --show-bin-path)/PalmierPro"
+BIN="$(swift build -c "$CONFIG" --show-bin-path)/$EXE"
 SPARKLE_FW="$ROOT/.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
 
 echo "==> Assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
-cp "$BIN" "$APP/Contents/MacOS/PalmierPro"
+cp "$BIN" "$APP/Contents/MacOS/$EXE"
 cp "$RESOURCES/Info.plist" "$APP/Contents/Info.plist"
 
 if [ -n "$SENTRY_DSN" ]; then
@@ -104,7 +106,7 @@ else
   exit 1
 fi
 
-install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/PalmierPro"
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/$EXE"
 touch "$APP"
 
 if [ "$MODE" = "fast" ]; then
@@ -117,7 +119,7 @@ fi
 DSYM="$ROOT/.build/PalmierPro.dSYM"
 echo "==> Generating dSYM"
 rm -rf "$DSYM"
-dsymutil "$APP/Contents/MacOS/PalmierPro" -o "$DSYM"
+dsymutil "$APP/Contents/MacOS/$EXE" -o "$DSYM"
 
 upload_dsyms() {
   if [ -z "${SENTRY_AUTH_TOKEN:-}" ] || [ -z "${SENTRY_ORG:-}" ] || [ -z "${SENTRY_PROJECT:-}" ]; then
@@ -195,11 +197,11 @@ rm -f "$ZIP"
 echo "==> Building DMG"
 rm -f "$DMG"
 STAGING="$(mktemp -d)"
-cp -R "$APP" "$STAGING/PalmierPro.app"
+cp -R "$APP" "$STAGING/Venice Video Editor.app"
 ln -s /Applications "$STAGING/Applications"
 cp "$RESOURCES/AppIcon.icns" "$STAGING/.VolumeIcon.icns"
 hdiutil create \
-  -volname "PalmierPro" \
+  -volname "Venice Video Editor" \
   -srcfolder "$STAGING" \
   -ov -format UDZO \
   "$DMG"

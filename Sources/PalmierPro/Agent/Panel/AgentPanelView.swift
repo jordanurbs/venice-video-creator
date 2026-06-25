@@ -140,11 +140,11 @@ struct AgentPanelView: View {
         if service.hasApiKey {
             Menu {
                 ForEach(service.availableModels, id: \.self) { m in
-                    Button(m.displayName) { service.model = m }
+                    Button(m.displayName) { service.agentModelId = m.id }
                 }
             } label: {
                 HStack(spacing: AppTheme.Spacing.xs) {
-                    Text(service.effectiveModel.displayName)
+                    Text(service.effectiveModelDisplayName)
                         .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
                         .foregroundStyle(AppTheme.Text.secondaryColor)
                     Image(systemName: "chevron.down")
@@ -161,10 +161,10 @@ struct AgentPanelView: View {
     @ViewBuilder
     private var byokIndicator: some View {
         if service.hasApiKey {
-            Text("using API key")
+            Text("Venice")
                 .font(.system(size: AppTheme.FontSize.xs).italic())
                 .foregroundStyle(AppTheme.Text.tertiaryColor)
-                .help("Streaming through your Anthropic API key (BYOK)")
+                .help("Streaming through your Venice API key")
         }
     }
 
@@ -316,32 +316,18 @@ struct AgentPanelView: View {
 
     @ViewBuilder
     private var missingKeyState: some View {
-        let account = AccountService.shared
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             Button(action: { SettingsWindowController.shared.show(tab: .account) }) {
-                Text(missingKeyPrimaryAction(account: account))
+                Text("Add your Venice API key")
                     .underline()
                     .foregroundStyle(AppTheme.Accent.primary)
             }
             .buttonStyle(.plain)
 
-            Text("or use")
+            Text("to start generating")
                 .foregroundStyle(AppTheme.Text.tertiaryColor)
-
-            Button(action: { SettingsWindowController.shared.show(tab: .agent) }) {
-                Text("your own Anthropic key")
-                    .underline()
-                    .foregroundStyle(AppTheme.Accent.primary)
-            }
-            .buttonStyle(.plain)
         }
         .font(.system(size: AppTheme.FontSize.md, weight: .medium))
-    }
-
-    private func missingKeyPrimaryAction(account: AccountService) -> String {
-        if !account.isSignedIn { return "Sign in" }
-        if !account.isPaid { return "Subscribe" }
-        return "Open Settings"
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {

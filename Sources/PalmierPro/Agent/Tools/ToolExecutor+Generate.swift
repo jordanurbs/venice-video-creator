@@ -3,15 +3,14 @@ import Foundation
 extension ToolExecutor {
     func generate(_ editor: EditorViewModel, _ args: [String: Any], type: ClipType) throws -> ToolResult {
         let prompt = try args.requireString("prompt")
-        guard AccountService.shared.isSignedIn else {
-            throw ToolError("Generation requires signing in to Palmier. Tell the user to sign in.")
-        }
-        guard AccountService.shared.hasCredits else {
-            throw ToolError("Out of credits. Tell the user to add credits or subscribe to keep generating.")
+        guard AccountService.shared.hasVeniceKey else {
+            throw ToolError("Generation requires a Venice API key. Tell the user to add it in Settings.")
         }
         switch type {
         case .video:
-            guard let modelId = args.string("model") ?? VideoModelConfig.allModels.first?.id else {
+            guard let modelId = args.string("model")
+                ?? ModelPreferences.shared.defaultModel(for: .textToVideo)
+                ?? VideoModelConfig.allModels.first?.id else {
                 throw ToolError("Model catalog not loaded yet. Try again in a moment.")
             }
             guard let model = VideoModelConfig.allModels.first(where: { $0.id == modelId }) else {
@@ -151,7 +150,9 @@ extension ToolExecutor {
         _ editor: EditorViewModel, _ args: [String: Any], prompt: String
     ) throws -> ToolResult {
         guard !prompt.isEmpty else { throw ToolError("Empty prompt") }
-        guard let modelId = args.string("model") ?? ImageModelConfig.allModels.first?.id else {
+        guard let modelId = args.string("model")
+            ?? ModelPreferences.shared.defaultModel(for: .image)
+            ?? ImageModelConfig.allModels.first?.id else {
             throw ToolError("Model catalog not loaded yet. Try again in a moment.")
         }
         guard let model = ImageModelConfig.allModels.first(where: { $0.id == modelId }) else {
@@ -195,13 +196,12 @@ extension ToolExecutor {
     }
 
     func generateAudio(_ editor: EditorViewModel, _ args: [String: Any]) async throws -> ToolResult {
-        guard AccountService.shared.isSignedIn else {
-            throw ToolError("Generation requires signing in to Palmier. Tell the user to sign in.")
+        guard AccountService.shared.hasVeniceKey else {
+            throw ToolError("Generation requires a Venice API key. Tell the user to add it in Settings.")
         }
-        guard AccountService.shared.hasCredits else {
-            throw ToolError("Out of credits. Tell the user to add credits or subscribe to keep generating.")
-        }
-        guard let modelId = args.string("model") ?? AudioModelConfig.allModels.first?.id else {
+        guard let modelId = args.string("model")
+            ?? ModelPreferences.shared.defaultModel(for: .audio)
+            ?? AudioModelConfig.allModels.first?.id else {
             throw ToolError("Model catalog not loaded yet. Try again in a moment.")
         }
         guard let model = AudioModelConfig.allModels.first(where: { $0.id == modelId }) else {
@@ -316,11 +316,8 @@ extension ToolExecutor {
         guard asset.type == .video || asset.type == .image else {
             throw ToolError("Upscale supports video and image assets only (got \(asset.type.rawValue))")
         }
-        guard AccountService.shared.isSignedIn else {
-            throw ToolError("Upscale requires signing in to Palmier. Tell the user to sign in.")
-        }
-        guard AccountService.shared.hasCredits else {
-            throw ToolError("Out of credits. Tell the user to add credits or subscribe to keep generating.")
+        guard AccountService.shared.hasVeniceKey else {
+            throw ToolError("Upscale requires a Venice API key. Tell the user to add it in Settings.")
         }
 
         let available = UpscaleModelConfig.models(for: asset.type)

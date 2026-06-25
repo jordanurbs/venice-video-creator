@@ -11,7 +11,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .account: return "Account"
+        case .account: return "Venice"
         case .general: return "General"
         case .models: return "Models"
         case .agent: return "Agent"
@@ -21,7 +21,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .account: return "person.circle"
+        case .account: return "key.horizontal"
         case .general: return "gearshape"
         case .models: return "square.stack.3d.up"
         case .agent: return "paperplane"

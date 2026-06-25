@@ -74,7 +74,7 @@ enum AppNotifications {
 
     private static func body(assetName: String, assetType: ClipType, count: Int) -> String {
         if count > 1 {
-            return "\(count) \(assetType.rawValue)s are ready in Palmier Pro."
+            return "\(count) \(assetType.rawValue)s are ready in Venice Video Editor."
         }
         let name = assetName.trimmingCharacters(in: .whitespacesAndNewlines)
         return name.isEmpty ? "Your \(assetType.rawValue) is ready." : "\(name) is ready."

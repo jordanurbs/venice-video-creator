@@ -1,9 +1,6 @@
 import AppKit
 import Foundation
-import Combine
-import ClerkKit
-import ClerkConvex
-@preconcurrency import ConvexMobile
+import Observation
 
 enum AccountTier: String, Decodable, Sendable {
     case none, pro, max
@@ -80,293 +77,67 @@ enum TopOffLimits {
     static let maxDollars = 1000
 }
 
-private struct UrlResponse: Decodable, Sendable {
-    let url: String
-}
-
-private struct OkResponse: Decodable, Sendable {
-    let ok: Bool
-}
-
+/// Venice BYO-key "account" state.
+///
+/// The original cloud account/billing layer (Clerk auth + Convex + Stripe
+/// credits) has been removed. There is no sign-in and no metered billing:
+/// access is gated purely on whether the user has stored a Venice API key.
+/// The public surface is preserved so the rest of the UI compiles unchanged —
+/// `isSignedIn` now means "has a Venice key", `budgetCredits` is `nil` so the
+/// credit counters stay hidden, and the billing actions are no-ops.
 @Observable
 @MainActor
 final class AccountService {
     static let shared = AccountService()
 
-    private static let allowedBillingHosts: Set<String> = [
-        "checkout.stripe.com",
-        "billing.stripe.com",
-    ]
-
-    private(set) var isLoading: Bool = true
-    private(set) var isMisconfigured: Bool = false
-    private(set) var account: AccountResponse?
+    private(set) var isLoading: Bool = false
+    /// Always configured: the only requirement is a Venice key, set in Settings.
+    let isMisconfigured: Bool = false
+    private(set) var account: AccountResponse? = nil
     private(set) var availablePlans: [AvailablePlan] = []
-    private(set) var lastError: String?
+    private(set) var lastError: String? = nil
     private(set) var isBuyingCredits: Bool = false
-    private(set) var authState: AuthState<String> = .loading
 
-    var isSignedIn: Bool {
-        guard !isMisconfigured, case .authenticated = authState else { return false }
-        return true
-    }
-    var aiAllowed: Bool { isSignedIn && !isMisconfigured }
-    var tier: AccountTier { account?.user.tier ?? .none }
-    var isPaid: Bool { tier.isPaid }
+    /// Reflects Venice key presence; observable so UI updates on key changes.
+    private(set) var hasVeniceKey: Bool = VeniceKeychain.hasKey
 
-    var spentCredits: Int { account?.user.spentCreditsThisPeriod ?? 0 }
-    var budgetCredits: Int? {
-        guard let user = account?.user else { return nil }
-        let tierBudget = account?.plan?.monthlyBudgetCredits ?? 0
-        return tierBudget + (user.purchasedCredits ?? 0)
+    @ObservationIgnored private var keyObserver: NSObjectProtocol?
+
+    private init() {
+        keyObserver = NotificationCenter.default.addObserver(
+            forName: .veniceAPIKeyChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.hasVeniceKey = VeniceKeychain.hasKey }
+        }
     }
 
-    var remainingCredits: Int { max(0, (budgetCredits ?? 0) - spentCredits) }
-    var hasCredits: Bool { remainingCredits > 0 }
+    isolated deinit {
+        if let keyObserver { NotificationCenter.default.removeObserver(keyObserver) }
+    }
 
-    @ObservationIgnored private(set) var convex: ConvexClientWithAuth<String>?
-    @ObservationIgnored private var accountSubscription: AnyCancellable?
-    @ObservationIgnored private var plansSubscription: AnyCancellable?
-    @ObservationIgnored private var authStateTask: Task<Void, Never>?
-    @ObservationIgnored private var didConfigure = false
-    @ObservationIgnored private var buyCreditsTask: Task<Void, Never>?
+    var isSignedIn: Bool { hasVeniceKey }
+    var aiAllowed: Bool { hasVeniceKey }
+    var tier: AccountTier { .none }
+    var isPaid: Bool { false }
 
-    private init() {}
+    var spentCredits: Int { 0 }
+    /// `nil` budget => the UI treats usage as unmetered (BYO key) and hides counters.
+    var budgetCredits: Int? { nil }
+    var remainingCredits: Int { 0 }
+    /// With a key present the user can generate; Venice meters usage on its side.
+    var hasCredits: Bool { hasVeniceKey }
 
     func configure() {
-        guard !didConfigure else { return }
-        didConfigure = true
-
-        guard let publishableKey = BackendConfig.clerkPublishableKey,
-              let deploymentURL = BackendConfig.convexDeploymentURL
-        else {
-            isMisconfigured = true
-            isLoading = false
-            Log.account.warning(
-                "account backend misconfigured",
-                telemetry: "Account backend misconfigured",
-                data: [
-                    "hasClerkKey": BackendConfig.clerkPublishableKey != nil,
-                    "hasConvexURL": BackendConfig.convexDeploymentURL != nil
-                ]
-            )
-            return
-        }
-
-        let keychainConfig = BackendConfig.clerkKeychainAccessGroup
-            .map { Clerk.Options.KeychainConfig(accessGroup: $0) } ?? .init()
-        Clerk.configure(
-            publishableKey: publishableKey,
-            options: Clerk.Options(
-                keychainConfig: keychainConfig,
-                redirectConfig: .init(
-                    redirectUrl: "palmier://callback",
-                    callbackUrlScheme: "palmier"
-                )
-            )
-        )
-        convex = ConvexClientWithAuth(
-            deploymentUrl: deploymentURL.absoluteString,
-            authProvider: ClerkConvexAuthProvider()
-        )
-        Log.account.notice("account configured", telemetry: "Account configured")
-        startPlansSubscription()
-
-        startAuthObservation()
+        hasVeniceKey = VeniceKeychain.hasKey
     }
 
-    private func startAuthObservation() {
-        guard let convex else { return }
-        authStateTask = Task { @MainActor [weak self] in
-            // Wait for Clerk to restore any cached session first.
-            for _ in 0..<50 where !Clerk.shared.isLoaded {
-                try? await Task.sleep(nanoseconds: 100_000_000)
-            }
-            for await state in convex.authState.values {
-                guard let self else { return }
-                self.authState = state
-                switch state {
-                case .loading:
-                    Log.account.notice("auth state loading", telemetry: "Auth state changed", data: ["state": "loading"])
-                    self.isLoading = true
-                case .authenticated:
-                    Log.account.notice("auth state authenticated", telemetry: "Auth state changed", data: ["state": "authenticated"])
-                    await self.provisionAndSubscribe()
-                    self.isLoading = false
-                case .unauthenticated:
-                    Log.account.notice("auth state unauthenticated", telemetry: "Auth state changed", data: ["state": "unauthenticated"])
-                    self.clearAccount()
-                    self.isLoading = Clerk.shared.session != nil
-                }
-            }
-        }
-    }
+    // MARK: - Removed cloud actions (kept as no-ops for API compatibility)
 
-    private func provisionAndSubscribe() async {
-        guard let convex else { return }
-
-        let user = Clerk.shared.user
-        let name = [user?.firstName, user?.lastName]
-            .compactMap { $0 }
-            .joined(separator: " ")
-        let args: [String: ConvexEncodable?] = [
-            "email": user?.primaryEmailAddress?.emailAddress,
-            "name": name.isEmpty ? nil : name,
-            "image": user?.imageUrl,
-        ]
-
-        for attempt in 0..<3 {
-            do {
-                if attempt == 0 {
-                    Log.account.notice("account provision start", telemetry: "Account provision started")
-                }
-                try await convex.mutation("users:upsertFromAuth", with: args)
-                Log.account.notice(
-                    "account provision ok attempt=\(attempt + 1)",
-                    telemetry: "Account provision finished",
-                    data: ["attempt": attempt + 1]
-                )
-                break
-            } catch {
-                lastError = error.localizedDescription
-                if attempt == 2 {
-                    Log.account.warning(
-                        "account provision failed error=\(error.localizedDescription)",
-                        telemetry: "Account provision failed",
-                        data: ["attempt": attempt + 1, "error": error.localizedDescription]
-                    )
-                    return
-                }
-                try? await Task.sleep(nanoseconds: 500_000_000)
-            }
-        }
-        startAccountSubscription()
-    }
-
-    private func startPlansSubscription() {
-        plansSubscription?.cancel()
-        plansSubscription = convex?
-            .subscribe(to: "billing:listPlans", yielding: [AvailablePlan].self)
-            .receive(on: DispatchQueue.main)
-            .sink(
-                receiveCompletion: { [weak self] completion in
-                    if case .failure(let err) = completion {
-                        Log.account.warning(
-                            "plans subscription failed error=\(err.localizedDescription)",
-                            telemetry: "Account plans subscription failed",
-                            data: ["error": err.localizedDescription]
-                        )
-                        self?.lastError = err.localizedDescription
-                    }
-                },
-                receiveValue: { [weak self] plans in
-                    self?.availablePlans = plans
-                }
-            )
-    }
-
-    private func startAccountSubscription() {
-        accountSubscription?.cancel()
-        accountSubscription = convex?
-            .subscribe(to: "account:get", yielding: AccountResponse.self)
-            .receive(on: DispatchQueue.main)
-            .sink(
-                receiveCompletion: { [weak self] completion in
-                    if case .failure(let err) = completion {
-                        Log.account.warning(
-                            "account subscription failed error=\(err.localizedDescription)",
-                            telemetry: "Account subscription failed",
-                            data: ["error": err.localizedDescription]
-                        )
-                        self?.lastError = err.localizedDescription
-                    }
-                },
-                receiveValue: { [weak self] response in
-                    self?.account = response
-                    self?.lastError = nil
-                }
-            )
-    }
-
-    private func clearAccount() {
-        accountSubscription?.cancel()
-        accountSubscription = nil
-        buyCreditsTask?.cancel()
-        buyCreditsTask = nil
-        account = nil
-        isBuyingCredits = false
-    }
-
-    func signInWithGoogle() async {
-        guard !isMisconfigured else { return }
-        lastError = nil
-        Log.account.notice("sign in requested provider=google", telemetry: "Sign in requested", data: ["provider": "google"])
-        do {
-            _ = try await Clerk.shared.auth.signInWithOAuth(provider: .google)
-        } catch {
-            lastError = error.localizedDescription
-            Log.account.warning(
-                "sign in failed provider=google error=\(error.localizedDescription)",
-                telemetry: "Sign in failed",
-                data: ["provider": "google", "error": error.localizedDescription]
-            )
-        }
-    }
-
-    func signOut() async {
-        guard !isMisconfigured else { return }
-        Log.account.notice("sign out requested", telemetry: "Sign out requested")
-        do {
-            try await Clerk.shared.auth.signOut()
-        } catch {
-            lastError = error.localizedDescription
-            Log.account.warning(
-                "sign out failed error=\(error.localizedDescription)",
-                telemetry: "Sign out failed",
-                data: ["error": error.localizedDescription]
-            )
-        }
-    }
-
-    func subscribe(tier: AccountTier) async {
-        lastError = nil
-        guard tier.isPaid, let convex else { return }
-        do {
-            let result: UrlResponse = try await convex.action(
-                "billing:createCheckoutSession",
-                with: ["tier": tier.rawValue]
-            )
-            openInBrowser(result.url)
-        } catch {
-            lastError = error.localizedDescription
-        }
-    }
-
-    func buyCredits(dollars: Int) {
-        guard let convex else { return }
-        guard (TopOffLimits.minDollars...TopOffLimits.maxDollars).contains(dollars) else {
-            lastError = "Amount must be $\(TopOffLimits.minDollars)–$\(TopOffLimits.maxDollars)."
-            return
-        }
-        if isBuyingCredits { return }
-        lastError = nil
-        isBuyingCredits = true
-        buyCreditsTask = Task { @MainActor [weak self] in
-            defer {
-                self?.isBuyingCredits = false
-                self?.buyCreditsTask = nil
-            }
-            do {
-                let result: UrlResponse = try await convex.action(
-                    "billing:createTopOffCheckoutSession",
-                    with: ["dollars": Double(dollars)]
-                )
-                self?.openInBrowser(result.url)
-            } catch {
-                self?.lastError = error.localizedDescription
-            }
-        }
-    }
+    func signInWithGoogle() async {}
+    func signOut() async {}
+    func subscribe(tier: AccountTier) async {}
+    func buyCredits(dollars: Int) {}
+    func manageSubscription() async {}
 
     func sendFeedback(
         message: String,
@@ -376,47 +147,10 @@ final class AccountService {
         appVersion: String,
         osVersion: String
     ) async throws {
-        guard let convex else {
-            throw NSError(
-                domain: "Palmier.Feedback",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Backend not configured."]
-            )
-        }
-        var args: [String: ConvexEncodable?] = [
-            "message": message,
-            "mayContact": mayContact,
-            "appVersion": appVersion,
-            "osVersion": osVersion,
-        ]
-        if let email { args["email"] = email }
-        if let screenshotPngBase64 { args["screenshotPngBase64"] = screenshotPngBase64 }
-        let _: OkResponse = try await convex.action("feedback:send", with: args)
-    }
-
-    func manageSubscription() async {
-        lastError = nil
-        guard let convex else { return }
-        do {
-            let result: UrlResponse = try await convex.action(
-                "billing:createPortalSession"
-            )
-            openInBrowser(result.url)
-        } catch {
-            lastError = error.localizedDescription
-        }
-    }
-
-    private func openInBrowser(_ urlString: String) {
-        guard let url = URL(string: urlString),
-              url.scheme == "https",
-              let host = url.host,
-              Self.allowedBillingHosts.contains(host)
-        else {
-            lastError = "Refused to open untrusted URL."
-            return
-        }
-        NSWorkspace.shared.open(url, configuration: .init(), completionHandler: nil)
+        throw NSError(
+            domain: "Venice.Feedback", code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "In-app feedback submission is disabled in this open-source build. Please open a GitHub issue."]
+        )
     }
 }
 
@@ -424,23 +158,12 @@ final class AccountService {
 
 extension AccountService {
     var displayPrimaryText: String {
-        if !isSignedIn { return "Signed out" }
-        let user = account?.user
-        return user?.displayName ?? user?.email ?? "Signed in"
+        isSignedIn ? "Venice API key set" : "No Venice key"
     }
 
-    var displaySecondaryText: String? {
-        guard isSignedIn else { return nil }
-        let user = account?.user
-        return user?.displayName != nil ? user?.email : nil
-    }
+    var displaySecondaryText: String? { nil }
 
-    var displayInitial: String {
-        guard isSignedIn else { return "" }
-        let user = account?.user
-        let source = user?.displayName ?? user?.email ?? ""
-        return source.first.map { String($0).uppercased() } ?? ""
-    }
+    var displayInitial: String { "V" }
 
     func availablePlan(for tier: AccountTier) -> AvailablePlan? {
         availablePlans.first { $0.tier == tier }

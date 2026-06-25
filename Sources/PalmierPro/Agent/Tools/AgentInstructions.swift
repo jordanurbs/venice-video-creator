@@ -31,7 +31,7 @@ enum AgentInstructions {
           upscale_media so the model you pick supports the duration, aspect ratio, references, \
           voice, or asset type you need.
         - get_timeline returns canGenerate. If false, every generation and upscale tool will \
-          fail — tell the user to sign in to Palmier and subscribe before proposing them. \
+          fail — tell the user to add their Venice API key in Settings before proposing them. \
           (inspect_media transcription runs on-device and is unaffected.)
         - Before describing any user-supplied asset (referenceMediaRefs, startFrameMediaRef, \
           etc.), call inspect_media and describe what you actually see — never paraphrase \

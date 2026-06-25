@@ -1,258 +1,138 @@
+import AppKit
 import SwiftUI
 
+/// Venice API key management — the single place to set the BYO key that powers
+/// every AI feature (agent inference, image/video/audio generation, upscaling).
 struct AccountPane: View {
-    @Bindable var account = AccountService.shared
-    @State private var topOffDollars: Int = 20
+    @Bindable private var account = AccountService.shared
+    @State private var hasKey: Bool = false
+    @State private var maskedKey: String = ""
+    @State private var draft: String = ""
+    @FocusState private var isFocused: Bool
+
+    private let consoleURL = URL(string: "https://venice.ai/settings/api")!
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
-            if account.isLoading {
-                Text("Loading…")
-                    .font(.system(size: AppTheme.FontSize.sm))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-            } else if account.isSignedIn {
-                signedInBody
-            } else {
-                signedOutBody
-            }
-
-            if let error = account.lastError {
-                Text(error)
-                    .font(.system(size: AppTheme.FontSize.sm))
-                    .foregroundStyle(.red)
-            }
+            header
+            keyField
+            statusRow
         }
+        .onAppear(perform: refresh)
     }
 
-    @ViewBuilder
-    private var signedInBody: some View {
-        if account.isPaid {
-            subscriptionSection
-            creditsSection
-        } else {
-            unpaidSection
-        }
-
-        Button("Sign out") {
-            Task { await account.signOut() }
-        }
-        .buttonStyle(.capsule(.secondary, size: .regular))
-    }
-
-    @ViewBuilder
-    private var unpaidSection: some View {
-        section(title: "Subscription") {
-            Text("Subscribe to use AI generation.")
-                .font(.system(size: AppTheme.FontSize.sm))
-                .foregroundStyle(AppTheme.Text.secondaryColor)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if account.availablePlans.isEmpty {
-                HStack(spacing: AppTheme.Spacing.sm) {
-                    Button("Upgrade to Pro") {
-                        Task { await account.subscribe(tier: .pro) }
-                    }
-                    .buttonStyle(.capsule(.prominent, size: .regular))
-
-                    Button("Upgrade to Max") {
-                        Task { await account.subscribe(tier: .max) }
-                    }
-                    .buttonStyle(.capsule(.secondary, size: .regular))
-                }
-            } else {
-                HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
-                    if let pro = account.availablePlan(for: .pro) {
-                        planCard(plan: pro, isPrimary: true)
-                            .frame(maxWidth: 180)
-                    }
-                    if let max = account.availablePlan(for: .max) {
-                        planCard(plan: max, isPrimary: false)
-                            .frame(maxWidth: 180)
-                    }
-                    Spacer(minLength: 0)
-                }
-
-                Text("Credits cover AI generation and chat.")
-                    .font(.system(size: AppTheme.FontSize.xs))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func planCard(plan: AvailablePlan, isPrimary: Bool) -> some View {
-        card {
-            cardCaption(plan.tier.planLabel)
-
-            HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.xs) {
-                Text("$\(plan.effectiveMonthlyPriceUsd)")
-                    .font(.system(size: AppTheme.FontSize.xl, weight: .semibold))
-                    .foregroundStyle(AppTheme.Text.primaryColor)
-                if plan.hasDiscount {
-                    Text("$\(plan.monthlyPriceUsd)")
-                        .font(.system(size: AppTheme.FontSize.sm))
-                        .foregroundStyle(AppTheme.Text.tertiaryColor)
-                        .strikethrough()
-                }
-                Text("/ month")
-                    .font(.system(size: AppTheme.FontSize.sm))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-            }
-
-            if let credits = plan.monthlyBudgetCredits {
-                Text("\(credits.formatted()) credits / month")
-                    .font(.system(size: AppTheme.FontSize.sm))
-                    .foregroundStyle(AppTheme.Text.secondaryColor)
-                    .monospacedDigit()
-            }
-
-            Spacer(minLength: AppTheme.Spacing.xs)
-
-            upgradeButton(for: plan, isPrimary: isPrimary)
-        }
-    }
-
-    @ViewBuilder
-    private func upgradeButton(for plan: AvailablePlan, isPrimary: Bool) -> some View {
-        let label = "Upgrade to \(plan.tier.upgradeLabel)"
-        if isPrimary {
-            Button {
-                Task { await account.subscribe(tier: plan.tier) }
-            } label: {
-                Text(label).frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.capsule(.prominent, size: .regular))
-        } else {
-            Button {
-                Task { await account.subscribe(tier: plan.tier) }
-            } label: {
-                Text(label).frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.capsule(.secondary, size: .regular))
-        }
-    }
-
-    @ViewBuilder
-    private var subscriptionSection: some View {
-        section(title: "Subscription") {
-            Text(account.tier.planLabel)
+    private var header: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+            Text("Venice API Key")
                 .font(.system(size: AppTheme.FontSize.md, weight: .medium))
                 .foregroundStyle(AppTheme.Text.primaryColor)
 
-            if account.account?.user.cancelAtPeriodEnd == true,
-               let date = formattedPeriodEnd {
-                Text("Cancels \(date)")
+            HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.sm) {
+                Text("A single Venice key powers the agent, image and video generation, audio, and upscaling. It is stored only in your macOS Keychain and sent directly to Venice.")
                     .font(.system(size: AppTheme.FontSize.sm))
-                    .foregroundStyle(.orange)
-            }
+                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            Button("Manage subscription") {
-                Task { await account.manageSubscription() }
+                Button(action: { NSWorkspace.shared.open(consoleURL, configuration: .init(), completionHandler: nil) }) {
+                    HStack(spacing: 2) {
+                        Text("Get Venice API key")
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: AppTheme.FontSize.xs, weight: .semibold))
+                    }
+                    .font(.system(size: AppTheme.FontSize.sm))
+                    .foregroundStyle(AppTheme.Accent.primary)
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+            }
+        }
+    }
+
+    private var keyField: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            fieldBox
+            trailingControl
+        }
+    }
+
+    private var fieldBox: some View {
+        SecureField(hasKey ? maskedKey : "Paste your Venice API key", text: $draft)
+            .textFieldStyle(.plain)
+            .focused($isFocused)
+            .font(.system(size: AppTheme.FontSize.sm, design: .monospaced))
+            .foregroundStyle(AppTheme.Text.primaryColor)
+            .onSubmit(save)
+            .padding(.horizontal, AppTheme.Spacing.md)
+            .padding(.vertical, AppTheme.Spacing.smMd)
+            .background(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.sm)
+                    .fill(Color.black.opacity(AppTheme.Opacity.muted))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.sm)
+                    .strokeBorder(
+                        isFocused ? AppTheme.Border.primaryColor : AppTheme.Border.subtleColor,
+                        lineWidth: AppTheme.BorderWidth.thin
+                    )
+            )
+            .animation(.easeOut(duration: AppTheme.Anim.hover), value: isFocused)
+    }
+
+    @ViewBuilder
+    private var trailingControl: some View {
+        let trimmed = draft.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty {
+            Button("Save", action: save)
+                .buttonStyle(.capsule(.prominent, size: .regular))
+                .controlSize(.large)
+        } else if hasKey {
+            Button(action: remove) {
+                Image(systemName: "trash")
+                    .font(.system(size: AppTheme.FontSize.md))
+                    .foregroundStyle(AppTheme.Text.secondaryColor)
+                    .frame(width: AppTheme.IconSize.md, height: AppTheme.IconSize.md)
             }
             .buttonStyle(.capsule(.secondary, size: .regular))
+            .controlSize(.large)
+            .help("Remove API key")
         }
     }
 
-    @ViewBuilder
-    private var creditsSection: some View {
-        section(title: "Credits") {
-            HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
-                remainingCard
-                buyCard
-            }
+    private var statusRow: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            Circle()
+                .fill(hasKey ? Color.green : AppTheme.Text.mutedColor)
+                .frame(width: 8, height: 8)
+            Text(hasKey ? "Key saved — AI features enabled." : "No key set — AI features are disabled.")
+                .font(.system(size: AppTheme.FontSize.sm))
+                .foregroundStyle(hasKey ? AppTheme.Text.secondaryColor : AppTheme.Text.tertiaryColor)
         }
     }
 
-    @ViewBuilder
-    private var remainingCard: some View {
-        card {
-            cardCaption("Remaining")
-
-            CreditSummaryView(style: .full)
-
-            Spacer(minLength: AppTheme.Spacing.sm)
-
-            if let date = formattedPeriodEnd {
-                Text("Resets \(date)")
-                    .font(.system(size: AppTheme.FontSize.xs))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-            }
-        }
+    private func refresh() {
+        let key = VeniceKeychain.load() ?? ""
+        hasKey = !key.isEmpty
+        maskedKey = mask(key)
     }
 
-    @ViewBuilder
-    private var buyCard: some View {
-        card {
-            cardCaption("Buy more")
-
-            TopOffField(dollars: $topOffDollars) {
-                account.buyCredits(dollars: topOffDollars)
-            }
-
-            Text("$\(TopOffLimits.minDollars)–$\(TopOffLimits.maxDollars) · Unused credits expire at your next billing date.")
-                .font(.system(size: AppTheme.FontSize.xs))
-                .foregroundStyle(AppTheme.Text.tertiaryColor)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+    private func save() {
+        let key = draft.trimmingCharacters(in: .whitespaces)
+        guard !key.isEmpty else { return }
+        VeniceKeychain.save(key)
+        draft = ""
+        isFocused = false
+        refresh()
+        ModelCatalog.shared.reload()
     }
 
-    @ViewBuilder
-    private func cardCaption(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
-            .foregroundStyle(AppTheme.Text.tertiaryColor)
+    private func remove() {
+        VeniceKeychain.delete()
+        draft = ""
+        refresh()
     }
 
-    @ViewBuilder
-    private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-            content()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(AppTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.md)
-                .fill(Color.white.opacity(AppTheme.Opacity.subtle))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.md)
-                .stroke(AppTheme.Border.subtleColor, lineWidth: AppTheme.BorderWidth.thin)
-        )
-    }
-
-    @ViewBuilder
-    private func section<Content: View>(
-        title: String,
-        @ViewBuilder content: () -> Content,
-    ) -> some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-            Text(title)
-                .font(.system(size: AppTheme.FontSize.xs, weight: .semibold))
-                .foregroundStyle(AppTheme.Text.tertiaryColor)
-                .textCase(.uppercase)
-                .tracking(AppTheme.Tracking.wide)
-            content()
-        }
-    }
-
-    private var formattedPeriodEnd: String? {
-        guard let endMs = account.account?.user.currentPeriodEnd else { return nil }
-        let end = Date(timeIntervalSince1970: endMs / 1000)
-        return end.formatted(date: .abbreviated, time: .omitted)
-    }
-
-    @ViewBuilder
-    private var signedOutBody: some View {
-        Text("Sign in to subscribe and use AI generation.")
-            .font(.system(size: AppTheme.FontSize.sm))
-            .foregroundStyle(AppTheme.Text.tertiaryColor)
-            .fixedSize(horizontal: false, vertical: true)
-
-        Button("Sign in with Google") {
-            Task { await account.signInWithGoogle() }
-        }
-        .buttonStyle(.capsule(.secondary, size: .regular))
-        .padding(.top, AppTheme.Spacing.xs)
+    private func mask(_ key: String) -> String {
+        guard key.count > 4 else { return String(repeating: "\u{2022}", count: 32) }
+        return String(repeating: "\u{2022}", count: 36) + key.suffix(4)
     }
 }

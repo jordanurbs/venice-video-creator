@@ -3,12 +3,12 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Palmier Pro</string>
+	<string>Venice Video Editor</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleTypeName</key>
-			<string>Palmier Project</string>
+			<string>Venice Project</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSItemContentTypes</key>
@@ -26,9 +26,9 @@
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
-	<string>io.palmier.pro</string>
+	<string>ai.venice.studio</string>
 	<key>CFBundleName</key>
-	<string>Palmier Pro</string>
+	<string>Venice Video Editor</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -51,7 +51,7 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>SUEnableAutomaticChecks</key>
-	<true/>
+	<false/>
 	<key>SUFeedURL</key>
 	<string>https://raw.githubusercontent.com/palmier-io/palmier-pro/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>
@@ -64,7 +64,7 @@
 				<string>com.apple.package</string>
 			</array>
 			<key>UTTypeDescription</key>
-			<string>Palmier Project</string>
+			<string>Venice Project</string>
 			<key>UTTypeIdentifier</key>
 			<string>io.palmier.project</string>
 			<key>UTTypeTagSpecification</key>

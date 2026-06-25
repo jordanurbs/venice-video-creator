@@ -11,7 +11,7 @@ final class AgentService {
     init() {
         reloadAPIKey()
         apiKeyObserver = NotificationCenter.default.addObserver(
-            forName: .anthropicAPIKeyChanged,
+            forName: .veniceAPIKeyChanged,
             object: nil,
             queue: .main
         ) { [weak self] _ in
@@ -24,7 +24,7 @@ final class AgentService {
     private func reloadAPIKey() {
         Task { [weak self] in
             let key = await Task.detached(priority: .utility) {
-                AnthropicKeychain.load() ?? ""
+                VeniceKeychain.load() ?? ""
             }.value
             self?.apiKey = key
         }
@@ -36,42 +36,43 @@ final class AgentService {
         }
     }
 
-    var hasApiKey: Bool { !apiKey.isEmpty }
+    /// AI access is gated solely on the presence of a Venice key.
+    var hasApiKey: Bool { !apiKey.isEmpty || VeniceKeychain.hasKey }
 
-    var canStream: Bool {
-        if hasApiKey { return true }
-        let account = AccountService.shared
-        return account.isSignedIn && account.hasCredits
-    }
+    var canStream: Bool { hasApiKey }
 
-    var availableModels: [AnthropicModel] {
-        if hasApiKey { return AnthropicModel.allCases }
-        return AccountService.shared.isPaid ? [.sonnet46] : [.haiku45]
+    /// Venice text models available to drive the agent. Models that advertise
+    /// function-calling are preferred; the rest are still offered as a fallback.
+    var availableModels: [VeniceTextModel] {
+        let all = ModelCatalog.shared.textModels
+        let callers = all.filter(\.supportsFunctionCalling)
+        return callers.isEmpty ? all : callers
     }
 
     private func selectClient() -> (any AgentClient)? {
-        let chosen = effectiveModel
-        if hasApiKey { return AnthropicClient(apiKey: apiKey, model: chosen) }
-        if AccountService.shared.isSignedIn {
-            return PalmierClient(model: chosen)
-        }
-        return nil
+        guard hasApiKey else { return nil }
+        let key = apiKey.isEmpty ? (VeniceKeychain.load() ?? "") : apiKey
+        guard !key.isEmpty else { return nil }
+        return VeniceAgentClient(apiKey: key, model: effectiveModelId)
     }
 
-    var effectiveModel: AnthropicModel {
+    /// The Venice model id the agent will actually use: the saved choice if it
+    /// is still available, otherwise the first available model.
+    var effectiveModelId: String {
         let available = availableModels
-        if available.contains(model) { return model }
-        return available.first ?? .sonnet46
+        if let id = agentModelId, available.contains(where: { $0.id == id }) { return id }
+        return available.first?.id ?? agentModelId ?? "qwen-2.5-qwq-32b"
     }
 
-    var model: AnthropicModel = {
-        if let raw = UserDefaults.standard.string(forKey: "agentModel"),
-           let m = AnthropicModel(rawValue: raw) {
-            return m
-        }
-        return .sonnet46
-    }() {
-        didSet { UserDefaults.standard.set(model.rawValue, forKey: "agentModel") }
+    var effectiveModelDisplayName: String {
+        let id = effectiveModelId
+        return availableModels.first(where: { $0.id == id })?.displayName ?? id
+    }
+
+    /// User-selected agent model id, persisted via `ModelPreferences`.
+    var agentModelId: String? {
+        get { ModelPreferences.shared.agentModelId }
+        set { ModelPreferences.shared.agentModelId = newValue }
     }
 
     var sessions: [ChatSession] = []
@@ -296,7 +297,7 @@ final class AgentService {
 
     func send(text: String, mentions: [AgentMention]) {
         guard canStream else {
-            streamError = .upstream("Sign in to a paid plan or add an Anthropic API key to start.")
+            streamError = .upstream("Add your Venice API key in Settings to start.")
             return
         }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)

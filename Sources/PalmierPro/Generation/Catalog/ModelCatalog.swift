@@ -1,6 +1,5 @@
 import Foundation
 import Combine
-@preconcurrency import ConvexMobile
 
 enum ModelKind: Sendable {
     case video(VideoModelConfig)
@@ -35,35 +34,48 @@ final class ModelCatalog {
     private(set) var image: [ImageModelConfig] = []
     private(set) var audio: [AudioModelConfig] = []
     private(set) var upscale: [UpscaleModelConfig] = []
+    private(set) var textModels: [VeniceTextModel] = []
     private(set) var byId: [String: ModelKind] = [:]
     private(set) var isLoaded: Bool = false
     private(set) var lastError: String?
 
-    @ObservationIgnored private var subscription: AnyCancellable?
     @ObservationIgnored private var didConfigure = false
+    @ObservationIgnored private var keyObserver: NSObjectProtocol?
+    @ObservationIgnored private var reloadTask: Task<Void, Never>?
 
     private init() {}
 
+    /// Loads the model catalog from Venice and reloads it whenever the key changes.
     func configure() {
         guard !didConfigure else { return }
         didConfigure = true
 
-        guard let client = AccountService.shared.convex else { return }
+        keyObserver = NotificationCenter.default.addObserver(
+            forName: .veniceAPIKeyChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reload() }
+        }
+        reload()
+    }
 
-        subscription = client
-            .subscribe(to: "models:list", yielding: [CatalogEntry].self)
-            .receive(on: DispatchQueue.main)
-            .sink(
-                receiveCompletion: { [weak self] completion in
-                    if case .failure(let err) = completion {
-                        Log.generation.error("ModelCatalog subscription failed: \(err.localizedDescription)")
-                        self?.lastError = err.localizedDescription
-                    }
-                },
-                receiveValue: { [weak self] entries in
-                    self?.apply(entries)
-                }
-            )
+    func reload() {
+        reloadTask?.cancel()
+        guard let api = VeniceAPI.fromKeychain() else {
+            isLoaded = false
+            lastError = nil
+            return
+        }
+        reloadTask = Task { [weak self] in
+            do {
+                let catalog = try await api.fetchCatalog()
+                guard !Task.isCancelled else { return }
+                self?.apply(catalog.entries)
+                self?.textModels = catalog.textModels
+            } catch {
+                Log.generation.error("Venice catalog load failed: \(error.localizedDescription)")
+                self?.lastError = error.localizedDescription
+            }
+        }
     }
 
     private func apply(_ entries: [CatalogEntry]) {

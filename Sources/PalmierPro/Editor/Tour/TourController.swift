@@ -154,7 +154,7 @@ final class TourController {
             TourStep(kind: .spotlight(.panel(.agent)), title: "AI agent",
                      instruction: "Chat with your agent! It can generate content, edit clips, organize your assets, and much more. Start by signing in, or bring your own Anthropic API key."),
             TourStep(kind: .outro, title: "You're all set",
-                     instruction: "Start creating, or explore these to get the most out of Palmier Pro."),
+                     instruction: "Start creating, or explore these to get the most out of Venice Video Editor."),
         ]
         return steps
     }

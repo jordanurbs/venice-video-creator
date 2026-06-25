@@ -61,8 +61,9 @@ enum VeniceGenerationRunner {
         ]
         if let resolution = params.resolution, !resolution.isEmpty { body["resolution"] = resolution }
         if !params.aspectRatio.isEmpty { body["aspect_ratio"] = params.aspectRatio }
-        // Image-to-video: the source image is a data URL produced by uploadReference.
-        if let imageURL = params.startFrameURL ?? params.referenceImageURLs.first {
+        // Image-to-video / reference-to-video / video-to-video all condition on a
+        // source passed via image_url (a data URL produced by uploadReference).
+        if let imageURL = params.startFrameURL ?? params.referenceImageURLs.first ?? params.sourceVideoURL {
             body["image_url"] = imageURL
         }
 
@@ -111,28 +112,59 @@ enum VeniceGenerationRunner {
     private static func runAudio(
         model: String, params: AudioGenerationParams, api: VeniceAPI
     ) async throws -> [String] {
-        let isMusic = ModelRegistry.byId[model].map { kind -> Bool in
-            if case .audio(let m) = kind { return m.category == .music }
+        // Route by the endpoint recorded in the catalog: type=tts models use the
+        // synchronous /audio/speech; music/SFX use the async /audio/queue flow.
+        let usesSpeech = ModelRegistry.byId[model].map { kind -> Bool in
+            if case .audio(let m) = kind { return m.entry.allowedEndpoints.contains("audio/speech") }
             return false
         } ?? false
 
-        if isMusic {
-            var body: [String: Any] = ["model": model, "prompt": params.prompt]
-            if params.instrumental { body["instrumental"] = true }
-            if let lyrics = params.lyrics { body["lyrics"] = lyrics }
-            if let style = params.styleInstructions { body["style"] = style }
-            let bytes = try await binaryOrBase64(path: "audio/music", body: body, accept: "audio/mpeg", api: api)
-            return [try writeTemp(data: bytes, ext: "mp3").absoluteString]
-        } else {
-            let body: [String: Any] = [
+        if usesSpeech {
+            var body: [String: Any] = [
                 "model": model,
                 "input": params.prompt,
-                "voice": params.voice ?? VeniceVoices.defaults.first ?? "af_sky",
                 "response_format": "mp3",
             ]
-            let bytes = try await binaryOrBase64(path: "audio/speech", body: body, accept: "audio/mpeg", api: api)
-            return [try writeTemp(data: bytes, ext: "mp3").absoluteString]
+            if let voice = params.voice, !voice.isEmpty { body["voice"] = voice }
+            let request = api.makeRequest(path: "audio/speech", accept: "audio/mpeg", body: try api.jsonBody(body))
+            let (data, response) = try await api.data(for: request)
+            try VeniceAPI.assertOK(data: data, response: response)
+            return [try writeTemp(data: data, ext: "mp3").absoluteString]
         }
+
+        // Async queue (music / SFX).
+        var body: [String: Any] = ["model": model, "prompt": params.prompt]
+        if let duration = params.durationSeconds, duration > 0 { body["duration_seconds"] = duration }
+        if let lyrics = params.lyrics, !lyrics.isEmpty { body["lyrics_prompt"] = lyrics }
+        if params.instrumental { body["force_instrumental"] = true }
+        if let voice = params.voice, !voice.isEmpty { body["voice"] = voice }
+
+        let queued = try await api.postJSON(path: "audio/queue", body: body)
+        guard let queueId = queued["queue_id"] as? String else {
+            throw VeniceAPI.VeniceError.decode("missing queue_id")
+        }
+        return [try await pollAudio(queueId: queueId, model: model, api: api)]
+    }
+
+    /// Polls `/audio/retrieve` until the audio is ready. Requires queue_id + model.
+    private static func pollAudio(queueId: String, model: String, api: VeniceAPI) async throws -> String {
+        let deadline = Date().addingTimeInterval(10 * 60)
+        while Date() < deadline {
+            let request = api.makeRequest(
+                path: "audio/retrieve",
+                accept: "audio/mpeg",
+                body: try api.jsonBody(["queue_id": queueId, "model": model])
+            )
+            let (data, response) = try await api.data(for: request)
+            try VeniceAPI.assertOK(data: data, response: response)
+            let contentType = ((response as? HTTPURLResponse)?
+                .value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
+            if contentType.contains("audio/") {
+                return try writeTemp(data: data, ext: contentType.contains("wav") ? "wav" : "mp3").absoluteString
+            }
+            try await Task.sleep(nanoseconds: 3_000_000_000)
+        }
+        throw VeniceAPI.VeniceError.transport("Audio generation timed out.")
     }
 
     // MARK: - Upscale
@@ -140,10 +172,11 @@ enum VeniceGenerationRunner {
     private static func runUpscale(
         model: String, params: UpscaleGenerationParams, api: VeniceAPI
     ) async throws -> [String] {
+        // Venice /image/upscale takes a raw base64 image (no data: prefix) + scale.
         let body: [String: Any] = [
-            "model": model,
-            "image": params.sourceURL,
+            "image": stripDataURLPrefix(params.sourceURL),
             "scale": 2,
+            "enhance": true,
         ]
         let bytes = try await binaryOrBase64(path: "image/upscale", body: body, accept: "image/png", api: api)
         return [try writeTemp(data: bytes, ext: "png").absoluteString]

@@ -90,6 +90,7 @@ enum VeniceModelMapper {
         let resolutions = constraints["resolutions"] as? [String]
         let durations = parseDurations(constraints["durations"] as? [String]) 
         let modelType = (constraints["model_type"] as? String) ?? "text-to-video"
+        let isVideoToVideo = modelType == "video"
         let isImageToVideo = modelType == "image-to-video" || modelType == "reference-to-video"
         // Venice exposes the same model under several variants that share a name
         // (text-to-video / image-to-video / reference-to-video). Append the
@@ -109,7 +110,7 @@ enum VeniceModelMapper {
             maxCombinedAudioRefSeconds: nil,
             framesAndReferencesExclusive: false,
             referenceTagNoun: "reference",
-            requiresSourceVideo: false,
+            requiresSourceVideo: isVideoToVideo,
             requiresReferenceImage: isImageToVideo
         )
         return CatalogEntry(
@@ -134,24 +135,35 @@ enum VeniceModelMapper {
     private static func audioEntry(
         id: String, name: String, type: String, spec: [String: Any], pricing: [String: Any]
     ) -> CatalogEntry {
-        let isMusic = type == "music"
+        // Venice splits audio across two endpoints:
+        //  - `type == "tts"` models use the synchronous OpenAI-style /audio/speech.
+        //  - `type == "music"` models (music, SFX, and some hosted TTS) use the
+        //    async /audio/queue + /audio/retrieve flow.
+        let lower = (id + " " + name).lowercased()
+        let isSpeechEndpoint = (type == "tts")
+        let isSFX = lower.contains("sound-effect") || lower.contains("sound effect") || lower.contains("sfx")
+        let isTTSLike = isSpeechEndpoint || lower.contains("tts") || lower.contains("text to speech")
+        let categoryStr: String = isTTSLike ? "tts" : (isSFX ? "sfx" : "music")
+        let endpoint = isSpeechEndpoint ? "audio/speech" : "audio/queue"
+
         let caps = AudioCaps(
-            category: isMusic ? "music" : "tts",
-            voices: isMusic ? nil : VeniceVoices.defaults,
-            defaultVoice: isMusic ? nil : VeniceVoices.defaults.first,
+            category: categoryStr,
+            voices: nil,
+            defaultVoice: nil,
             supportsLyrics: (spec["supports_lyrics"] as? Bool) ?? false,
-            supportsInstrumental: (spec["supports_force_instrumental"] as? Bool) ?? isMusic,
-            supportsStyleInstructions: isMusic,
+            supportsInstrumental: (spec["supports_force_instrumental"] as? Bool) ?? false,
+            supportsStyleInstructions: false,
             durations: nil,
             minPromptLength: 1,
             inputs: ["text"],
-            promptLabel: isMusic ? "Describe the music" : "Text to speak",
-            minSeconds: nil,
-            maxSeconds: nil
+            promptLabel: categoryStr == "tts" ? "Text to speak"
+                : (categoryStr == "sfx" ? "Describe the sound" : "Describe the music"),
+            minSeconds: 1,
+            maxSeconds: 600
         )
         return CatalogEntry(
             id: id, kind: .audio, displayName: name,
-            allowedEndpoints: [isMusic ? "audio/music" : "audio/speech"],
+            allowedEndpoints: [endpoint],
             responseShape: .audio,
             uiCapabilities: .audio(caps),
             audioPricing: .perThousandChars(rate: usdPrice(pricing))
@@ -159,7 +171,8 @@ enum VeniceModelMapper {
     }
 
     private static func upscaleEntry(id: String, name: String, pricing: [String: Any]) -> CatalogEntry {
-        let caps = UpscaleCaps(speed: "Medium", p75DurationSeconds: 30, supportedTypes: ["image", "video"])
+        // Venice's upscaler is image-only (no video upscaling).
+        let caps = UpscaleCaps(speed: "Medium", p75DurationSeconds: 30, supportedTypes: ["image"])
         return CatalogEntry(
             id: id, kind: .upscale, displayName: name,
             allowedEndpoints: ["image/upscale"], responseShape: .upscaledImage,

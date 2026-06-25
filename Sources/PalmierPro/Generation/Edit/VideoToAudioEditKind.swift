@@ -13,8 +13,8 @@ enum VideoToAudioEditKind {
 
     var providerName: String {
         switch self {
-        case .music: "Sonilo"
-        case .sfx: "Mirelo"
+        case .music: "Music"
+        case .sfx: "SFX"
         }
     }
 
@@ -34,8 +34,8 @@ enum VideoToAudioEditKind {
 
     var description: String {
         switch self {
-        case .music: "Generate music that fits the video"
-        case .sfx: "Create matching sound for the video"
+        case .music: "Generate music from a prompt for this clip"
+        case .sfx: "Generate a sound effect from a prompt"
         }
     }
 
@@ -46,10 +46,11 @@ enum VideoToAudioEditKind {
         }
     }
 
+    /// Preferred Venice model id for this kind, when available.
     var preferredModelId: String {
         switch self {
-        case .music: "sonilo-v1.1-video-to-music"
-        case .sfx: "mirelo-sfx-v1.5-video-to-audio"
+        case .music: "lyria-3-pro"
+        case .sfx: "elevenlabs-sound-effects-v2"
         }
     }
 
@@ -60,18 +61,14 @@ enum VideoToAudioEditKind {
         }
     }
 
+    /// Resolve a Venice model for this kind. Venice audio is text-conditioned
+    /// (no video-to-audio), so we just pick a model of the matching category —
+    /// the preferred id if present, otherwise the first of that category.
     @MainActor
     var model: AudioModelConfig? {
-        if let preferred = AudioModelConfig.allModels.first(where: {
-            $0.id == preferredModelId && $0.category == category && $0.inputs.contains(.video)
-        }) {
+        if let preferred = AudioModelConfig.allModels.first(where: { $0.id == preferredModelId }) {
             return preferred
         }
-        return AudioModelConfig.allModels.first {
-            $0.category == category
-                && $0.inputs.contains(.video)
-                && ($0.id.localizedCaseInsensitiveContains(providerName)
-                    || $0.displayName.localizedCaseInsensitiveContains(providerName))
-        }
+        return AudioModelConfig.allModels.first { $0.category == category }
     }
 }

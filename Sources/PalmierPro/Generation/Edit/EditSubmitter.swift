@@ -316,15 +316,16 @@ enum EditSubmitter {
 
     static func videoAudioSeed(for asset: MediaAsset, kind: VideoToAudioEditKind) -> GenerationInput? {
         guard asset.type == .video, let model = kind.model else { return nil }
-        var stored = GenerationInput(
+        // Venice audio is text-to-audio (no video conditioning). Seed the panel
+        // with the model + the clip's duration so the generated track matches the
+        // clip length; the result is placed on the timeline at the clip start.
+        return GenerationInput(
             prompt: "",
             model: model.id,
             duration: max(0, Int(asset.duration.rounded())),
             aspectRatio: "",
             resolution: nil
         )
-        stored.referenceVideoAssetIds = [asset.id]
-        return stored
     }
 
     // MARK: - Names

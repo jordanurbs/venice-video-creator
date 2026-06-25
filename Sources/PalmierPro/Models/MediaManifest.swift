@@ -43,6 +43,8 @@ struct GenerationInput: Codable, Sendable, Equatable {
     var imageURLs: [String]?
     /// Image-only
     var numImages: Int?
+    /// Image-only: Venice `/image/generate` style preset (from `/image/styles`).
+    var stylePreset: String?
     /// Audio-only
     var voice: String?
     var lyrics: String?

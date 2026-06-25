@@ -10,6 +10,8 @@ import SwiftUI
 struct ModelsPane: View {
     private var prefs = ModelPreferences.shared
     private var catalog = ModelCatalog.shared
+    private var traits = ModelTraitsCatalog.shared
+    @Bindable private var transcription = TranscriptionPreferences.shared
 
     @State private var query = ""
 
@@ -20,6 +22,7 @@ struct ModelsPane: View {
             } else {
                 agentSection
                 defaultsSection
+                transcriptionSection
                 Divider().overlay(AppTheme.Border.subtleColor)
                 searchBar
                 toggleSections
@@ -50,7 +53,49 @@ struct ModelsPane: View {
                     options: catalog.textModels.map { ($0.id, $0.displayName) },
                     onSelect: { prefs.agentModelId = $0 }
                 )
+                traitQuickPicks
             }
+        }
+    }
+
+    /// Venice `/models/traits` quick-picks: one tap sets the agent model to the
+    /// model Venice recommends for that trait (Fastest, Reasoning, …).
+    @ViewBuilder
+    private var traitQuickPicks: some View {
+        let picks = traits.availableTraitPicks(in: Set(catalog.textModels.map(\.id)))
+        if !picks.isEmpty {
+            Divider().overlay(AppTheme.Border.subtleColor)
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+                Text("Quick pick")
+                    .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
+                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 110), spacing: AppTheme.Spacing.xs)],
+                    alignment: .leading,
+                    spacing: AppTheme.Spacing.xs
+                ) {
+                    ForEach(picks, id: \.modelId) { pick in
+                        Button {
+                            prefs.agentModelId = pick.modelId
+                        } label: {
+                            Text(pick.label)
+                                .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
+                                .foregroundStyle(prefs.agentModelId == pick.modelId
+                                    ? AppTheme.Text.primaryColor : AppTheme.Text.secondaryColor)
+                                .padding(.horizontal, AppTheme.Spacing.sm)
+                                .padding(.vertical, AppTheme.Spacing.xxs)
+                                .background(
+                                    Capsule().fill(prefs.agentModelId == pick.modelId
+                                        ? AppTheme.Accent.primary.opacity(AppTheme.Opacity.moderate)
+                                        : Color.white.opacity(AppTheme.Opacity.subtle))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .help("Use Venice's recommended model for: \(pick.label)")
+                    }
+                }
+            }
+            .padding(.vertical, AppTheme.Spacing.xs)
         }
     }
 
@@ -88,6 +133,39 @@ struct ModelsPane: View {
                 options: catalog.upscale.map { ($0.id, $0.displayName) },
                 onSelect: { prefs.setDefaultModel($0, for: .upscale) }
             )
+        }
+    }
+
+    // MARK: - Transcription backend
+
+    private var transcriptionSection: some View {
+        sectionContainer(title: "Transcription") {
+            HStack(spacing: AppTheme.Spacing.md) {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.xxs) {
+                    Text("Use Venice cloud transcription")
+                        .font(.system(size: AppTheme.FontSize.md))
+                        .foregroundStyle(AppTheme.Text.primaryColor)
+                    Text("Off uses on-device Speech (private, free). On uses Venice /audio/transcriptions for languages and accuracy it covers better; falls back to on-device on error.")
+                        .font(.system(size: AppTheme.FontSize.xs))
+                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: AppTheme.Spacing.lg)
+                Toggle("", isOn: $transcription.useVenice)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+            }
+            .padding(.vertical, AppTheme.Spacing.xs)
+            if transcription.useVenice {
+                Divider().overlay(AppTheme.Border.subtleColor)
+                pickerRow(
+                    title: "Transcription model",
+                    selectionId: transcription.veniceModel,
+                    options: TranscriptionPreferences.availableModels.map { ($0.id, $0.name) },
+                    onSelect: { transcription.veniceModel = $0 ?? TranscriptionPreferences.availableModels[0].id }
+                )
+            }
         }
     }
 

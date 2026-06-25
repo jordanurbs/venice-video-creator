@@ -3,6 +3,8 @@ import Foundation
 enum EditAction {
     case upscale
     case edit
+    case editImage
+    case removeBackground
     case generateMusic
     case generateSFX
     case rerun
@@ -84,6 +86,24 @@ enum EditAction {
                 kind: .sfx,
                 effectiveDurationOverride: effectiveDurationOverride
             )
+
+        case .editImage:
+            guard asset.type == .image else {
+                return .disabled(reason: "AI Edit only works on images")
+            }
+            if asset.isGenerating {
+                return .disabled(reason: "Generation in progress")
+            }
+            return .available
+
+        case .removeBackground:
+            guard asset.type == .image else {
+                return .disabled(reason: "Remove Background only works on images")
+            }
+            if asset.isGenerating {
+                return .disabled(reason: "Generation in progress")
+            }
+            return .available
 
         case .createVideo:
             guard asset.type == .image else {

@@ -68,6 +68,91 @@ enum EditSubmitter {
         )
     }
 
+    // MARK: - Background remove
+
+    @discardableResult
+    static func submitBackgroundRemove(
+        asset: MediaAsset,
+        editor: EditorViewModel,
+        onComplete: (@MainActor (MediaAsset) -> Void)? = nil,
+        onFailure: (@MainActor () -> Void)? = nil
+    ) -> String? {
+        guard AccountService.shared.isSignedIn, asset.type == .image else { return nil }
+        let genInput = GenerationInput(
+            prompt: "", model: VeniceBuiltInModel.backgroundRemove,
+            duration: 0, aspectRatio: "", resolution: nil
+        )
+        let sourceAssetId = asset.id
+        return editor.generationService.generate(
+            genInput: genInput,
+            assetType: .image,
+            placeholderDuration: Defaults.imageDurationSeconds,
+            references: [asset],
+            name: "Cutout \(stripPrefix(asset.name))",
+            folderId: asset.folderId,
+            buildParams: { uploaded in
+                .backgroundRemove(BackgroundRemoveParams(sourceURL: uploaded.first ?? ""))
+            },
+            snapshotRefs: { input, uploaded in
+                input.imageURLs = uploaded.isEmpty ? nil : uploaded
+                input.imageURLAssetIds = [sourceAssetId]
+            },
+            fileExtension: "png",
+            projectURL: editor.projectURL,
+            editor: editor,
+            onComplete: onComplete,
+            onFailure: onFailure
+        )
+    }
+
+    // MARK: - Image edit (prompt-driven)
+
+    @discardableResult
+    static func submitImageEdit(
+        asset: MediaAsset,
+        prompt: String,
+        modelId: String?,
+        editor: EditorViewModel,
+        onComplete: (@MainActor (MediaAsset) -> Void)? = nil,
+        onFailure: (@MainActor () -> Void)? = nil
+    ) -> String? {
+        guard AccountService.shared.isSignedIn, asset.type == .image else { return nil }
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let model = modelId
+            ?? ModelCatalog.shared.editModels.first?.id
+            ?? VeniceBuiltInModel.defaultEdit
+        let genInput = GenerationInput(
+            prompt: trimmed, model: model,
+            duration: 0, aspectRatio: "", resolution: nil
+        )
+        let sourceAssetId = asset.id
+        return editor.generationService.generate(
+            genInput: genInput,
+            assetType: .image,
+            placeholderDuration: Defaults.imageDurationSeconds,
+            references: [asset],
+            name: "Edited \(stripPrefix(asset.name))",
+            folderId: asset.folderId,
+            buildParams: { uploaded in
+                .imageEdit(ImageEditParams(
+                    sourceURL: uploaded.first ?? "",
+                    prompt: trimmed,
+                    aspectRatio: nil
+                ))
+            },
+            snapshotRefs: { input, uploaded in
+                input.imageURLs = uploaded.isEmpty ? nil : uploaded
+                input.imageURLAssetIds = [sourceAssetId]
+            },
+            fileExtension: "png",
+            projectURL: editor.projectURL,
+            editor: editor,
+            onComplete: onComplete,
+            onFailure: onFailure
+        )
+    }
+
     // MARK: - Rerun
 
     enum RerunError: LocalizedError {
@@ -200,7 +285,8 @@ enum EditSubmitter {
                         resolution: gen.resolution,
                         quality: gen.quality,
                         imageURLs: uploaded,
-                        numImages: count
+                        numImages: count,
+                        stylePreset: gen.stylePreset
                     ))
                 },
                 fileExtension: "jpg",

@@ -7,9 +7,10 @@ struct ImageGenerationParams: Encodable, Sendable {
     let quality: String?
     let imageURLs: [String]
     let numImages: Int
+    var stylePreset: String? = nil
 
     enum CodingKeys: String, CodingKey {
-        case kind, prompt, aspectRatio, resolution, quality, imageURLs, numImages
+        case kind, prompt, aspectRatio, resolution, quality, imageURLs, numImages, stylePreset
     }
 
     func encode(to encoder: Encoder) throws {
@@ -21,6 +22,7 @@ struct ImageGenerationParams: Encodable, Sendable {
         try c.encodeIfPresent(quality, forKey: .quality)
         if !imageURLs.isEmpty { try c.encode(imageURLs, forKey: .imageURLs) }
         try c.encode(numImages, forKey: .numImages)
+        try c.encodeIfPresent(stylePreset, forKey: .stylePreset)
     }
 }
 

@@ -76,15 +76,21 @@ extension ToolExecutor {
         let candidates = editor.mediaAssets
             .filter { ($0.type == .video || $0.type == .audio) && (restrict?.contains($0.id) ?? true) }
             .map { (id: $0.id, url: $0.url) }
-        let hits = TranscriptSearch.search(query: query, assets: candidates, limit: limit)
+        // Prefer Venice embedding similarity; fall back to exact keyword matching
+        // when no key/embedding model is available or it returns nothing.
+        let semantic = await TranscriptSearch.semanticSearch(query: query, assets: candidates, limit: limit)
+        let keyword = TranscriptSearch.search(query: query, assets: candidates, limit: limit)
+        let hits = (semantic?.isEmpty == false ? semantic! : keyword)
         return hits.map { hit in
-            [
+            var entry: [String: Any] = [
                 "mediaRef": hit.assetID,
                 "name": editor.mediaAssets.first { $0.id == hit.assetID }?.name ?? "",
                 "startSeconds": hit.start,
                 "endSeconds": hit.end,
                 "text": hit.text,
             ]
+            if hit.score != 0 { entry["score"] = hit.score }
+            return entry
         }
     }
 

@@ -310,6 +310,90 @@ extension ToolExecutor {
         return .ok("Generation started. Placeholder asset ID: \(placeholderId). Model: \(model.displayName), \(model.category.label)\(scored). Place it with add_clips.")
     }
 
+    func editImage(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
+        let prompt = try args.requireString("prompt")
+        guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ToolError("Empty prompt")
+        }
+        guard AccountService.shared.hasVeniceKey else {
+            throw ToolError("Image editing requires a Venice API key. Tell the user to add it in Settings.")
+        }
+        let mediaRef = try args.requireString("mediaRef")
+        let base = try asset(mediaRef, editor: editor, label: "Source image")
+        guard base.type == .image else {
+            throw ToolError("edit_image requires an image asset (got \(base.type.rawValue)).")
+        }
+        let modelId = args.string("model")
+        if let modelId, !ModelCatalog.shared.editModels.contains(where: { $0.id == modelId }) {
+            let ids = ModelCatalog.shared.editModels.map(\.id).joined(separator: ", ")
+            throw ToolError("Unknown edit model '\(modelId)'. Available: \(ids.isEmpty ? "(none loaded)" : ids)")
+        }
+
+        let extraIds = args.stringArray("referenceMediaRefs")
+        let folderId = try resolveFolderId(args, editor: editor, fallbackReferences: [base])
+
+        if extraIds.isEmpty {
+            guard let placeholderId = EditSubmitter.submitImageEdit(
+                asset: base, prompt: prompt, modelId: modelId, editor: editor
+            ) else {
+                throw ToolError("Failed to start image edit.")
+            }
+            return .ok("Image edit started. Placeholder asset ID: \(placeholderId). Source: \(base.name)")
+        }
+
+        // Multi-edit: base image first, then up to 2 additional references (3 total).
+        var refs: [MediaAsset] = [base]
+        for id in extraIds {
+            let a = try asset(id, editor: editor, label: "Reference image")
+            guard a.type == .image else {
+                throw ToolError("referenceMediaRefs entry '\(id)' must be an image (got \(a.type.rawValue)).")
+            }
+            refs.append(a)
+        }
+        guard refs.count <= 3 else {
+            throw ToolError("/image/multi-edit supports up to 3 images total (base + 2 references); got \(refs.count).")
+        }
+        let model = modelId ?? ModelCatalog.shared.editModels.first?.id ?? VeniceBuiltInModel.defaultEdit
+        let refIds = refs.map(\.id)
+        let genInput = GenerationInput(
+            prompt: prompt, model: model, duration: 0, aspectRatio: "", resolution: nil
+        )
+        let placeholderId = editor.generationService.generate(
+            genInput: genInput,
+            assetType: .image,
+            placeholderDuration: Defaults.imageDurationSeconds,
+            references: refs,
+            name: args.string("name") ?? "Edited \(base.name)",
+            folderId: folderId,
+            buildParams: { uploaded in
+                .imageMultiEdit(ImageMultiEditParams(sourceURLs: uploaded, prompt: prompt))
+            },
+            snapshotRefs: { input, uploaded in
+                input.imageURLs = uploaded.isEmpty ? nil : uploaded
+                input.imageURLAssetIds = refIds
+            },
+            fileExtension: "png",
+            projectURL: editor.projectURL,
+            editor: editor
+        )
+        return .ok("Multi-image edit started. Placeholder asset ID: \(placeholderId). Base: \(base.name), +\(refs.count - 1) reference(s).")
+    }
+
+    func removeBackground(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
+        guard AccountService.shared.hasVeniceKey else {
+            throw ToolError("Background removal requires a Venice API key. Tell the user to add it in Settings.")
+        }
+        let mediaRef = try args.requireString("mediaRef")
+        let base = try asset(mediaRef, editor: editor, label: "Source image")
+        guard base.type == .image else {
+            throw ToolError("remove_background requires an image asset (got \(base.type.rawValue)).")
+        }
+        guard let placeholderId = EditSubmitter.submitBackgroundRemove(asset: base, editor: editor) else {
+            throw ToolError("Failed to start background removal.")
+        }
+        return .ok("Background removal started. Placeholder asset ID: \(placeholderId). Source: \(base.name)")
+    }
+
     func upscaleMedia(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         let mediaRef = try args.requireString("mediaRef")
         let asset = try asset(mediaRef, editor: editor)
@@ -381,6 +465,13 @@ extension ToolExecutor {
         }
         if filter == nil || filter == "upscale" {
             out += UpscaleModelConfig.allModels.map { Self.upscaleModelInfo($0) }
+        }
+        if filter == nil || filter == "edit" {
+            out += ModelCatalog.shared.editModels.map { m -> [String: Any] in
+                var info: [String: Any] = ["id": m.id, "displayName": m.displayName, "type": "edit"]
+                if !m.aspectRatios.isEmpty { info["aspectRatios"] = m.aspectRatios }
+                return info
+            }
         }
         let body: [String: Any] = [
             "models": out,

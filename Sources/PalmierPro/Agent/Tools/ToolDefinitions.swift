@@ -19,7 +19,12 @@ enum ToolName: String, CaseIterable, Sendable {
     case generateVideo = "generate_video"
     case generateImage = "generate_image"
     case generateAudio = "generate_audio"
+    case editImage = "edit_image"
+    case removeBackground = "remove_background"
     case upscaleMedia = "upscale_media"
+    case webSearch = "web_search"
+    case fetchURL = "fetch_url"
+    case parseDocument = "parse_document"
     case importMedia = "import_media"
     case listModels = "list_models"
     case inspectMedia = "inspect_media"
@@ -98,7 +103,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .searchMedia,
-            description: "Search the media library by content: what's on screen (visual) and what's said (spoken). Visual matching is semantic and on-device — phrase the query like an image caption ('a wide shot of a harbor at sunset'), not keywords; covers videos and stills. Spoken matching layers exact keywords over on-device semantic matching of transcript segments — quote the words said, or paraphrase them; transcripts are created automatically while indexing (and by inspect_media and add_captions), so coverage grows as indexing completes. The two groups rank independently and are never blended. Scores are uncalibrated — use them for ordering only.\n\nHits are source-second ranges. To place exactly that moment, multiply by fps and pass as trimStartFrame/trimEndFrame with a matching durationFrames to add_clips or set_clip_properties. Image hits have no time range.\n\nstatus reports the visual index: ready | indexing | modelNotInstalled | downloadingModel | preparing | disabled | failed. When not ready, moments may be empty or incomplete (compare indexedAssets to indexableAssets) — report that instead of concluding the footage doesn't exist, and don't poll in a loop. Spoken results work regardless of status.",
+            description: "Search the media library by content: what's on screen (visual) and what's said (spoken). Visual matching is semantic and on-device — phrase the query like an image caption ('a wide shot of a harbor at sunset'), not keywords; covers videos and stills. Spoken matching is semantic when a Venice API key is set (transcript segments ranked by Venice embedding similarity), and falls back to exact keyword matching otherwise — quote the words said, or paraphrase them; transcripts are created automatically while indexing (and by inspect_media and add_captions), so coverage grows as indexing completes. The two groups rank independently and are never blended. Scores are uncalibrated — use them for ordering only.\n\nHits are source-second ranges. To place exactly that moment, multiply by fps and pass as trimStartFrame/trimEndFrame with a matching durationFrames to add_clips or set_clip_properties. Image hits have no time range.\n\nstatus reports the visual index: ready | indexing | modelNotInstalled | downloadingModel | preparing | disabled | failed. When not ready, moments may be empty or incomplete (compare indexedAssets to indexableAssets) — report that instead of concluding the footage doesn't exist, and don't poll in a loop. Spoken results work regardless of status.",
             inputSchema: objectSchema(
                 properties: [
                     "query": ["type": "string", "description": "What to find. Visual: a caption-style scene description. Spoken: the words to match."],
@@ -415,6 +420,65 @@ enum ToolDefinitions {
             )
         ),
         AgentTool(
+            name: .editImage,
+            description: "Edits an existing IMAGE asset with a text prompt using Venice /image/edit (prompt-driven transform) or /image/multi-edit (compose up to 3 images). Returns a placeholder asset ID immediately; the edited image appears in get_media once ready. Good prompts are short and specific: 'remove the tree', 'add sunglasses to the cat', 'make the sky a vivid orange sunrise'. Pass referenceMediaRefs to composite additional images into the base (e.g. 'place the person from image 2 onto the beach in image 1'). Costs real money and is not undoable.",
+            inputSchema: objectSchema(
+                properties: [
+                    "mediaRef": ["type": "string", "description": "ID of the base image asset to edit (from get_media)."],
+                    "prompt": ["type": "string", "description": "What to change. Short and specific works best."],
+                    "referenceMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Optional. Up to 2 additional image asset IDs to composite with the base (routes to /image/multi-edit). The base image is image 1; these become image 2, 3."],
+                    "model": ["type": "string", "description": "Optional edit model ID. Use list_models with type='edit' to see options. Defaults to the first available edit model."],
+                    "name": ["type": "string", "description": "Display name for the result. Defaults to 'Edited <source>'."],
+                    "folderId": ["type": "string", "description": "Optional. Folder id to place the result in. Omit for the project root."],
+                ],
+                required: ["mediaRef", "prompt"]
+            )
+        ),
+        AgentTool(
+            name: .removeBackground,
+            description: "Removes the background from an existing IMAGE asset using Venice /image/background-remove, producing a transparent PNG cutout of the subject. Returns a placeholder asset ID immediately; the cutout appears in get_media once ready. Costs real money and is not undoable.",
+            inputSchema: objectSchema(
+                properties: [
+                    "mediaRef": ["type": "string", "description": "ID of the image asset to cut out (from get_media)."],
+                    "name": ["type": "string", "description": "Display name for the result. Defaults to 'Cutout <source>'."],
+                    "folderId": ["type": "string", "description": "Optional. Folder id to place the result in. Omit for the project root."],
+                ],
+                required: ["mediaRef"]
+            )
+        ),
+        AgentTool(
+            name: .webSearch,
+            description: "Searches the web with Venice /augment/search (privacy-preserving — Brave ZDR by default, or anonymized Google). Returns structured results: title, url, content snippet, and date. Use to research topics, find facts, verify current information, or gather source URLs to then read with fetch_url. Each call costs a small amount. Requires a Venice API key.",
+            inputSchema: objectSchema(
+                properties: [
+                    "query": ["type": "string", "description": "Search query (1–400 characters)."],
+                    "limit": ["type": "integer", "description": "Optional. Max results 1–20 (default 10)."],
+                    "provider": ["type": "string", "enum": ["brave", "google"], "description": "Optional search provider (default brave)."],
+                ],
+                required: ["query"]
+            )
+        ),
+        AgentTool(
+            name: .fetchURL,
+            description: "Fetches a web page with Venice /augment/scrape and returns its content as clean markdown. Use after web_search to read a result, or to pull a specific article/page into context (e.g. a script, brief, or reference). Note: X/Twitter and Reddit reject automated access. Each call costs a small amount. Requires a Venice API key.",
+            inputSchema: objectSchema(
+                properties: [
+                    "url": ["type": "string", "description": "The https URL to fetch."],
+                ],
+                required: ["url"]
+            )
+        ),
+        AgentTool(
+            name: .parseDocument,
+            description: "Extracts plain text from a document using Venice /augment/text-parser. Accepts a local file PATH (PDF, DOCX, XLSX, or plain text, up to 25MB) — useful for importing a script, brief, or shot list as text the assistant can read. Returns the extracted text and an approximate token count. Requires a Venice API key.",
+            inputSchema: objectSchema(
+                properties: [
+                    "path": ["type": "string", "description": "Absolute local file path to a PDF, DOCX, XLSX, or plain-text document (<= 25MB)."],
+                ],
+                required: ["path"]
+            )
+        ),
+        AgentTool(
             name: .upscaleMedia,
             description: "Upscales an existing video or image asset to higher resolution using an AI upscaler. Returns a placeholder asset ID immediately; the upscaled asset appears in get_media once ready. Use list_models with type='upscale' to pick a model that supports the asset's type. Costs real money and is not undoable.",
             inputSchema: objectSchema(
@@ -581,7 +645,7 @@ enum ToolDefinitions {
             description: "Lists AI models with their capabilities (durations, aspect ratios, resolutions, first/last frame support, reference support, voices/category for audio, upscaler speed). Always call before generate_video, generate_image, generate_audio, or upscale_media so the model you pick actually supports the constraints you need. Returns { models, loaded } — if loaded=false the catalog hasn't synced yet (e.g. user not signed in); the models array may be empty even when models exist, so do not conclude no models are available. Retry after the user signs in.",
             inputSchema: objectSchema(
                 properties: [
-                    "type": ["type": "string", "enum": ["video", "image", "audio", "upscale"], "description": "Filter by type. Omit to list all models."],
+                    "type": ["type": "string", "enum": ["video", "image", "audio", "upscale", "edit"], "description": "Filter by type. Omit to list all models. 'edit' lists image-edit models for edit_image."],
                 ]
             )
         ),

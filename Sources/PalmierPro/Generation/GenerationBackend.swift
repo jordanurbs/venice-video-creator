@@ -52,6 +52,9 @@ enum BackendGenerationParams: Encodable, Sendable {
     case image(ImageGenerationParams)
     case audio(AudioGenerationParams)
     case upscale(UpscaleGenerationParams)
+    case imageEdit(ImageEditParams)
+    case imageMultiEdit(ImageMultiEditParams)
+    case backgroundRemove(BackgroundRemoveParams)
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.singleValueContainer()
@@ -60,6 +63,9 @@ enum BackendGenerationParams: Encodable, Sendable {
         case .image(let p): try c.encode(p)
         case .audio(let p): try c.encode(p)
         case .upscale(let p): try c.encode(p)
+        case .imageEdit(let p): try c.encode(p)
+        case .imageMultiEdit(let p): try c.encode(p)
+        case .backgroundRemove(let p): try c.encode(p)
         }
     }
 }

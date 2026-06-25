@@ -7,6 +7,9 @@ struct AIEditTab: View {
     @Environment(EditorViewModel.self) private var editor
     @Bindable private var account = AccountService.shared
     @State private var rerunError: String?
+    @State private var showEditPrompt: Bool = false
+    @State private var editPromptText: String = ""
+    @State private var pendingEditModelId: String?
     @State private var replaceClipSource: Bool = false
     @State private var useTrimmedClip: Bool = true
     @State private var placeAudioOnTimeline: Bool = true
@@ -35,12 +38,27 @@ struct AIEditTab: View {
                         title: "Upscale",
                         description: "Enhance resolution with AI"
                     )
-                    actionRow(
-                        action: .edit,
-                        icon: "wand.and.stars",
-                        title: "Edit",
-                        description: "Transform with a prompt or motion reference"
-                    )
+                    if asset.type == .image {
+                        actionRow(
+                            action: .editImage,
+                            icon: "wand.and.stars",
+                            title: "AI Edit",
+                            description: "Transform with a text prompt"
+                        )
+                        actionRow(
+                            action: .removeBackground,
+                            icon: "scissors.badge.ellipsis",
+                            title: "Remove Background",
+                            description: "Cut out the subject as a transparent PNG"
+                        )
+                    } else {
+                        actionRow(
+                            action: .edit,
+                            icon: "wand.and.stars",
+                            title: "Edit",
+                            description: "Transform with a prompt or motion reference"
+                        )
+                    }
                     actionRow(
                         action: .rerun,
                         icon: "arrow.clockwise",
@@ -78,6 +96,14 @@ struct AIEditTab: View {
             Button("Dismiss") { rerunError = nil }
         } message: {
             Text(rerunError ?? "")
+        }
+        .alert("AI Edit", isPresented: $showEditPrompt) {
+            TextField("Describe the change", text: $editPromptText)
+            Button("Cancel", role: .cancel) { }
+            Button("Edit") { submitImageEdit() }
+                .disabled(editPromptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("e.g. “make the sky a vivid orange sunrise” or “remove the tree”")
         }
     }
 
@@ -304,6 +330,31 @@ struct AIEditTab: View {
             audioMenu(kind: .music, title: title, isEnabled: isEnabled)
         case .generateSFX:
             audioMenu(kind: .sfx, title: title, isEnabled: isEnabled)
+        case .removeBackground:
+            Button(title) { runBackgroundRemove() }
+            .buttonStyle(.capsule(.secondary))
+            .controlSize(.small)
+            .disabled(!isEnabled || !account.aiAllowed)
+            .help(account.aiAllowed ? "" : "Add your Venice API key to edit")
+        case .editImage:
+            if ModelCatalog.shared.editModels.count > 1 {
+                Menu(title) {
+                    ForEach(ModelCatalog.shared.editModels) { model in
+                        Button(model.displayName) { beginImageEdit(modelId: model.id) }
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .controlSize(.small)
+                .disabled(!isEnabled || !account.aiAllowed)
+                .help(account.aiAllowed ? "" : "Add your Venice API key to edit")
+            } else {
+                Button(title) { beginImageEdit(modelId: nil) }
+                .buttonStyle(.capsule(.secondary))
+                .controlSize(.small)
+                .disabled(!isEnabled || !account.aiAllowed)
+                .help(account.aiAllowed ? "" : "Add your Venice API key to edit")
+            }
         case .edit, .rerun:
             Button(title) {
                 present(action)
@@ -312,6 +363,30 @@ struct AIEditTab: View {
             .controlSize(.small)
             .disabled(!isEnabled)
         }
+    }
+
+    private func beginImageEdit(modelId: String?) {
+        pendingEditModelId = modelId
+        editPromptText = ""
+        showEditPrompt = true
+    }
+
+    private func runBackgroundRemove() {
+        markReplacementPendingIfNeeded()
+        _ = EditSubmitter.submitBackgroundRemove(
+            asset: asset, editor: editor,
+            onComplete: replacementCompletion(),
+            onFailure: replacementFailure()
+        )
+    }
+
+    private func submitImageEdit() {
+        markReplacementPendingIfNeeded()
+        _ = EditSubmitter.submitImageEdit(
+            asset: asset, prompt: editPromptText, modelId: pendingEditModelId, editor: editor,
+            onComplete: replacementCompletion(),
+            onFailure: replacementFailure()
+        )
     }
 
     private func audioModels(for kind: VideoToAudioEditKind) -> [AudioModelConfig] {
@@ -341,7 +416,7 @@ struct AIEditTab: View {
 
     private func present(_ action: EditAction) {
         switch action {
-        case .upscale, .createVideo: break // handled via menu
+        case .upscale, .createVideo, .editImage, .removeBackground: break // handled via menu/button
         case .edit:
             guard let stored = EditSubmitter.editSeed(for: asset) else { return }
             seedPanel(stored: stored, trimmed: trimmedSourceIfEnabled())

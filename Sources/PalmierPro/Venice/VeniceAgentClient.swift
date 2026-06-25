@@ -11,6 +11,8 @@ struct VeniceAgentClient: AgentClient {
     /// Venice text model id (e.g. a Qwen/Llama variant with function calling).
     let model: String
     var maxTokens: Int = 8192
+    /// Optional Venice character persona slug (applied via venice_parameters).
+    var characterSlug: String? = nil
 
     func stream(
         system: String,
@@ -39,7 +41,8 @@ struct VeniceAgentClient: AgentClient {
         guard !apiKey.isEmpty else { throw PalmierClientError.unauthenticated }
 
         let body = VeniceChatRequest.build(
-            model: model, maxTokens: maxTokens, system: system, tools: tools, messages: messages
+            model: model, maxTokens: maxTokens, system: system, tools: tools, messages: messages,
+            characterSlug: characterSlug
         )
         let api = VeniceAPI(apiKey: apiKey)
         let request = api.makeRequest(
@@ -150,7 +153,8 @@ enum VeniceChatRequest {
         maxTokens: Int,
         system: String,
         tools: [AnthropicToolSchema],
-        messages: [AnthropicMessage]
+        messages: [AnthropicMessage],
+        characterSlug: String? = nil
     ) -> [String: Any] {
         var openAIMessages: [[String: Any]] = [["role": "system", "content": system]]
         for message in messages {
@@ -174,6 +178,12 @@ enum VeniceChatRequest {
                     ],
                 ]
             }
+        }
+        if let slug = characterSlug, !slug.isEmpty {
+            body["venice_parameters"] = [
+                "character_slug": slug,
+                "include_venice_system_prompt": false,
+            ]
         }
         return body
     }

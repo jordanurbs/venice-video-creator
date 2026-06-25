@@ -35,15 +35,22 @@ final class ModelPreferences {
 
     private static let disabledKey = "disabledModelIds"
     private static let defaultsKey = "defaultModelIds"
+    private static let characterSlugKey = "agentCharacterSlug"
 
     private(set) var disabledIds: Set<String>
     /// task.rawValue -> model id
     private var defaultIds: [String: String]
 
+    /// Optional Venice character persona slug applied to the agent (nil = none).
+    var agentCharacterSlug: String? {
+        didSet { UserDefaults.standard.set(agentCharacterSlug, forKey: Self.characterSlugKey) }
+    }
+
     private init() {
         let stored = UserDefaults.standard.stringArray(forKey: Self.disabledKey) ?? []
         disabledIds = Set(stored)
         defaultIds = (UserDefaults.standard.dictionary(forKey: Self.defaultsKey) as? [String: String]) ?? [:]
+        agentCharacterSlug = UserDefaults.standard.string(forKey: Self.characterSlugKey)
     }
 
     // MARK: - Enable / disable

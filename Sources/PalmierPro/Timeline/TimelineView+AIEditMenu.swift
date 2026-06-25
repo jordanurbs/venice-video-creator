@@ -31,6 +31,8 @@ extension TimelineView {
                 item.representedObject = clipId
                 item.isEnabled = aiAllowed
                 submenu.addItem(item)
+            case .editImage, .removeBackground:
+                continue // image-only AI edits are offered in the Inspector AI tab
             case .generateMusic, .generateSFX:
                 let kind: VideoToAudioEditKind = action == .generateMusic ? .music : .sfx
                 let item = NSMenuItem(title: "\(kind.title)…", action: #selector(performAIEditVideoAudio(_:)), keyEquivalent: "")

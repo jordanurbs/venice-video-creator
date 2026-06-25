@@ -152,7 +152,7 @@ final class TourController {
             TourStep(kind: .spotlight(.element(.timelineRuler)), title: "Select a range",
                      instruction: "This is the timeline ruler. Shift+drag on the ruler to select a range to render. You can pick any slot to AI edit or generate music that fits that range."),
             TourStep(kind: .spotlight(.panel(.agent)), title: "AI agent",
-                     instruction: "Chat with your agent! It can generate content, edit clips, organize your assets, and much more. Start by signing in, or bring your own Anthropic API key."),
+                     instruction: "Chat with your agent! It can generate content, edit clips, organize your assets, and much more. Add your Venice API key in Settings to get started."),
             TourStep(kind: .outro, title: "You're all set",
                      instruction: "Start creating, or explore these to get the most out of Venice Video Editor."),
         ]

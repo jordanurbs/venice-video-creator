@@ -101,13 +101,34 @@ final class AccountService {
     /// Reflects Venice key presence; observable so UI updates on key changes.
     private(set) var hasVeniceKey: Bool = VeniceKeychain.hasKey
 
+    // MARK: - Live Venice balance / usage (BYO key)
+
+    struct VeniceUsageInfo: Sendable, Equatable {
+        var accessPermitted: Bool
+        var tier: String?
+        var usdBalance: Double?
+        var diemBalance: Double?
+        var nextEpochBegins: String?
+        var spendUSD: Double?
+        var spendDiem: Double?
+        var spendLookbackDays: Int?
+    }
+
+    private(set) var veniceUsage: VeniceUsageInfo?
+    private(set) var isLoadingUsage: Bool = false
+    private(set) var usageError: String?
+
     @ObservationIgnored private var keyObserver: NSObjectProtocol?
 
     private init() {
         keyObserver = NotificationCenter.default.addObserver(
             forName: .veniceAPIKeyChanged, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.hasVeniceKey = VeniceKeychain.hasKey }
+            MainActor.assumeIsolated {
+                self?.hasVeniceKey = VeniceKeychain.hasKey
+                self?.veniceUsage = nil
+                self?.usageError = nil
+            }
         }
     }
 
@@ -129,6 +150,38 @@ final class AccountService {
 
     func configure() {
         hasVeniceKey = VeniceKeychain.hasKey
+    }
+
+    /// Pulls live balances (`/api_keys/rate_limits`) and trailing spend
+    /// (`/billing/usage-analytics`) for the current Venice key. Both are
+    /// best-effort — partial results still update the UI.
+    func refreshUsage(lookbackDays: Int = 7) async {
+        guard let api = VeniceAPI.fromKeychain() else {
+            veniceUsage = nil
+            return
+        }
+        isLoadingUsage = true
+        defer { isLoadingUsage = false }
+
+        async let rateLimits = try? api.rateLimitInfo()
+        async let totals = try? api.usageAnalytics(lookbackDays: lookbackDays)
+        let (limits, usage) = await (rateLimits, totals)
+
+        if limits == nil && usage == nil {
+            usageError = "Could not load balance for this key."
+            return
+        }
+        usageError = nil
+        veniceUsage = VeniceUsageInfo(
+            accessPermitted: limits?.accessPermitted ?? true,
+            tier: limits?.tier,
+            usdBalance: limits?.usd,
+            diemBalance: limits?.diem,
+            nextEpochBegins: limits?.nextEpochBegins,
+            spendUSD: usage?.usd,
+            spendDiem: usage?.diem,
+            spendLookbackDays: usage?.lookbackDays
+        )
     }
 
     // MARK: - Removed cloud actions (kept as no-ops for API compatibility)

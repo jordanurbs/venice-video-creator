@@ -50,7 +50,7 @@ Some examples on using Palmier Pro MCP server with Claude:
 
 **What models are supported?**
 
-We support most SOTA generation models. For images, the most common ones are Nano Banana Pro, GPT-image-2. For videos, Seedance2, Kling3, Grok, Veo, etc. We constantly push update for more. For the in-app chat, only Anthropic at the moment. But you can connect with MCP to try other models.
+We support most SOTA generation models. For images, the most common ones are Nano Banana Pro, GPT-image-2. For videos, Seedance2, Kling3, Grok, Veo, etc. We constantly push update for more. The in-app chat runs on Venice text models (pick one in Settings → Models). You can also connect external clients via MCP.
 
 **What is the future of Palmier Pro?**
 

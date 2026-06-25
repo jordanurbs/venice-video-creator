@@ -63,10 +63,71 @@ enum TranscriptionError: LocalizedError {
 
 enum Transcription {
     static func transcribeVideoAudio(videoURL: URL, censorProfanity: Bool = false, preferredLocale: Locale? = nil, sourceRange: ClosedRange<Double>? = nil) async throws -> TranscriptionResult {
+        if let veniceModel = await veniceConfig() {
+            do {
+                return try await transcribeViaVenice(
+                    originalURL: videoURL, range: sourceRange,
+                    model: veniceModel, preferredLocale: preferredLocale
+                )
+            } catch {
+                Log.transcription.warning("venice STT failed, falling back to on-device: \(error.localizedDescription)")
+            }
+        }
         let tempAudioURL = try await extractAudioTrack(from: videoURL, range: sourceRange)
         defer { try? FileManager.default.removeItem(at: tempAudioURL) }
-        let result = try await transcribe(fileURL: tempAudioURL, censorProfanity: censorProfanity, preferredLocale: preferredLocale)
+        let result = try await transcribeOnDevice(fileURL: tempAudioURL, censorProfanity: censorProfanity, preferredLocale: preferredLocale)
         return result.offsetting(by: sourceRange?.lowerBound ?? 0)
+    }
+
+    /// Reads the Venice STT model preference on the main actor; nil = on-device.
+    private static func veniceConfig() async -> String? {
+        await MainActor.run {
+            let prefs = TranscriptionPreferences.shared
+            return prefs.veniceActive ? prefs.veniceModel : nil
+        }
+    }
+
+    /// Cloud STT via Venice `/audio/transcriptions`. Exports an upload-ready m4a
+    /// (trimmed to `range`) from any audio/video source, then offsets back to
+    /// source time.
+    private static func transcribeViaVenice(
+        originalURL: URL, range: ClosedRange<Double>?, model: String, preferredLocale: Locale?
+    ) async throws -> TranscriptionResult {
+        guard let api = await MainActor.run(body: { VeniceAPI.fromKeychain() }) else {
+            throw TranscriptionError.analysisFailed("No Venice API key")
+        }
+        let m4a = try await exportAudioM4A(from: originalURL, range: range)
+        defer { try? FileManager.default.removeItem(at: m4a) }
+        let language = preferredLocale?.language.languageCode?.identifier
+        let result = try await api.transcribeAudio(fileURL: m4a, model: model, language: language)
+        return result.offsetting(by: range?.lowerBound ?? 0)
+    }
+
+    /// Exports an m4a audio sample from any audio/video source (e.g. for voice cloning).
+    static func exportAudioSample(from url: URL) async throws -> URL {
+        try await exportAudioM4A(from: url, range: nil)
+    }
+
+    /// Exports an AAC/m4a audio file (optionally trimmed) suitable for upload.
+    private static func exportAudioM4A(from url: URL, range: ClosedRange<Double>?) async throws -> URL {
+        let asset = AVURLAsset(url: url)
+        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+            throw TranscriptionError.audioExtractionFailed("Could not create audio exporter")
+        }
+        if let range {
+            export.timeRange = CMTimeRange(
+                start: CMTime(seconds: range.lowerBound, preferredTimescale: 600),
+                end: CMTime(seconds: range.upperBound, preferredTimescale: 600)
+            )
+        }
+        let outURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("palmier-venice-stt-\(UUID().uuidString).m4a")
+        do {
+            try await export.export(to: outURL, as: .m4a)
+        } catch {
+            throw TranscriptionError.audioExtractionFailed(error.localizedDescription)
+        }
+        return outURL
     }
 
     static func supportedLocales() async -> [Locale] {
@@ -90,10 +151,27 @@ enum Transcription {
     }
 
     static func transcribe(fileURL: URL, censorProfanity: Bool = false, preferredLocale: Locale? = nil, sourceRange: ClosedRange<Double>? = nil) async throws -> TranscriptionResult {
+        if let veniceModel = await veniceConfig() {
+            do {
+                return try await transcribeViaVenice(
+                    originalURL: fileURL, range: sourceRange,
+                    model: veniceModel, preferredLocale: preferredLocale
+                )
+            } catch {
+                Log.transcription.warning("venice STT failed, falling back to on-device: \(error.localizedDescription)")
+            }
+        }
+        return try await transcribeOnDevice(
+            fileURL: fileURL, censorProfanity: censorProfanity,
+            preferredLocale: preferredLocale, sourceRange: sourceRange
+        )
+    }
+
+    private static func transcribeOnDevice(fileURL: URL, censorProfanity: Bool = false, preferredLocale: Locale? = nil, sourceRange: ClosedRange<Double>? = nil) async throws -> TranscriptionResult {
         if let sourceRange {
             let tempURL = try await extractAudioTrack(from: fileURL, range: sourceRange)
             defer { try? FileManager.default.removeItem(at: tempURL) }
-            let result = try await transcribe(fileURL: tempURL, censorProfanity: censorProfanity, preferredLocale: preferredLocale)
+            let result = try await transcribeOnDevice(fileURL: tempURL, censorProfanity: censorProfanity, preferredLocale: preferredLocale)
             return result.offsetting(by: sourceRange.lowerBound)
         }
 

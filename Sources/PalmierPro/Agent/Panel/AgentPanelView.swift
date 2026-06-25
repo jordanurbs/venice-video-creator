@@ -158,6 +158,55 @@ struct AgentPanelView: View {
         }
     }
 
+    @State private var characterCatalog = CharacterCatalog.shared
+
+    @ViewBuilder
+    private var personaPicker: some View {
+        if service.hasApiKey {
+            Menu {
+                Button {
+                    service.selectedCharacterSlug = nil
+                } label: {
+                    Label("No persona", systemImage: service.selectedCharacterSlug == nil ? "checkmark" : "")
+                }
+                if characterCatalog.isLoading {
+                    Text("Loading personas…")
+                } else if !characterCatalog.characters.isEmpty {
+                    Divider()
+                    ForEach(characterCatalog.characters) { character in
+                        Button {
+                            service.selectedCharacterSlug = character.slug
+                        } label: {
+                            Label(
+                                character.name,
+                                systemImage: service.selectedCharacterSlug == character.slug ? "checkmark" : ""
+                            )
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: AppTheme.Spacing.xs) {
+                    Image(systemName: "theatermasks")
+                        .font(.system(size: AppTheme.FontSize.xxs))
+                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                    Text(personaLabel)
+                        .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
+                        .foregroundStyle(AppTheme.Text.secondaryColor)
+                        .lineLimit(1)
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Apply a Venice character persona to the agent")
+        }
+    }
+
+    private var personaLabel: String {
+        guard let slug = service.selectedCharacterSlug else { return "Persona" }
+        return characterCatalog.name(forSlug: slug) ?? slug
+    }
+
     @ViewBuilder
     private var byokIndicator: some View {
         if service.hasApiKey {
@@ -357,8 +406,10 @@ struct AgentPanelView: View {
                 onCancel: { service.cancel() }
             ) {
                 modelPicker
+                personaPicker
                 byokIndicator
             }
+            .onAppear { characterCatalog.loadIfNeeded() }
         }
         .padding(.horizontal, AppTheme.Spacing.mdLg)
         .padding(.bottom, AppTheme.Spacing.mdLg)

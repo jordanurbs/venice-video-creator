@@ -15,6 +15,9 @@ struct GenerationView: View {
     @State private var selectedResolution = "1080p"
     @State private var selectedQuality = "high"
     @State private var selectedNumImages = 1
+    /// Image style preset (Venice `/image/styles`); empty = none.
+    @State private var selectedStyle = ""
+    @Bindable private var styleCatalog = ImageStyleCatalog.shared
     /// Live USD cost estimate (Venice quote for video/audio, static for image).
     @State private var estimatedUSD: Double?
 
@@ -239,7 +242,7 @@ struct GenerationView: View {
     private var hasAnySettings: Bool {
         switch selectedType {
         case .video: return !videoModel.durations.isEmpty || !videoModel.aspectRatios.isEmpty || videoModel.resolutions != nil || videoModel.audioDiscountRate != nil
-        case .image: return !imageModel.aspectRatios.isEmpty || imageModel.resolutions != nil || imageModel.qualities != nil || imageModel.maxImages > 1
+        case .image: return !imageModel.aspectRatios.isEmpty || imageModel.resolutions != nil || imageModel.qualities != nil || imageModel.maxImages > 1 || !styleCatalog.styles.isEmpty
         case .audio: return audioModel.supportsInstrumental || audioModel.durations != nil
         }
     }
@@ -562,6 +565,7 @@ struct GenerationView: View {
         .padding(.bottom, AppTheme.Spacing.sm)
         .frame(maxHeight: max(0, CGFloat(maxPanelHeight)), alignment: .top)
         .onAppear {
+            ImageStyleCatalog.shared.configure()
             let hadSeed = editor.pendingPanelSeed != nil
             consumePendingPanelSeed()
             // A seeded edit may reuse a now-disabled model; keep its selection.
@@ -887,11 +891,36 @@ struct GenerationView: View {
         }
     }
 
+    private var cloneCapable: Bool { ClonedVoiceStore.isCloneCapable(audioModel.id) }
+    private var cloneableAudioAssets: [MediaAsset] {
+        editor.mediaAssets.filter { $0.type == .audio || $0.type == .video }
+    }
+
     private var voicePicker: some View {
         Menu {
             if let voices = audioModel.voices {
                 ForEach(voices, id: \.self) { voice in
                     Button(voice) { selectedVoice = voice }
+                }
+            }
+            if cloneCapable {
+                let clones = ClonedVoiceStore.shared.voices(forModel: audioModel.id)
+                if !clones.isEmpty {
+                    Section("Cloned voices") {
+                        ForEach(clones) { clone in
+                            Button(clone.label) { selectedVoice = clone.id }
+                        }
+                    }
+                }
+                Divider()
+                Menu("Clone a voice from…") {
+                    if cloneableAudioAssets.isEmpty {
+                        Text("No audio/video assets")
+                    } else {
+                        ForEach(cloneableAudioAssets) { asset in
+                            Button(asset.name) { cloneVoice(from: asset) }
+                        }
+                    }
                 }
             }
         } label: {
@@ -914,6 +943,35 @@ struct GenerationView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .hoverHighlight()
+    }
+
+    private func cloneVoice(from asset: MediaAsset) {
+        guard let api = VeniceAPI.fromKeychain() else {
+            flashDropError("Add your Venice API key to clone voices.")
+            return
+        }
+        let model = audioModel.id
+        let label = "Clone of \(asset.name)"
+        let sourceURL = asset.url
+        Task { @MainActor in
+            do {
+                // Voice cloning wants an audio sample; export audio for video sources.
+                let sampleURL: URL
+                var temp: URL?
+                if asset.type == .video {
+                    sampleURL = try await Transcription.exportAudioSample(from: sourceURL)
+                    temp = sampleURL
+                } else {
+                    sampleURL = sourceURL
+                }
+                defer { if let temp { try? FileManager.default.removeItem(at: temp) } }
+                let handle = try await api.cloneVoice(sampleFileURL: sampleURL, name: label, model: model)
+                ClonedVoiceStore.shared.add(ClonedVoice(id: handle, label: label, model: model))
+                selectedVoice = handle
+            } catch {
+                flashDropError("Voice cloning failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: - Video frame references
@@ -1487,6 +1545,9 @@ struct GenerationView: View {
                     options: Array(1...imageModel.maxImages)
                 ) { "\($0)" }
             }
+            if selectedType == .image, !styleCatalog.styles.isEmpty {
+                stylePickerMenu
+            }
             if selectedType == .audio && audioModel.supportsInstrumental {
                 Toggle("Instrumental", isOn: $instrumental)
                     .controlSize(.small)
@@ -1505,6 +1566,41 @@ struct GenerationView: View {
         }
         .padding(AppTheme.Spacing.lg)
         .frame(width: 220)
+    }
+
+    private var stylePickerMenu: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+            Text("Style")
+                .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
+                .foregroundStyle(AppTheme.Text.tertiaryColor)
+            Menu {
+                Button("None") { selectedStyle = "" }
+                Divider()
+                ForEach(styleCatalog.styles, id: \.self) { style in
+                    Button(style) { selectedStyle = style }
+                }
+            } label: {
+                HStack(spacing: AppTheme.Spacing.xs) {
+                    Text(selectedStyle.isEmpty ? "None" : selectedStyle)
+                        .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
+                        .foregroundStyle(AppTheme.Text.secondaryColor)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: AppTheme.Spacing.xs)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: AppTheme.FontSize.micro, weight: .semibold))
+                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                }
+                .padding(.horizontal, AppTheme.Spacing.sm)
+                .padding(.vertical, AppTheme.Spacing.xs)
+                .background(
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.sm)
+                        .fill(Color.white.opacity(AppTheme.Opacity.subtle))
+                )
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+        }
     }
 
     private func settingsPicker<T: Hashable>(_ label: String, selection: Binding<T>, options: [T], format: @escaping (T) -> String) -> some View {
@@ -1640,6 +1736,9 @@ struct GenerationView: View {
                 ? instrumental : nil,
             generateAudio: supportsAudioToggle ? generateAudio : nil
         )
+        if selectedType == .image, !selectedStyle.isEmpty {
+            genInput.stylePreset = selectedStyle
+        }
         let imageCount: Int = {
             guard selectedType == .image, imageModel.maxImages > 1 else { return 1 }
             return min(imageModel.maxImages, max(1, selectedNumImages))
@@ -1843,6 +1942,7 @@ struct GenerationView: View {
             selectedAudioDuration = stored.duration
         }
         if let n = stored.numImages { selectedNumImages = max(1, n) }
+        selectedStyle = stored.stylePreset ?? ""
         if let v = stored.voice, !v.isEmpty { selectedVoice = v }
         lyrics = stored.lyrics ?? ""
         styleInstructions = stored.styleInstructions ?? ""

@@ -17,8 +17,93 @@ struct AccountPane: View {
             header
             keyField
             statusRow
+            if hasKey {
+                Divider().overlay(AppTheme.Border.subtleColor)
+                balanceSection
+            }
         }
-        .onAppear(perform: refresh)
+        .onAppear {
+            refresh()
+            if hasKey { Task { await account.refreshUsage() } }
+        }
+    }
+
+    @ViewBuilder
+    private var balanceSection: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            HStack(spacing: AppTheme.Spacing.sm) {
+                Text("BALANCE & USAGE")
+                    .font(.system(size: AppTheme.FontSize.xs, weight: .semibold))
+                    .tracking(AppTheme.Tracking.tight)
+                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+                Spacer()
+                if account.isLoadingUsage {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button {
+                        Task { await account.refreshUsage() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: AppTheme.FontSize.sm))
+                            .foregroundStyle(AppTheme.Text.secondaryColor)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Refresh balance and usage")
+                }
+            }
+
+            if let usage = account.veniceUsage {
+                VStack(spacing: 0) {
+                    if let usd = usage.usdBalance {
+                        balanceRow("USD balance", String(format: "$%.2f", usd))
+                    }
+                    if let diem = usage.diemBalance {
+                        balanceRow("DIEM balance", String(format: "%.2f", diem))
+                    }
+                    if let spend = usage.spendUSD, let days = usage.spendLookbackDays {
+                        balanceRow("Spent (last \(days)d)", String(format: "$%.2f", spend))
+                    }
+                    if let tier = usage.tier {
+                        balanceRow("Tier", tier.capitalized)
+                    }
+                    if !usage.accessPermitted {
+                        balanceRow("Status", "Blocked — top up to continue")
+                    }
+                }
+                .padding(.horizontal, AppTheme.Spacing.md)
+                .padding(.vertical, AppTheme.Spacing.xs)
+                .background(
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.md)
+                        .fill(Color.white.opacity(AppTheme.Opacity.subtle))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.md)
+                        .strokeBorder(AppTheme.Border.primaryColor, lineWidth: AppTheme.BorderWidth.thin)
+                )
+            } else if let err = account.usageError {
+                Text(err)
+                    .font(.system(size: AppTheme.FontSize.sm))
+                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+            } else if !account.isLoadingUsage {
+                Text("Balance and usage will appear here.")
+                    .font(.system(size: AppTheme.FontSize.sm))
+                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+            }
+        }
+    }
+
+    private func balanceRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: AppTheme.FontSize.sm))
+                .foregroundStyle(AppTheme.Text.secondaryColor)
+            Spacer()
+            Text(value)
+                .font(.system(size: AppTheme.FontSize.sm, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(AppTheme.Text.primaryColor)
+        }
+        .padding(.vertical, AppTheme.Spacing.xs)
     }
 
     private var header: some View {
@@ -123,6 +208,7 @@ struct AccountPane: View {
         isFocused = false
         refresh()
         ModelCatalog.shared.reload()
+        Task { await account.refreshUsage() }
     }
 
     private func remove() {

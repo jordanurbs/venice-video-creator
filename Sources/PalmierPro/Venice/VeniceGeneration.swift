@@ -15,7 +15,51 @@ enum VeniceGenerationRunner {
         case .video(let p): return try await runVideo(model: model, params: p, api: api)
         case .audio(let p): return try await runAudio(model: model, params: p, api: api)
         case .upscale(let p): return try await runUpscale(model: model, params: p, api: api)
+        case .imageEdit(let p): return try await runImageEdit(model: model, params: p, api: api)
+        case .imageMultiEdit(let p): return try await runImageMultiEdit(model: model, params: p, api: api)
+        case .backgroundRemove(let p): return try await runBackgroundRemove(params: p, api: api)
         }
+    }
+
+    // MARK: - Image edit / multi-edit / background-remove
+
+    /// Venice `/image/edit` — prompt-driven single-image transform. Returns PNG.
+    private static func runImageEdit(
+        model: String, params: ImageEditParams, api: VeniceAPI
+    ) async throws -> [String] {
+        var body: [String: Any] = [
+            "model": model.isEmpty ? VeniceBuiltInModel.defaultEdit : model,
+            "prompt": params.prompt,
+            "image": stripDataURLPrefix(params.sourceURL),
+            "safe_mode": false,
+        ]
+        if let ar = params.aspectRatio, !ar.isEmpty { body["aspect_ratio"] = ar }
+        let bytes = try await binaryOrBase64(path: "image/edit", body: body, accept: "image/png", api: api)
+        return [try writeTemp(data: bytes, ext: "png").absoluteString]
+    }
+
+    /// Venice `/image/multi-edit` — compose 1–3 images. Uses `modelId` (not `model`). Returns PNG.
+    private static func runImageMultiEdit(
+        model: String, params: ImageMultiEditParams, api: VeniceAPI
+    ) async throws -> [String] {
+        let body: [String: Any] = [
+            "modelId": model.isEmpty ? VeniceBuiltInModel.defaultEdit : model,
+            "prompt": params.prompt,
+            // multi-edit accepts base64 or data: URLs; pass them through as-is.
+            "images": params.sourceURLs,
+            "safe_mode": false,
+        ]
+        let bytes = try await binaryOrBase64(path: "image/multi-edit", body: body, accept: "image/png", api: api)
+        return [try writeTemp(data: bytes, ext: "png").absoluteString]
+    }
+
+    /// Venice `/image/background-remove` — transparent cutout. Returns PNG with alpha.
+    private static func runBackgroundRemove(
+        params: BackgroundRemoveParams, api: VeniceAPI
+    ) async throws -> [String] {
+        let body: [String: Any] = ["image": stripDataURLPrefix(params.sourceURL)]
+        let bytes = try await binaryOrBase64(path: "image/background-remove", body: body, accept: "image/png", api: api)
+        return [try writeTemp(data: bytes, ext: "png").absoluteString]
     }
 
     // MARK: - Image (synchronous)
@@ -34,6 +78,7 @@ enum VeniceGenerationRunner {
         if !params.aspectRatio.isEmpty { body["aspect_ratio"] = params.aspectRatio }
         if let resolution = params.resolution, !resolution.isEmpty { body["resolution"] = resolution }
         if let quality = params.quality, !quality.isEmpty { body["quality"] = quality }
+        if let style = params.stylePreset, !style.isEmpty { body["style_preset"] = style }
         // Best-effort reference image passthrough for models that accept it.
         if let first = params.imageURLs.first { body["image"] = first }
 

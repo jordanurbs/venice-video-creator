@@ -8,11 +8,20 @@ struct VeniceTextModel: Sendable, Identifiable, Hashable {
     let supportsVision: Bool
 }
 
+/// A Venice edit-capable image model (`/models?type=inpaint`) used by `/image/edit`.
+struct VeniceEditModel: Sendable, Identifiable, Hashable {
+    let id: String
+    let displayName: String
+    let aspectRatios: [String]
+}
+
 /// The fully-parsed Venice model catalog, ready to apply to `ModelCatalog`.
 /// All members are `Sendable` so parsing can happen off the main actor.
 struct VeniceCatalog: Sendable {
     var entries: [CatalogEntry] = []
     var textModels: [VeniceTextModel] = []
+    var editModels: [VeniceEditModel] = []
+    var embeddingModels: [String] = []
 }
 
 extension VeniceAPI {
@@ -53,8 +62,14 @@ enum VeniceModelMapper {
                 catalog.entries.append(audioEntry(id: id, name: name, type: type, spec: spec, pricing: pricing))
             case "upscale":
                 catalog.entries.append(upscaleEntry(id: id, name: name, pricing: pricing))
+            case "inpaint":
+                let aspectRatios = (constraints["aspectRatios"] as? [String])
+                    ?? (constraints["aspect_ratios"] as? [String]) ?? []
+                catalog.editModels.append(VeniceEditModel(id: id, displayName: name, aspectRatios: aspectRatios))
+            case "embedding":
+                catalog.embeddingModels.append(id)
             default:
-                break // asr / embedding / inpaint are not surfaced in the editor catalog
+                break // asr models are not surfaced in the editor catalog
             }
         }
         return catalog

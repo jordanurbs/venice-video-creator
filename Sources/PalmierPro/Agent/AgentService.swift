@@ -53,14 +53,25 @@ final class AgentService {
         guard hasApiKey else { return nil }
         let key = apiKey.isEmpty ? (VeniceKeychain.load() ?? "") : apiKey
         guard !key.isEmpty else { return nil }
-        return VeniceAgentClient(apiKey: key, model: effectiveModelId)
+        return VeniceAgentClient(apiKey: key, model: effectiveModelId, characterSlug: selectedCharacterSlug)
+    }
+
+    /// User-selected Venice character persona slug, persisted via `ModelPreferences`.
+    var selectedCharacterSlug: String? {
+        get { ModelPreferences.shared.agentCharacterSlug }
+        set { ModelPreferences.shared.agentCharacterSlug = newValue }
     }
 
     /// The Venice model id the agent will actually use: the saved choice if it
     /// is still available, otherwise the first available model.
     var effectiveModelId: String {
         let available = availableModels
-        if let id = agentModelId, available.contains(where: { $0.id == id }) { return id }
+        if let id = agentModelId {
+            if available.contains(where: { $0.id == id }) { return id }
+            // Resolve OpenAI-style / legacy aliases to a concrete Venice id.
+            let resolved = ModelTraitsCatalog.shared.resolve(id)
+            if resolved != id, available.contains(where: { $0.id == resolved }) { return resolved }
+        }
         return available.first?.id ?? agentModelId ?? "qwen-2.5-qwq-32b"
     }
 

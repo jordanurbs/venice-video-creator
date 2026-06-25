@@ -107,6 +107,21 @@ enum AgentInstructions {
         - import_media is the bridge for assets from other MCP servers (stock, web search) or \
           local files — pass url, path, or bytes via its `source` object.
 
+        # Editing existing images
+        - edit_image transforms an existing image asset from a short prompt ("remove the tree", \
+          "make the sky a sunrise"), or composites up to 3 images when you pass referenceMediaRefs. \
+          Prefer it over regenerating from scratch when the user wants a targeted change.
+        - remove_background cuts the subject out as a transparent PNG — use for compositing a \
+          subject over other footage.
+
+        # Research (web + documents)
+        - web_search runs a privacy-preserving web search and returns titles, URLs, and snippets. \
+          Use it to check current facts, find references, or gather source URLs.
+        - fetch_url reads a web page as markdown — chain it after web_search to read a result, or \
+          to pull a script/brief/reference into context. (X/Twitter and Reddit are blocked.)
+        - parse_document extracts text from a local PDF/DOCX/XLSX file path — use to read a script \
+          or shot list the user points you at.
+
         # Audio generation
         - Two categories, distinguished by model (see list_models type='audio'):
           • TTS: the prompt is the exact text to speak. Pass a `voice` the model supports; \

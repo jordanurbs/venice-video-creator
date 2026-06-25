@@ -62,6 +62,41 @@ struct VeniceAPI: Sendable {
         try JSONSerialization.data(withJSONObject: object, options: [])
     }
 
+    /// Builds a `multipart/form-data` request. `fields` are simple text parts;
+    /// `file` is an optional binary part with filename + content type.
+    func makeMultipartRequest(
+        path: String,
+        fields: [String: String] = [:],
+        file: (field: String, filename: String, contentType: String, data: Data)? = nil,
+        accept: String = "application/json"
+    ) -> URLRequest {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+        func append(_ s: String) { body.append(s.data(using: .utf8)!) }
+        for (name, value) in fields {
+            append("--\(boundary)\r\n")
+            append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n")
+            append("\(value)\r\n")
+        }
+        if let file {
+            append("--\(boundary)\r\n")
+            append("Content-Disposition: form-data; name=\"\(file.field)\"; filename=\"\(file.filename)\"\r\n")
+            append("Content-Type: \(file.contentType)\r\n\r\n")
+            body.append(file.data)
+            append("\r\n")
+        }
+        append("--\(boundary)--\r\n")
+
+        let url = URL(string: Self.baseURL.absoluteString + "/" + path) ?? Self.baseURL
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue(accept, forHTTPHeaderField: "Accept")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        return request
+    }
+
     // MARK: - JSON helpers
 
     /// POST a JSON object and decode the JSON response into a dictionary.

@@ -58,7 +58,8 @@ struct ImageGenerationSubmission {
                     resolution: genInput.resolution,
                     quality: genInput.quality,
                     imageURLs: uploaded,
-                    numImages: numImages
+                    numImages: numImages,
+                    stylePreset: genInput.stylePreset
                 ))
             }
         )

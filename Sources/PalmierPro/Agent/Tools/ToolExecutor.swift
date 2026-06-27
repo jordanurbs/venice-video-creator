@@ -120,7 +120,18 @@ final class ToolExecutor {
         case .saveDocument:  return try saveDocument(editor, args)
         case .readDocument:  return try readDocument(editor, args)
         case .listDocuments: return listDocuments(editor)
+        case .readSkill:     return readSkill(args)
         }
+    }
+
+    func readSkill(_ args: [String: Any]) -> ToolResult {
+        guard let id = args.string("id") else {
+            return .error("read_skill requires an 'id'.")
+        }
+        guard let body = SkillStore.shared.body(for: id) else {
+            return .error("Unknown skill: \(id)")
+        }
+        return .ok(body)
     }
 
     /// Reverts the assistant's most recent timeline edit. Refuses to undo the user's own edits.

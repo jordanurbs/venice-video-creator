@@ -612,6 +612,7 @@ extension EditorViewModel {
         case .text, .lottie:
             break
         }
+        refreshPreviewForFinalizedAsset(asset)
         Log.project.notice(
             "media finalize ok asset=\(asset.id.prefix(8)) type=\(asset.type.rawValue)",
             telemetry: "Media asset finalize finished",
@@ -625,6 +626,22 @@ extension EditorViewModel {
                 "hasAudio": asset.hasAudio
             ]
         )
+    }
+
+    private func refreshPreviewForFinalizedAsset(_ asset: MediaAsset) {
+        let usedOnTimeline = timeline.tracks.contains { track in
+            track.clips.contains { $0.mediaRef == asset.id }
+        }
+        if usedOnTimeline {
+            timelineRenderRevision &+= 1
+            videoEngine?.rebuild()
+        }
+        if case .mediaAsset(let id, _, let type) = activePreviewTab,
+           id == asset.id,
+           type != .image {
+            videoEngine?.previewAsset(asset)
+            videoEngine?.seek(to: sourcePlayheadFrame, mode: .exact)
+        }
     }
 
     struct TextClipSpec {

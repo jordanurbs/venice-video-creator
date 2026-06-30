@@ -58,7 +58,8 @@ enum AgentInstructions {
           selection:
           • apply_layout: compose multiple clips in the preview (split screen, PIP, grid, \
             sidebar, three-up). Pick a layout, fill every slot with mediaRef (place new) or \
-            clipId (re-layout existing). Fills each region edge-to-edge without stretching \
+            clipId / clipIds (re-layout existing — one clip or a batch of sequential takes per \
+            slot, all sharing the slot's framing). Fills each region edge-to-edge without stretching \
             (crops to slot shape); fit='fit' letterboxes instead. Crop is centered by default — \
             bias with anchor ('top', …) or anchorX/anchorY (0–1) when centering chops \
             something off. Re-call with adjusted anchors to fine-tune. Don't compute \

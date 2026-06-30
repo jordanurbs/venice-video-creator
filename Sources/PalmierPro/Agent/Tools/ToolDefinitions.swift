@@ -52,6 +52,9 @@ enum ToolName: String, CaseIterable, Sendable {
     case readDocument = "read_document"
     case listDocuments = "list_documents"
     case readSkill = "read_skill"
+    case getProjects = "get_projects"
+    case openProject = "open_project"
+    case newProject = "new_project"
 }
 
 struct AgentTool: @unchecked Sendable {
@@ -973,7 +976,7 @@ enum ToolDefinitions {
             .joined(separator: "\n")
     }
 
-    /// In-app assistant only. Not registered with the MCP server
+    /// In-app assistant only
     static let readSkill = AgentTool(
         name: .readSkill,
         description: "Load the full instructions for one of the skills listed under # Skills in your system prompt. Call this before starting a task that matches a skill's description, then follow the returned procedure. Pass the id exactly as listed.",
@@ -985,7 +988,36 @@ enum ToolDefinitions {
         )
     )
 
-    /// Tools for the in-app agent: every MCP tool plus read_skill.
+    /// MCP server only
+    static let getProjects = AgentTool(
+        name: .getProjects,
+        description: "List the user's known projects, most recently opened first: each entry's id, name, path, whether it's currently open, and whether it's the active project (the one editing tools act on). Also returns a top-level `active` (name, path) for the current project, which may not appear in the list. Call this to discover what's available before open_project, or to find out which project is active. Takes no arguments.",
+        inputSchema: objectSchema()
+    )
+
+    static let openProject = AgentTool(
+        name: .openProject,
+        description: "Open a project and make it the active one — every editing tool then acts on it. Identify it by `id` (from get_projects) or by `path` to a .palmier package. If it's already open, it's brought to front. Returns the now-active project and how many are open. The user sees the window change.",
+        inputSchema: objectSchema(
+            properties: [
+                "id": ["type": "string", "description": "Project id from get_projects. Provide this or path."],
+                "path": ["type": "string", "description": "Filesystem path to a .palmier package. Provide this or id."],
+            ]
+        )
+    )
+
+    static let newProject = AgentTool(
+        name: .newProject,
+        description: "Create a new empty project in the user's Palmier Pro folder and make it active. Fails if a project with that name already exists — pick another name. Returns the new project's name and path.",
+        inputSchema: objectSchema(
+            properties: [
+                "name": ["type": "string", "description": "Project name (without extension). Defaults to 'Untitled Project'."],
+            ]
+        )
+    )
+
+
+    static var mcpServer: [AgentTool] { all + [getProjects, openProject, newProject] }
     static var inAppAgent: [AgentTool] { all + [readSkill] }
 
     private static func textBoxTransformProperties() -> [String: [String: Any]] {

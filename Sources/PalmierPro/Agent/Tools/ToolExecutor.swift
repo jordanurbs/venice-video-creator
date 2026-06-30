@@ -24,6 +24,15 @@ final class ToolExecutor {
         guard let tool = ToolName(rawValue: name) else {
             return .error("Unknown tool: \(name)")
         }
+
+        // project tools act on AppState before editor is available
+        switch tool {
+        case .getProjects, .openProject, .newProject:
+            return await runProjectTool(tool, args)
+        default:
+            break
+        }
+
         guard let editor else { return .error("Editor not available") }
         let before = editor.timeline
         let result: ToolResult
@@ -123,6 +132,8 @@ final class ToolExecutor {
         case .readDocument:  return try readDocument(editor, args)
         case .listDocuments: return listDocuments(editor)
         case .readSkill:     return readSkill(args)
+        case .getProjects, .openProject, .newProject:
+            return await runProjectTool(tool, args)
         }
     }
 

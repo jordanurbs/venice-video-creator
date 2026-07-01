@@ -118,6 +118,7 @@ final class ToolExecutor {
         case .fetchURL:      return try await fetchURL(args)
         case .parseDocument: return try await parseDocument(editor, args)
         case .importMedia:   return try await importMedia(editor, args)
+        case .createMatte:   return try await createMatte(editor, args)
         case .listModels:    return listModels(args)
         case .listFolders:   return listFolders(editor)
         case .createFolder:  return try createFolder(editor, args)

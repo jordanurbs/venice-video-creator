@@ -31,6 +31,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case fetchURL = "fetch_url"
     case parseDocument = "parse_document"
     case importMedia = "import_media"
+    case createMatte = "create_matte"
     case listModels = "list_models"
     case inspectMedia = "inspect_media"
     case getTranscript = "get_transcript"
@@ -658,6 +659,23 @@ enum ToolDefinitions {
                     "folderId": ["type": "string", "description": "Optional. Folder id (from list_folders or create_folder) to place the result in. Omit for the project root."],
                 ],
                 required: ["source"]
+            )
+        ),
+        AgentTool(
+            name: .createMatte,
+            description: "Creates a solid-color PNG matte in the media library.",
+            inputSchema: objectSchema(
+                properties: [
+                    "hex": ["type": "string", "description": "Hex color, e.g. '#000000' or '#FFFFFF'."],
+                    "aspectRatio": [
+                        "type": "string",
+                        "enum": ["Project", "16:9", "9:16", "1:1", "4:3", "9:14", "2.4:1"],
+                        "description": "Defaults to Project (timeline resolution). Other values use the project's short edge.",
+                    ],
+                    "name": ["type": "string"],
+                    "folderId": ["type": "string"],
+                ],
+                required: ["hex"]
             )
         ),
         AgentTool(

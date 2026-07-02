@@ -71,10 +71,6 @@ struct MusicTab: View {
             }
             if let issue = model.validate(spanSeconds: spanSeconds) { return issue }
         }
-        if let cost = estimatedCost, cost > AccountService.shared.remainingCredits,
-           AccountService.shared.budgetCredits != nil {
-            return "\(cost) credits needed. Only \(AccountService.shared.remainingCredits.formatted()) remaining."
-        }
         return nil
     }
 
@@ -238,7 +234,7 @@ struct MusicTab: View {
                 }
                 .buttonStyle(.plain).focusable(false)
                 .disabled(!canGenerate || !account.aiAllowed)
-                .help(account.aiAllowed ? "" : "Sign in to generate")
+                .help(account.aiAllowed ? "" : "Add your Venice key to generate")
 
                 agentMenu
             }

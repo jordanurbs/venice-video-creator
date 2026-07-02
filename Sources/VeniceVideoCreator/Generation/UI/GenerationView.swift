@@ -196,7 +196,6 @@ struct GenerationView: View {
     }
 
     private var canSubmit: Bool {
-        guard canAffordGeneration else { return false }
         if selectedType == .video && videoModel.requiresSourceVideo {
             guard sourceVideo != nil else { return false }
             if videoModel.requiresReferenceImage && imageReferences.isEmpty { return false }
@@ -387,33 +386,11 @@ struct GenerationView: View {
         }
     }
 
-    private var remainingCredits: Int? {
-        guard let budget = AccountService.shared.budgetCredits else { return nil }
-        return max(0, budget - AccountService.shared.spentCredits)
-    }
-
-    private var hasInsufficientCredits: Bool {
-        guard let cost = estimatedCost, let left = remainingCredits else { return false }
-        return cost > left
-    }
-
-    private var canAffordGeneration: Bool {
-        guard let left = remainingCredits else { return true }
-        if let cost = estimatedCost { return cost <= left }
-        return left > 0
-    }
-
     private var costHelpText: String {
         guard let cost = estimatedCost else {
             return "Estimated cost. Actual billing may differ slightly."
         }
-        guard let left = remainingCredits else {
-            return "\(cost) credits estimated. Actual billing may differ."
-        }
-        if cost > left {
-            return "\(cost) credits needed. Only \(left.formatted()) remaining."
-        }
-        return "\(cost) credits. \((left - cost).formatted()) credits remaining after this generation."
+        return "\(cost) credits estimated. Actual billing may differ."
     }
 
     private var settingsSummary: String {
@@ -490,7 +467,6 @@ struct GenerationView: View {
             HStack(spacing: AppTheme.Spacing.sm) {
                 typeTabs
                 Spacer()
-                CreditSummaryView(style: .compact)
                 ProjectActivityButton()
                 Button {
                     editor.pendingEditReplacementClipId = nil

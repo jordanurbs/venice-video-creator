@@ -335,11 +335,11 @@ struct AgentPanelView: View {
         guard let error else { return nil }
         switch error {
         case .unauthenticated:
-            return ErrorCTA(title: "Sign in") {
+            return ErrorCTA(title: "Add Venice key") {
                 SettingsWindowController.shared.show(tab: .account)
             }
         case .insufficientCredits:
-            return ErrorCTA(title: "View plans") {
+            return ErrorCTA(title: "Check balance") {
                 SettingsWindowController.shared.show(tab: .account)
             }
         case .upstream:

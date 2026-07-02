@@ -2,89 +2,11 @@ import AppKit
 import Foundation
 import Observation
 
-enum AccountTier: String, Decodable, Sendable {
-    case none, pro, max
-
-    var isPaid: Bool { self != .none }
-
-    var planLabel: String {
-        switch self {
-        case .none: return "Free"
-        case .pro: return "Pro plan"
-        case .max: return "Max plan"
-        }
-    }
-
-    var upgradeLabel: String {
-        switch self {
-        case .none: return ""
-        case .pro: return "Pro"
-        case .max: return "Max"
-        }
-    }
-}
-
-struct AccountUser: Decodable, Sendable {
-    let email: String?
-    let name: String?
-    let image: String?
-    let tier: AccountTier
-    let currentPeriodEnd: Double?
-    let cancelAtPeriodEnd: Bool?
-    let spentCreditsThisPeriod: Int?
-    let purchasedCredits: Int?
-
-    var displayName: String? {
-        guard let trimmed = name?.trimmingCharacters(in: .whitespaces),
-              !trimmed.isEmpty else { return nil }
-        return trimmed
-    }
-
-    var firstName: String? {
-        displayName?.split(separator: " ").first.map(String.init)
-    }
-}
-
-struct AccountPlan: Decodable, Sendable {
-    let tier: AccountTier
-    let monthlyPriceUsd: Int
-    let monthlyBudgetCredits: Int?
-}
-
-struct AvailablePlan: Decodable, Sendable, Identifiable {
-    let tier: AccountTier
-    let monthlyPriceUsd: Int
-    let discountedMonthlyPriceUsd: Int?
-    let monthlyBudgetCredits: Int?
-
-    var id: String { tier.rawValue }
-    var effectiveMonthlyPriceUsd: Int {
-        hasDiscount ? discountedMonthlyPriceUsd! : monthlyPriceUsd
-    }
-    var hasDiscount: Bool {
-        guard let discounted = discountedMonthlyPriceUsd else { return false }
-        return discounted < monthlyPriceUsd
-    }
-}
-
-struct AccountResponse: Decodable, Sendable {
-    let user: AccountUser
-    let plan: AccountPlan?
-}
-
-enum TopOffLimits {
-    static let minDollars = 5
-    static let maxDollars = 1000
-}
-
 /// Venice BYO-key "account" state.
 ///
-/// The original cloud account/billing layer (Clerk auth + Convex + Stripe
-/// credits) has been removed. There is no sign-in and no metered billing:
-/// access is gated purely on whether the user has stored a Venice API key.
-/// The public surface is preserved so the rest of the UI compiles unchanged —
-/// `isSignedIn` now means "has a Venice key", `budgetCredits` is `nil` so the
-/// credit counters stay hidden, and the billing actions are no-ops.
+/// There is no cloud sign-in and no metered billing: access is gated purely on
+/// whether the user has stored a Venice API key. Live balance/usage is read
+/// directly from Venice for the current key.
 @Observable
 @MainActor
 final class AccountService {
@@ -93,10 +15,7 @@ final class AccountService {
     private(set) var isLoading: Bool = false
     /// Always configured: the only requirement is a Venice key, set in Settings.
     let isMisconfigured: Bool = false
-    private(set) var account: AccountResponse? = nil
-    private(set) var availablePlans: [AvailablePlan] = []
     private(set) var lastError: String? = nil
-    private(set) var isBuyingCredits: Bool = false
 
     /// Reflects Venice key presence; observable so UI updates on key changes.
     private(set) var hasVeniceKey: Bool = VeniceKeychain.hasKey
@@ -138,13 +57,6 @@ final class AccountService {
 
     var isSignedIn: Bool { hasVeniceKey }
     var aiAllowed: Bool { hasVeniceKey }
-    var tier: AccountTier { .none }
-    var isPaid: Bool { false }
-
-    var spentCredits: Int { 0 }
-    /// `nil` budget => the UI treats usage as unmetered (BYO key) and hides counters.
-    var budgetCredits: Int? { nil }
-    var remainingCredits: Int { 0 }
     /// With a key present the user can generate; Venice meters usage on its side.
     var hasCredits: Bool { hasVeniceKey }
 
@@ -184,14 +96,6 @@ final class AccountService {
         )
     }
 
-    // MARK: - Removed cloud actions (kept as no-ops for API compatibility)
-
-    func signInWithGoogle() async {}
-    func signOut() async {}
-    func subscribe(tier: AccountTier) async {}
-    func buyCredits(dollars: Int) {}
-    func manageSubscription() async {}
-
     func sendFeedback(
         message: String,
         email: String?,
@@ -217,8 +121,4 @@ extension AccountService {
     var displaySecondaryText: String? { nil }
 
     var displayInitial: String { "V" }
-
-    func availablePlan(for tier: AccountTier) -> AvailablePlan? {
-        availablePlans.first { $0.tier == tier }
-    }
 }

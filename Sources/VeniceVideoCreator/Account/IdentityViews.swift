@@ -55,15 +55,7 @@ struct UserAvatar: View {
 
     @ViewBuilder
     private var profileImage: some View {
-        if let urlString = account.account?.user.image,
-           let url = URL(string: urlString) {
-            AsyncImage(url: url) { phase in
-                if let image = phase.image {
-                    image.resizable().scaledToFill()
-                }
-            }
-            .id(urlString)
-        }
+        EmptyView()
     }
 }
 
@@ -84,7 +76,7 @@ struct UserAvatarButton: View {
             .hoverHighlight()
         }
         .buttonStyle(.plain)
-        .help(account.isSignedIn ? "Account" : "Sign in")
+        .help(account.isSignedIn ? "Account" : "Add Venice key")
         .popover(isPresented: $isPopoverPresented, arrowEdge: .bottom) {
             AccountPopoverCard()
         }

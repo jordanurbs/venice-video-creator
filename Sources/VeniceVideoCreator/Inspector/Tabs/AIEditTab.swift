@@ -275,7 +275,7 @@ struct AIEditTab: View {
             .fixedSize()
             .controlSize(.small)
             .disabled(!isEnabled || !account.aiAllowed)
-            .help(account.aiAllowed ? "" : "Sign in to upscale")
+            .help(account.aiAllowed ? "" : "Add your Venice key to upscale")
         case .createVideo:
             Menu(title) {
                 Button("Set as first frame") { sendToVideo(asReference: false) }

@@ -148,8 +148,6 @@ private struct NewProjectCard: View {
 }
 
 private struct WelcomeTitle: View {
-    @Bindable private var account = AccountService.shared
-
     var body: some View {
         Text(title)
             .font(.system(size: AppTheme.FontSize.title2, weight: .light))
@@ -158,10 +156,7 @@ private struct WelcomeTitle: View {
     }
 
     private var title: String {
-        if let first = account.account?.user.firstName {
-            return "Welcome to Venice Video Editor, \(first)"
-        }
-        return "Welcome to Venice Video Editor"
+        "Welcome to Venice Video Creator"
     }
 }
 

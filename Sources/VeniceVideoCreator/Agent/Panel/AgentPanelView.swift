@@ -331,7 +331,7 @@ struct AgentPanelView: View {
         let action: () -> Void
     }
 
-    private func errorCTA(for error: PalmierClientError?) -> ErrorCTA? {
+    private func errorCTA(for error: AgentClientError?) -> ErrorCTA? {
         guard let error else { return nil }
         switch error {
         case .unauthenticated:

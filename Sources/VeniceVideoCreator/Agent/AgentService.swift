@@ -90,7 +90,7 @@ final class AgentService {
     var currentSessionId: UUID?
     var messages: [AgentMessage] = []
     var isStreaming: Bool = false
-    var streamError: PalmierClientError?
+    var streamError: AgentClientError?
     var onSessionsChanged: (@MainActor () -> Void)?
 
     var draft: String = ""
@@ -422,7 +422,7 @@ final class AgentService {
             } catch is CancellationError {
                 dropEmptyAssistantTurn(id: assistantID)
                 break loop
-            } catch let err as PalmierClientError {
+            } catch let err as AgentClientError {
                 dropEmptyAssistantTurn(id: assistantID)
                 streamError = err
                 break loop

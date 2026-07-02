@@ -3,7 +3,7 @@ import Foundation
 /// Error type surfaced by the agent stream. Originally tied to the Palmier cloud
 /// backend; retained as the shared agent error type now that streaming runs
 /// directly against Venice.
-enum PalmierClientError: LocalizedError {
+enum AgentClientError: LocalizedError {
     case unauthenticated
     case insufficientCredits(String)
     case upstream(String)
@@ -16,7 +16,7 @@ enum PalmierClientError: LocalizedError {
         }
     }
 
-    static func from(status: Int, body: String) -> PalmierClientError {
+    static func from(status: Int, body: String) -> AgentClientError {
         let parsed = parseErrorEnvelope(body)
         let message = parsed?.message ?? body.prefix(500).description
         switch parsed?.code {

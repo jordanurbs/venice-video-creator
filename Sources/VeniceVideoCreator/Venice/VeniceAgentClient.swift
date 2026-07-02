@@ -38,7 +38,7 @@ struct VeniceAgentClient: AgentClient {
         messages: [AnthropicMessage],
         continuation: AsyncThrowingStream<AnthropicStreamEvent, Error>.Continuation
     ) async throws {
-        guard !apiKey.isEmpty else { throw PalmierClientError.unauthenticated }
+        guard !apiKey.isEmpty else { throw AgentClientError.unauthenticated }
 
         let body = VeniceChatRequest.build(
             model: model, maxTokens: maxTokens, system: system, tools: tools, messages: messages,
@@ -55,7 +55,7 @@ struct VeniceAgentClient: AgentClient {
         if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
             var raw = ""
             for try await line in bytes.lines { raw += line + "\n" }
-            throw PalmierClientError.from(status: http.statusCode, body: raw)
+            throw AgentClientError.from(status: http.statusCode, body: raw)
         }
 
         try await OpenAISSE.parse(bytes: bytes, continuation: continuation)

@@ -31,14 +31,15 @@ fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLIST="$ROOT/Sources/PalmierPro/Resources/Info.plist"
 APPCAST="$ROOT/appcast.xml"
-DMG="$ROOT/.build/PalmierPro.dmg"
+DMG="$ROOT/.build/VeniceVideoCreator.dmg"
+RELEASE_BRANCH="${RELEASE_BRANCH:-venice-integration}"
 cd "$ROOT"
 
 echo "==> Preflight"
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-if [ "$BRANCH" != "main" ]; then
-  echo "error: must be on main (got: $BRANCH)" >&2
+if [ "$BRANCH" != "$RELEASE_BRANCH" ]; then
+  echo "error: must be on $RELEASE_BRANCH (got: $BRANCH)" >&2
   exit 1
 fi
 
@@ -53,14 +54,14 @@ if git rev-parse "$TAG" >/dev/null 2>&1; then
   exit 1
 fi
 
-git fetch origin main --quiet
+git fetch origin "$RELEASE_BRANCH" --quiet
 git fetch origin --tags --quiet
 if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
   echo "error: tag $TAG already exists on origin" >&2
   exit 1
 fi
-if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
-  echo "error: local main differs from origin/main. Push or pull first." >&2
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/$RELEASE_BRANCH)" ]; then
+  echo "error: local $RELEASE_BRANCH differs from origin/$RELEASE_BRANCH. Push or pull first." >&2
   exit 1
 fi
 
@@ -117,7 +118,7 @@ fi
 echo "==> Committing + pushing version bump"
 git add "$PLIST"
 git commit -m "Bump to $VERSION"
-git push origin main
+git push origin "$RELEASE_BRANCH"
 
 echo "==> Tagging $TAG"
 git tag "$TAG"
@@ -136,7 +137,7 @@ b = os.environ["NEW_BUILD"]
 d = os.environ["PUBDATE"]
 l = os.environ["LENGTH"]
 s = os.environ["SIGNATURE"]
-url = f"https://github.com/palmier-io/palmier-pro/releases/download/v{v}/PalmierPro.dmg"
+url = f"https://github.com/jordanurbs/venice-video-editor/releases/download/v{v}/VeniceVideoCreator.dmg"
 
 item = f"""        <item>
             <title>Version {v}</title>
@@ -161,8 +162,8 @@ PYEOF
 
 git add "$APPCAST"
 git commit -m "Add $TAG to appcast"
-git push origin main
+git push origin "$RELEASE_BRANCH"
 
 echo ""
 echo "==> Released $TAG"
-echo "    https://github.com/palmier-io/palmier-pro/releases/tag/$TAG"
+echo "    https://github.com/jordanurbs/venice-video-editor/releases/tag/$TAG"

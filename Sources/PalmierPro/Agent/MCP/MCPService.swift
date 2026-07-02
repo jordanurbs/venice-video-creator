@@ -36,7 +36,7 @@ final class MCPService {
         let toolExecutor = self.toolExecutor
         let httpServer = MCPHTTPServer(port: Self.port) {
             let server = Server(
-                name: "palmier-pro",
+                name: "venice-video-creator",
                 version: "1.0.0",
                 instructions: AgentInstructions.serverInstructions + AgentInstructions.projectNavigation,
                 capabilities: .init(

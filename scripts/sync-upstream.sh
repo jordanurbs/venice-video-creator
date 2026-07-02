@@ -14,11 +14,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 # --- config: where upstream lives and where our work lives --------------------
-UPSTREAM_REMOTE="${UPSTREAM_REMOTE:-origin}"   # palmier-io/palmier-pro
+UPSTREAM_REMOTE="${UPSTREAM_REMOTE:-upstream}" # palmier-io/palmier-pro
 UPSTREAM_BRANCH="${UPSTREAM_BRANCH:-main}"
 MIRROR_BRANCH="${MIRROR_BRANCH:-main}"          # local pristine mirror of upstream
 WORK_BRANCH="${WORK_BRANCH:-venice-integration}" # our Venice branch
-FORK_REMOTE="${FORK_REMOTE:-fork}"              # jordanurbs/venice-video-editor
+FORK_REMOTE="${FORK_REMOTE:-origin}"            # jordanurbs/venice-video-editor (our repo)
 
 do_push=false
 do_build=true

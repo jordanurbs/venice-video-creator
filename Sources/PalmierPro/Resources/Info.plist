@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Venice Video Editor</string>
+	<string>Venice Video Creator</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -28,7 +28,7 @@
 	<key>CFBundleIdentifier</key>
 	<string>ai.venice.studio</string>
 	<key>CFBundleName</key>
-	<string>Venice Video Editor</string>
+	<string>Venice Video Creator</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -37,10 +37,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>io.palmier.pro</string>
+			<string>ai.venice.videocreator</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>palmier</string>
+				<string>venice</string>
 			</array>
 		</dict>
 	</array>
@@ -53,7 +53,7 @@
 	<key>SUEnableAutomaticChecks</key>
 	<false/>
 	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/palmier-io/palmier-pro/main/appcast.xml</string>
+	<string>https://raw.githubusercontent.com/jordanurbs/venice-video-editor/venice-integration/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>Jh56mT+7YZSRsLylQIPyP+4/ahRtTPzfQQaKDZoBsio=</string>
 	<key>UTExportedTypeDeclarations</key>

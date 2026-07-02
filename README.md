@@ -1,79 +1,58 @@
 <div align="center">
 
-# Palmier Pro
+# Venice Video Creator
 
-**The video editor built for AI.**
-
-<a href="https://github.com/palmier-io/palmier-pro/releases/latest/download/PalmierPro.dmg">
-  <img src="./assets/macos-badge.png" alt="Download Palmier Pro for macOS" width="180" />
-</a>
+**A Mac-native, AI-powered video editor that runs on a single Venice API key.**
 
 <sub><i>Requires macOS 26 (Tahoe) on Apple Silicon</i></sub>
 
-<a href="https://x.com/Palmier_io"><img src="https://img.shields.io/badge/Follow-%40Palmier__io-000000?style=flat&logo=x&logoColor=white" alt="Follow on X" /></a>
-<a href="https://discord.com/invite/SMVW6pKYmg"><img src="https://img.shields.io/badge/Join-Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord" /></a>
-<a href="https://www.ycombinator.com/companies/palmier"><img src="https://img.shields.io/badge/Y%20Combinator-S24-orange" alt="Y Combinator S24" /></a>
-
-<p>
-  <strong>English</strong> ·
-  <a href="docs/readme/README.es.md">Español</a> ·
-  <a href="docs/readme/README.zh-CN.md">简体中文</a> ·
-  <a href="docs/readme/README.zh-TW.md">繁體中文</a> ·
-  <a href="docs/readme/README.ja.md">日本語</a> ·
-  <a href="docs/readme/README.ko.md">한국어</a> ·
-  <a href="docs/readme/README.vi.md">Tiếng Việt</a> ·
-  <a href="docs/readme/README.hi.md">हिन्दी</a> ·
-  <a href="docs/readme/README.bn.md">বাংলা</a> ·
-  <a href="docs/readme/README.ar.md">العربية</a> ·
-  <a href="docs/readme/README.it.md">Italiano</a> ·
-  <a href="docs/readme/README.pt-BR.md">Português (Brasil)</a> ·
-  <a href="docs/readme/README.fr.md">Français</a> ·
-  <a href="docs/readme/README.ru.md">Русский</a> ·
-  <a href="docs/readme/README.tr.md">Türkçe</a>
-</p>
-
 </div>
-
-<img src="./assets/palmier-ui.png" alt="Palmier Pro UI" width="900" />
 
 ---
 
-Palmier Pro is an open source video editor for Mac. You and your agent can generate and edit videos together inside the timeline.
+Venice Video Creator is an open-source video editor for Mac. You and your agent generate and edit video together, right inside the timeline — powered entirely by your own [Venice](https://venice.ai) API key. No account, no subscription, no data sent to us: bring your key and everything runs against Venice directly.
 
-### Swift-native video editor
+## Download
 
-We built Palmier Pro from scratch with Swift. The north star is Premiere Pro, with our take on integrating AI into the workflow.
+**Don't use GitHub? No problem — it's a normal Mac app.**
 
-### Built-in Generative AI
+1. Go to the **[latest release page](https://github.com/jordanurbs/venice-video-editor/releases/latest)**.
+2. Under **Assets**, download **`VeniceVideoCreator.dmg`**.
+3. Open the downloaded `.dmg`, then drag **Venice Video Creator** onto the **Applications** folder.
+4. Launch it from Applications.
 
-Generate videos and images with SOTA models like Seedance, Kling, Nano Banana Pro inside the timeline editor.
+> First launch: because the app is distributed outside the Mac App Store, macOS may ask you to confirm. If you see *"cannot be opened"*, right-click the app → **Open** → **Open**, or allow it under **System Settings → Privacy & Security**.
 
-### Integrates with your agents
+To start creating, open **Settings → Venice** and paste your Venice API key (get one at [venice.ai](https://venice.ai)).
 
-Connects your Claude/Codex/Cursor via MCP, or use the in-app agent to work on the same project together.
+## What it does
+
+- **Swift-native timeline editor.** Built from scratch for macOS — cut, trim, layout, caption, and export on a real timeline.
+- **Generative AI on your Venice key.** Generate video, images, music, and SFX with the models in your Venice catalog, directly on the timeline.
+- **Works with your agents.** Drive the editor from the built-in AI agent, or connect Claude / Codex / Cursor over MCP to edit the same project.
 
 ## MCP server
 
-When the app is open, it exposes an MCP server at `http://127.0.0.1:19789/mcp` via HTTP. To connect:
+When the app is open it exposes an MCP server at `http://127.0.0.1:19789/mcp` over HTTP.
 
 **Claude Code**
 ```bash
-claude mcp add --transport http palmier-pro http://127.0.0.1:19789/mcp
+claude mcp add --transport http venice-video-creator http://127.0.0.1:19789/mcp
 ```
 
 **Codex**
 ```bash
-codex mcp add palmier-pro --url http://127.0.0.1:19789/mcp
+codex mcp add venice-video-creator --url http://127.0.0.1:19789/mcp
 ```
 
 **Cursor**
 
-The easiest way is go inside the app `Help` -> `MCP Instructions` -> `Install in Cursor`, or install manually by adding this to `~/.cursor/mcp.json`:
+In the app, go to `Help → MCP Instructions → Install in Cursor`, or add this to `~/.cursor/mcp.json`:
 
-```
+```json
 {
   "mcpServers": {
-    "palmier-pro": {
+    "venice-video-creator": {
       "type": "http",
       "url": "http://127.0.0.1:19789/mcp"
     }
@@ -83,19 +62,13 @@ The easiest way is go inside the app `Help` -> `MCP Instructions` -> `Install in
 
 **Claude Desktop**
 
-We bundle a [mcpb](https://github.com/modelcontextprotocol/mcpb) with the app that allows a one click install Desktop Extension on Claude Desktop. Go to `Help` -> `MCP Instructions` -> `Install in Claude Desktop`
+The app bundles an [mcpb](https://github.com/modelcontextprotocol/mcpb) Desktop Extension for one-click install. Go to `Help → MCP Instructions → Install in Claude Desktop`.
 
 ## FAQ
 
-**Is Palmier Pro fully open source?**
-
-The video editor (without the generative AI features) is fully open source. The MCP server and the agent chat are also open source. The only thing that is closed source is the generative AI processing.
-
 **Is it free?**
 
-The editor is free. You can download it with no login required, and use it as a video editor like CapCut or Adobe Premiere. You can also use the MCP server for free, and start experimenting using Claude Code/Desktop or Cursor to interact with your timeline editor.
-
-Generative AI features require login and subscription.
+The app is free and open source. Generative AI features run against your own Venice API key — you pay Venice directly for what you generate; there's no separate subscription or login here.
 
 **What platforms does it support?**
 
@@ -105,27 +78,19 @@ See [FAQ.md](FAQ.md) for more.
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md)
+```bash
+swift build
+swift run
+```
 
-## Community &amp; Support
+See [CONTRIBUTING.md](CONTRIBUTING.md) for more.
 
-- **Discord:** Join the community on **[Discord](https://discord.com/invite/SMVW6pKYmg)**.
-- **Twitter / X:** Follow **[@Palmier_io](https://x.com/Palmier_io)** for updates and announcements.
-- **Instagram:** Follow [@palmier.io](https://www.instagram.com/palmier.io) 
-- **Feedback &amp; Support:** Create a [Github Issue](https://github.com/palmier-io/palmier-pro/issues) or email us at founders@palmier.io
+## Credits
 
-## Star History
-
-<a href="https://www.star-history.com/?type=date&repos=palmier-io%2Fpalmier-pro">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=palmier-io/palmier-pro&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=palmier-io/palmier-pro&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=palmier-io/palmier-pro&type=date&legend=top-left" />
- </picture>
-</a>
+Venice Video Creator is derived from **[Palmier Pro](https://github.com/palmier-io/palmier-pro)** by Palmier, Inc., used under the GPLv3. Huge thanks to the Palmier team for the editor foundation. Upstream engine improvements are periodically merged in.
 
 ## License
 
-Copyright (C) 2026 Palmier, Inc.
+Venice Video Creator is open source under [GPLv3](LICENSE).
 
-Palmier Pro is open source under [GPLv3](LICENSE).
+Copyright (C) 2026 Palmier, Inc. and Venice Video Creator contributors.

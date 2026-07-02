@@ -41,9 +41,9 @@ ENTITLEMENTS="$ROOT/scripts/PalmierPro.entitlements"
 RESOURCES="$ROOT/Sources/PalmierPro/Resources"
 # User-facing app + executable names (the Swift module stays "PalmierPro").
 EXE="VeniceVideoEditor"
-APP="$ROOT/.build/Venice Video Editor.app"
-ZIP="$ROOT/.build/Venice Video Editor.zip"
-DMG="$ROOT/.build/Venice Video Editor.dmg"
+APP="$ROOT/.build/Venice Video Creator.app"
+ZIP="$ROOT/.build/VeniceVideoCreator.zip"
+DMG="$ROOT/.build/VeniceVideoCreator.dmg"
 
 echo "==> Building ($CONFIG)"
 swift build -c "$CONFIG"
@@ -197,11 +197,11 @@ rm -f "$ZIP"
 echo "==> Building DMG"
 rm -f "$DMG"
 STAGING="$(mktemp -d)"
-cp -R "$APP" "$STAGING/Venice Video Editor.app"
+cp -R "$APP" "$STAGING/Venice Video Creator.app"
 ln -s /Applications "$STAGING/Applications"
 cp "$RESOURCES/AppIcon.icns" "$STAGING/.VolumeIcon.icns"
 hdiutil create \
-  -volname "Venice Video Editor" \
+  -volname "Venice Video Creator" \
   -srcfolder "$STAGING" \
   -ov -format UDZO \
   "$DMG"

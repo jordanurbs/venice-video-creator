@@ -9,13 +9,14 @@ extension ToolExecutor {
         switch type {
         case .video:
             guard let modelId = args.string("model")
-                ?? ModelPreferences.shared.defaultModel(for: .textToVideo)
-                ?? VideoModelConfig.allModels.first?.id else {
+                ?? enabledDefault(.textToVideo, in: VideoModelConfig.allModels.map(\.id))
+                ?? VideoModelConfig.allModels.first(where: { ModelPreferences.shared.isEnabled($0.id) })?.id else {
                 throw ToolError("Model catalog not loaded yet. Try again in a moment.")
             }
             guard let model = VideoModelConfig.allModels.first(where: { $0.id == modelId }) else {
-                throw ToolError("Unknown model '\(modelId)'. Available: \(VideoModelConfig.allModels.map(\.id).joined(separator: ", "))")
+                throw ToolError("Unknown model '\(modelId)'. Available: \(enabledIds(VideoModelConfig.allModels.map(\.id)))")
             }
+            try ensureEnabled(model.id, kind: "video")
             return model.requiresSourceVideo
                 ? try generateVideoEdit(editor, args, prompt: prompt, model: model)
                 : try generateVideoText(editor, args, prompt: prompt, model: model)
@@ -27,6 +28,26 @@ extension ToolExecutor {
             throw ToolError("Text generation is not wired through the generate tool.")
         case .lottie:
             throw ToolError("Lottie animations aren't generated through this tool.")
+        }
+    }
+
+    /// The saved default for `task`, but only if it's still enabled and present in `candidates`.
+    private func enabledDefault(_ task: ModelPreferences.ModelTask, in candidates: [String]) -> String? {
+        guard let id = ModelPreferences.shared.defaultModel(for: task),
+              candidates.contains(id), ModelPreferences.shared.isEnabled(id) else { return nil }
+        return id
+    }
+
+    /// Comma-joined enabled ids, for "available models" error messages.
+    private func enabledIds(_ ids: [String]) -> String {
+        let enabled = ids.filter { ModelPreferences.shared.isEnabled($0) }
+        return enabled.isEmpty ? "(none enabled — turn some on in Settings → Models)" : enabled.joined(separator: ", ")
+    }
+
+    /// Rejects a model the user has turned off in Settings → Models.
+    private func ensureEnabled(_ id: String, kind: String) throws {
+        guard ModelPreferences.shared.isEnabled(id) else {
+            throw ToolError("Model '\(id)' is turned off in Settings → Models. Pick an enabled \(kind) model (see list_models) or ask the user to turn it back on.")
         }
     }
 
@@ -45,7 +66,7 @@ extension ToolExecutor {
             imageRefs.append(try asset(id, editor: editor, label: "Reference image"))
         }
 
-        if let err = model.validate(duration: 0, aspectRatio: "", resolution: nil) {
+        if let err = model.validate(duration: 0, aspectRatio: "", resolution: nil, validateDuration: false) {
             throw ToolError(err)
         }
         let inputAssets = VideoGenerationSubmission.InputAssets(sourceVideo: sourceAsset, imageRefs: imageRefs)
@@ -151,15 +172,18 @@ extension ToolExecutor {
     ) throws -> ToolResult {
         guard !prompt.isEmpty else { throw ToolError("Empty prompt") }
         guard let modelId = args.string("model")
-            ?? ModelPreferences.shared.defaultModel(for: .image)
-            ?? ImageModelConfig.allModels.first?.id else {
+            ?? enabledDefault(.image, in: ImageModelConfig.allModels.map(\.id))
+            ?? ImageModelConfig.allModels.first(where: { ModelPreferences.shared.isEnabled($0.id) })?.id else {
             throw ToolError("Model catalog not loaded yet. Try again in a moment.")
         }
         guard let model = ImageModelConfig.allModels.first(where: { $0.id == modelId }) else {
-            throw ToolError("Unknown model '\(modelId)'. Available: \(ImageModelConfig.allModels.map(\.id).joined(separator: ", "))")
+            throw ToolError("Unknown model '\(modelId)'. Available: \(enabledIds(ImageModelConfig.allModels.map(\.id)))")
         }
+        try ensureEnabled(model.id, kind: "image")
         let aspectRatio = args.string("aspectRatio") ?? model.aspectRatios.first ?? ""
-        let resolution = args.string("resolution") ?? model.resolutions?.first
+        // Default agent-initiated stills to the cheapest resolution; the user can
+        // request a higher resolution explicitly or upscale the result afterward.
+        let resolution = args.string("resolution") ?? Self.cheapestResolution(model)
         let quality = args.string("quality") ?? model.qualities?.last
         let refIds = args.stringArray("referenceMediaRefs")
         if let err = model.validate(
@@ -195,18 +219,34 @@ extension ToolExecutor {
         return .ok("Generation started. Placeholder asset ID: \(placeholderId). Model: \(model.displayName), aspect: \(aspectRatio)")
     }
 
+    /// Lowest-resolution option a model offers, so chat-driven generations stay cheap.
+    /// Handles WxH IDs ("3840x2160") and tier labels ("1K", "1080p").
+    static func cheapestResolution(_ model: ImageModelConfig) -> String? {
+        guard let resolutions = model.resolutions, !resolutions.isEmpty else { return nil }
+        return resolutions.min { resolutionRank($0) < resolutionRank($1) }
+    }
+
+    private static func resolutionRank(_ id: String) -> Int {
+        if let (w, h) = ImageModelConfig.parseWxH(id) { return max(w, h) }
+        let lower = id.lowercased()
+        if lower.hasSuffix("k"), let n = Int(lower.dropLast()) { return n * 1024 }
+        if lower.hasSuffix("p"), let n = Int(lower.dropLast()) { return n }
+        return .max
+    }
+
     func generateAudio(_ editor: EditorViewModel, _ args: [String: Any]) async throws -> ToolResult {
         guard AccountService.shared.hasVeniceKey else {
             throw ToolError("Generation requires a Venice API key. Tell the user to add it in Settings.")
         }
         guard let modelId = args.string("model")
-            ?? ModelPreferences.shared.defaultModel(for: .audio)
-            ?? AudioModelConfig.allModels.first?.id else {
+            ?? enabledDefault(.audio, in: AudioModelConfig.allModels.map(\.id))
+            ?? AudioModelConfig.allModels.first(where: { ModelPreferences.shared.isEnabled($0.id) })?.id else {
             throw ToolError("Model catalog not loaded yet. Try again in a moment.")
         }
         guard let model = AudioModelConfig.allModels.first(where: { $0.id == modelId }) else {
-            throw ToolError("Unknown model '\(modelId)'. Available: \(AudioModelConfig.allModels.map(\.id).joined(separator: ", "))")
+            throw ToolError("Unknown model '\(modelId)'. Available: \(enabledIds(AudioModelConfig.allModels.map(\.id)))")
         }
+        try ensureEnabled(model.id, kind: "audio")
 
         let prompt = (args.string("prompt") ?? "").trimmingCharacters(in: .whitespaces)
         let acceptsVideo = model.inputs.contains(.video)
@@ -251,7 +291,8 @@ extension ToolExecutor {
         }
 
         let instrumental = args.bool("instrumental") ?? false
-        let durationSeconds = args.int("duration") ?? spanSeconds.map { max(1, Int($0.rounded())) }
+        let requestedDuration = args.int("duration") ?? spanSeconds.map { max(1, Int($0.rounded())) }
+        let durationSeconds = model.reconciledDuration(requestedDuration)
         let params = AudioGenerationParams(
             prompt: prompt,
             voice: model.voices != nil ? (args.string("voice") ?? model.defaultVoice) : nil,
@@ -308,7 +349,8 @@ extension ToolExecutor {
             editor: editor
         )
         let scored = videoURL != nil ? " (scored from video)" : ""
-        return .ok("Generation started. Placeholder asset ID: \(placeholderId). Model: \(model.displayName), \(model.category.label)\(scored). Place it with add_clips.")
+        let lengthNote = durationSeconds.map { ", \($0)s" } ?? ""
+        return .ok("Generation started. Placeholder asset ID: \(placeholderId). Model: \(model.displayName), \(model.category.label)\(lengthNote)\(scored). Place it with add_clips.")
     }
 
     func editImage(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
@@ -367,7 +409,7 @@ extension ToolExecutor {
             name: args.string("name") ?? "Edited \(base.name)",
             folderId: folderId,
             buildParams: { uploaded in
-                .imageMultiEdit(ImageMultiEditParams(sourceURLs: uploaded, prompt: prompt))
+                .imageMultiEdit(ImageMultiEditParams(sourceURLs: uploaded, prompt: prompt, aspectRatio: nil))
             },
             snapshotRefs: { input, uploaded in
                 input.imageURLs = uploaded.isEmpty ? nil : uploaded
@@ -398,8 +440,8 @@ extension ToolExecutor {
     func upscaleMedia(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         let mediaRef = try args.requireString("mediaRef")
         let asset = try asset(mediaRef, editor: editor)
-        guard asset.type == .video || asset.type == .image else {
-            throw ToolError("Upscale supports video and image assets only (got \(asset.type.rawValue))")
+        guard asset.type == .image else {
+            throw ToolError("Upscale supports image assets only (got \(asset.type.rawValue))")
         }
         guard AccountService.shared.hasVeniceKey else {
             throw ToolError("Upscale requires a Venice API key. Tell the user to add it in Settings.")
@@ -409,13 +451,14 @@ extension ToolExecutor {
         let model: UpscaleModelConfig
         if let requested = args.string("model") {
             guard let match = available.first(where: { $0.id == requested }) else {
-                let ids = available.map(\.id).joined(separator: ", ")
+                let ids = enabledIds(available.map(\.id))
                 throw ToolError("Model '\(requested)' does not support \(asset.type.rawValue). Available: \(ids)")
             }
+            try ensureEnabled(match.id, kind: "upscale")
             model = match
         } else {
-            guard let first = available.first else {
-                throw ToolError("No upscaler available for \(asset.type.rawValue)")
+            guard let first = available.first(where: { ModelPreferences.shared.isEnabled($0.id) }) else {
+                throw ToolError("No enabled upscaler for \(asset.type.rawValue). Turn one on in Settings → Models.")
             }
             model = first
         }
@@ -454,18 +497,19 @@ extension ToolExecutor {
 
     func listModels(_ args: [String: Any]) -> ToolResult {
         let filter = args.string("type")
+        let prefs = ModelPreferences.shared
         var out: [[String: Any]] = []
         if filter == nil || filter == "video" {
-            out += VideoModelConfig.allModels.map { Self.videoModelInfo($0, includeType: true) }
+            out += VideoModelConfig.allModels.filter { prefs.isEnabled($0.id) }.map { Self.videoModelInfo($0, includeType: true) }
         }
         if filter == nil || filter == "image" {
-            out += ImageModelConfig.allModels.map { Self.imageModelInfo($0, includeType: true) }
+            out += ImageModelConfig.allModels.filter { prefs.isEnabled($0.id) }.map { Self.imageModelInfo($0, includeType: true) }
         }
         if filter == nil || filter == "audio" {
-            out += AudioModelConfig.allModels.map { Self.audioModelInfo($0) }
+            out += AudioModelConfig.allModels.filter { prefs.isEnabled($0.id) }.map { Self.audioModelInfo($0) }
         }
         if filter == nil || filter == "upscale" {
-            out += UpscaleModelConfig.allModels.map { Self.upscaleModelInfo($0) }
+            out += UpscaleModelConfig.allModels.filter { prefs.isEnabled($0.id) }.map { Self.upscaleModelInfo($0) }
         }
         if filter == nil || filter == "edit" {
             out += ModelCatalog.shared.editModels.map { m -> [String: Any] in

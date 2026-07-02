@@ -4,17 +4,36 @@ struct MediaManifest: Codable, Sendable, Equatable {
     var version: Int = 2
     var entries: [MediaManifestEntry] = []
     var folders: [MediaFolder] = []
+    var documents: [ProjectDocument] = []
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
         entries = try c.decodeIfPresent([MediaManifestEntry].self, forKey: .entries) ?? []
         folders = try c.decodeIfPresent([MediaFolder].self, forKey: .folders) ?? []
+        documents = try c.decodeIfPresent([ProjectDocument].self, forKey: .documents) ?? []
     }
 
     init() {}
 
-    private enum CodingKeys: String, CodingKey { case version, entries, folders }
+    private enum CodingKeys: String, CodingKey { case version, entries, folders, documents }
+}
+
+/// A markdown document authored in the project (scripts, storyboards, shot lists).
+/// Stored in the manifest so it persists and travels with the project; also mirrored
+/// as a real `.md` file in the media directory for external editing.
+struct ProjectDocument: Codable, Sendable, Equatable, Identifiable {
+    let id: String
+    var name: String
+    var content: String
+    var updatedAt: Date
+
+    init(id: String = UUID().uuidString, name: String, content: String, updatedAt: Date = Date()) {
+        self.id = id
+        self.name = name
+        self.content = content
+        self.updatedAt = updatedAt
+    }
 }
 
 struct MediaManifestEntry: Codable, Sendable, Equatable, Identifiable {
@@ -67,4 +86,32 @@ struct GenerationInput: Codable, Sendable, Equatable {
 enum MediaSource: Codable, Sendable, Equatable {
     case external(absolutePath: String)
     case project(relativePath: String)
+
+    var basename: String {
+        switch self {
+        case .external(let p): return (p as NSString).lastPathComponent
+        case .project(let p): return (p as NSString).lastPathComponent
+        }
+    }
+
+    /// Classify a file URL relative to the project package. A file that physically
+    /// lives inside the project is stored relative so the project stays portable
+    /// (survives moves/renames); anything else is stored as an absolute path.
+    static func make(for url: URL, projectURL: URL?) -> MediaSource {
+        if let projectURL, let relative = relativePath(of: url, under: projectURL) {
+            return .project(relativePath: relative)
+        }
+        return .external(absolutePath: url.standardizedFileURL.path)
+    }
+
+    /// Path of `url` relative to `base`, or nil when `url` is not inside `base`.
+    /// Normalizes symlinks so `/var` vs `/private/var` (and `~`) don't misclassify
+    /// an in-project file as external.
+    static func relativePath(of url: URL, under base: URL) -> String? {
+        let baseParts = base.standardizedFileURL.resolvingSymlinksInPath().pathComponents
+        let urlParts = url.standardizedFileURL.resolvingSymlinksInPath().pathComponents
+        guard urlParts.count > baseParts.count,
+              Array(urlParts.prefix(baseParts.count)) == baseParts else { return nil }
+        return urlParts.dropFirst(baseParts.count).joined(separator: "/")
+    }
 }

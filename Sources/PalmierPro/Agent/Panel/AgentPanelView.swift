@@ -111,6 +111,10 @@ struct AgentPanelView: View {
 
     @State private var showHistory = false
     @State private var isScrolledFromBottom = false
+    /// Flipped once after the message list appears to force the `LazyVStack` to
+    /// re-run layout — works around the SwiftUI `ScrollView` + `LazyVStack` bug
+    /// (rdar FB9747151) where content renders blank until the first user scroll.
+    @State private var layoutPass = false
 
     private var historyButton: some View {
         Button { showHistory.toggle() } label: {
@@ -159,31 +163,14 @@ struct AgentPanelView: View {
     }
 
     @State private var characterCatalog = CharacterCatalog.shared
+    @State private var showPersonaPicker = false
 
     @ViewBuilder
     private var personaPicker: some View {
         if service.hasApiKey {
-            Menu {
-                Button {
-                    service.selectedCharacterSlug = nil
-                } label: {
-                    Label("No persona", systemImage: service.selectedCharacterSlug == nil ? "checkmark" : "")
-                }
-                if characterCatalog.isLoading {
-                    Text("Loading personas…")
-                } else if !characterCatalog.characters.isEmpty {
-                    Divider()
-                    ForEach(characterCatalog.characters) { character in
-                        Button {
-                            service.selectedCharacterSlug = character.slug
-                        } label: {
-                            Label(
-                                character.name,
-                                systemImage: service.selectedCharacterSlug == character.slug ? "checkmark" : ""
-                            )
-                        }
-                    }
-                }
+            @Bindable var service = editor.agentService
+            Button {
+                showPersonaPicker.toggle()
             } label: {
                 HStack(spacing: AppTheme.Spacing.xs) {
                     Image(systemName: "theatermasks")
@@ -195,26 +182,22 @@ struct AgentPanelView: View {
                         .lineLimit(1)
                 }
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
+            .buttonStyle(.plain)
+            .focusable(false)
             .fixedSize()
             .help("Apply a Venice character persona to the agent")
+            .popover(isPresented: $showPersonaPicker, arrowEdge: .top) {
+                PersonaPicker(
+                    selectedSlug: $service.selectedCharacterSlug,
+                    catalog: characterCatalog
+                )
+            }
         }
     }
 
     private var personaLabel: String {
         guard let slug = service.selectedCharacterSlug else { return "Persona" }
         return characterCatalog.name(forSlug: slug) ?? slug
-    }
-
-    @ViewBuilder
-    private var byokIndicator: some View {
-        if service.hasApiKey {
-            Text("Venice")
-                .font(.system(size: AppTheme.FontSize.xs).italic())
-                .foregroundStyle(AppTheme.Text.tertiaryColor)
-                .help("Streaming through your Venice API key")
-        }
     }
 
     private var toolResults: [String: ToolRunResult] {
@@ -249,9 +232,16 @@ struct AgentPanelView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
                     let results = toolResults
+                    let streaming = service.isStreaming
+                    let lastId = service.messages.last?.id
                     ForEach(service.messages) { msg in
-                        AgentMessageView(message: msg, toolResults: results)
-                            .id(msg.id)
+                        AgentMessageView(
+                            message: msg,
+                            toolResults: results,
+                            isStreaming: streaming && msg.role == .assistant && msg.id == lastId,
+                            selectable: !streaming
+                        )
+                        .id(msg.id)
                     }
                     if service.isStreaming {
                         ThinkingDots().id("streaming-indicator")
@@ -264,6 +254,7 @@ struct AgentPanelView: View {
                 .padding(.bottom, AppTheme.Spacing.smMd)
                 .frame(maxWidth: Layout.chatColumnMax)
                 .frame(maxWidth: .infinity)
+                .id(layoutPass)
             }
             .scrollIndicators(.never)
             .scrollEdgeEffectStyle(.soft, for: .bottom)
@@ -275,6 +266,19 @@ struct AgentPanelView: View {
             }
             .onChange(of: service.messages.count) { _, _ in scrollToBottom(proxy) }
             .onChange(of: service.isStreaming) { _, _ in scrollToBottom(proxy) }
+            .onChange(of: service.currentSessionId) { _, _ in
+                pinToBottom(proxy)
+            }
+            .onAppear {
+                pinToBottom(proxy)
+                if !layoutPass {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(16))
+                        layoutPass = true
+                        pinToBottom(proxy)
+                    }
+                }
+            }
             .overlay(alignment: .bottomTrailing) {
                 if isScrolledFromBottom {
                     scrollToBottomButton(proxy: proxy)
@@ -379,15 +383,28 @@ struct AgentPanelView: View {
         .font(.system(size: AppTheme.FontSize.md, weight: .medium))
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        if service.isStreaming {
-            withAnimation(.easeOut(duration: 0.15)) {
-                proxy.scrollTo("streaming-indicator", anchor: .bottom)
+    /// Jumps to the latest message when a conversation is first shown or
+    /// switched. The `LazyVStack` lays out top-down, so the bottom row isn't
+    /// positioned on the first pass — re-pin across a few frames as rows render.
+    private func pinToBottom(_ proxy: ScrollViewProxy) {
+        scrollToBottom(proxy, animated: false)
+        Task { @MainActor in
+            for _ in 0..<5 {
+                try? await Task.sleep(for: .milliseconds(16))
+                scrollToBottom(proxy, animated: false)
             }
-        } else if let last = service.messages.last {
-            withAnimation(.easeOut(duration: 0.15)) {
-                proxy.scrollTo(last.id, anchor: .bottom)
-            }
+        }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        let target: AnyHashable? = service.isStreaming
+            ? "streaming-indicator"
+            : service.messages.last?.id
+        guard let target else { return }
+        if animated {
+            withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(target, anchor: .bottom) }
+        } else {
+            proxy.scrollTo(target, anchor: .bottom)
         }
     }
 
@@ -407,9 +424,14 @@ struct AgentPanelView: View {
             ) {
                 modelPicker
                 personaPicker
-                byokIndicator
             }
-            .onAppear { characterCatalog.loadIfNeeded() }
+            .onAppear {
+                characterCatalog.loadIfNeeded()
+                if let slug = service.selectedCharacterSlug { characterCatalog.ensureName(forSlug: slug) }
+            }
+            .onChange(of: service.selectedCharacterSlug) { _, slug in
+                if let slug { characterCatalog.ensureName(forSlug: slug) }
+            }
         }
         .padding(.horizontal, AppTheme.Spacing.mdLg)
         .padding(.bottom, AppTheme.Spacing.mdLg)

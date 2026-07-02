@@ -163,12 +163,27 @@ struct VeniceAPI: Sendable {
         guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
             return String(data: data, encoding: .utf8)?.prefix(300).description ?? ""
         }
-        if let error = obj["error"] as? String { return error }
-        if let error = obj["error"] as? [String: Any] {
-            if let message = error["message"] as? String { return message }
+        var base = ""
+        if let error = obj["error"] as? String { base = error }
+        else if let error = obj["error"] as? [String: Any], let message = error["message"] as? String { base = message }
+        else if let message = obj["message"] as? String { base = message }
+        else if let detail = obj["detail"] as? String { base = detail }
+        // Venice returns Zod-style field diagnostics under `issues`; surface them so
+        // the message is actionable instead of a generic "Invalid request parameters".
+        let issues = (obj["issues"] as? [[String: Any]])?.compactMap { issue -> String? in
+            let msg = issue["message"] as? String
+            let path = (issue["path"] as? [Any])?.map { "\($0)" }.joined(separator: ".")
+            switch (path, msg) {
+            case let (p?, m?) where !p.isEmpty: return "\(p): \(m)"
+            case let (_, m?): return m
+            default: return nil
+            }
+        } ?? []
+        if !issues.isEmpty {
+            let joined = Array(Set(issues)).sorted().joined(separator: " | ")
+            base = base.isEmpty ? joined : "\(base) (\(joined))"
         }
-        if let message = obj["message"] as? String { return message }
-        if let detail = obj["detail"] as? String { return detail }
-        return String(data: data, encoding: .utf8)?.prefix(300).description ?? ""
+        if base.isEmpty { base = String(data: data, encoding: .utf8)?.prefix(300).description ?? "" }
+        return base
     }
 }

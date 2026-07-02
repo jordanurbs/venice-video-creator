@@ -29,7 +29,7 @@ enum CostEstimator {
             return ceilCredits(price * count)
         }
         // Quality-only lookup when the model varies on quality but not resolution.
-        if model.qualities != nil, let q = quality, let price = model.creditsPerImage[q] {
+        if model.qualities?.isEmpty == false, let q = quality, let price = model.creditsPerImage[q] {
             return ceilCredits(price * count)
         }
         guard let rate = resolvedRate(model.creditsPerImage, key: resolution) else { return nil }
@@ -80,7 +80,7 @@ enum CostEstimator {
                 numImages: genInput.numImages ?? 1
             )
         case .audio(let m):
-            let duration = (m.durations != nil || m.inputs.contains(.video)) ? genInput.duration : nil
+            let duration = (m.durations?.isEmpty == false || m.inputs.contains(.video)) ? genInput.duration : nil
             return audioCost(model: m, prompt: genInput.prompt, durationSeconds: duration)
         case .upscale(let m):
             return upscaleCost(model: m, durationSeconds: genInput.duration)

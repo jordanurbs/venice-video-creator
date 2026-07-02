@@ -9,6 +9,7 @@ struct AssetThumbnailView: View {
     @FocusState private var isRenameFieldFocused: Bool
     @State private var renameDraft = ""
     @State private var isHovering = false
+    @State private var thumbnailWidth: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
@@ -27,6 +28,19 @@ struct AssetThumbnailView: View {
             )
             .onHover { hovering in
                 withAnimation(.easeOut(duration: 0.12)) { isHovering = hovering }
+            }
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.width
+            } action: { width in
+                thumbnailWidth = width
+            }
+            .onContinuousHover(coordinateSpace: .local) { phase in
+                switch phase {
+                case .active(let location):
+                    scrubPreview(at: location.x)
+                case .ended:
+                    editor.endLibraryScrubPreview(for: asset.id)
+                }
             }
 
             if isOnTimeline {
@@ -313,6 +327,10 @@ struct AssetThumbnailView: View {
         (asset.type == .video || asset.type == .audio) && asset.duration > 0
     }
 
+    private var canScrubPreview: Bool {
+        asset.type == .video && asset.duration > 0 && !asset.isGenerating && !isMissing && !isSwapPickMode
+    }
+
     private var isOnTimeline: Bool {
         editor.timeline.tracks.contains { track in
             track.clips.contains { $0.mediaRef == asset.id }
@@ -332,6 +350,11 @@ struct AssetThumbnailView: View {
             editor.renameMediaAsset(id: asset.id, name: trimmed)
         }
         isRenaming = false
+    }
+
+    private func scrubPreview(at x: CGFloat) {
+        guard canScrubPreview, thumbnailWidth > 0 else { return }
+        editor.scrubLibraryPreview(for: asset, fraction: x / thumbnailWidth)
     }
 
     private func handleTap() {

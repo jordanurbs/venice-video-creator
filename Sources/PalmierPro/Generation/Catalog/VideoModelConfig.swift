@@ -4,6 +4,19 @@ func unsupportedValue(model displayName: String, field: String, value: String, a
     "\(displayName) does not support \(field) '\(value)'. Valid: \(allowed.joined(separator: ", "))."
 }
 
+/// Renders a duration ladder as natural language: [5] → "5s", [5,10] → "5s or 10s",
+/// [5,10,15] → "5s, 10s, or 15s".
+func durationPhrase(_ durations: [Int]) -> String {
+    let labels = durations.map { "\($0)s" }
+    switch labels.count {
+    case 0: return ""
+    case 1: return labels[0]
+    case 2: return "\(labels[0]) or \(labels[1])"
+    default:
+        return labels.dropLast().joined(separator: ", ") + ", or " + labels[labels.count - 1]
+    }
+}
+
 struct VideoModelConfig: Identifiable, Sendable {
     @MainActor
     static var allModels: [VideoModelConfig] { ModelCatalog.shared.video }
@@ -31,6 +44,7 @@ struct VideoModelConfig: Identifiable, Sendable {
     var referenceTagNoun: String { caps.referenceTagNoun }
     var requiresSourceVideo: Bool { caps.requiresSourceVideo }
     var requiresReferenceImage: Bool { caps.requiresReferenceImage }
+    var audioConfigurable: Bool { caps.audioConfigurable }
 
     var supportsReferences: Bool {
         maxReferenceImages > 0 || maxReferenceVideos > 0 || maxReferenceAudios > 0
@@ -47,18 +61,38 @@ struct VideoModelConfig: Identifiable, Sendable {
         return dict[""]
     }
 
-    func validate(duration: Int, aspectRatio: String, resolution: String?) -> String? {
-        if !durations.isEmpty, !durations.contains(duration) {
-            return unsupportedValue(
-                model: displayName, field: "duration",
-                value: "\(duration)s", allowed: durations.map { "\($0)s" }
-            )
+    func validate(
+        duration: Int,
+        aspectRatio: String,
+        resolution: String?,
+        validateDuration: Bool = true
+    ) -> String? {
+        if validateDuration, durations.isEmpty, duration > 0 {
+            return "\(displayName) does not support duration."
+        }
+        if validateDuration, !durations.isEmpty, !durations.contains(duration) {
+            // Many video models accept only a stepped ladder (e.g. Reference→Video
+            // models at 5s/10s). List the rungs and point at the nearest one.
+            let allowed = durations.sorted()
+            var message = "\(displayName) supports \(durationPhrase(allowed)), not \(duration)s."
+            if let nearest = allowed.min(by: { abs($0 - duration) < abs($1 - duration) }) {
+                message += " Try \(nearest)s."
+            }
+            return message
+        }
+        if aspectRatios.isEmpty, !aspectRatio.isEmpty {
+            return "\(displayName) does not support aspect ratio."
         }
         if !aspectRatios.isEmpty, !aspectRatio.isEmpty, !aspectRatios.contains(aspectRatio) {
             return unsupportedValue(model: displayName, field: "aspect ratio", value: aspectRatio, allowed: aspectRatios)
         }
-        if let allowed = resolutions, let r = resolution, !r.isEmpty, !allowed.contains(r) {
-            return unsupportedValue(model: displayName, field: "resolution", value: r, allowed: allowed)
+        if let r = resolution, !r.isEmpty {
+            guard let allowed = resolutions, !allowed.isEmpty else {
+                return "\(displayName) does not support resolution."
+            }
+            if !allowed.contains(r) {
+                return unsupportedValue(model: displayName, field: "resolution", value: r, allowed: allowed)
+            }
         }
         return nil
     }

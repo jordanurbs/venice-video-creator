@@ -72,6 +72,14 @@ struct AIEditTab: View {
                             title: "Create Video",
                             description: "Use as first frame or reference"
                         )
+                    } else {
+                        actionRow(
+                            action: .lastFrameToVideo,
+                            icon: "video.badge.plus",
+                            title: "Create Video from Last Frame",
+                            description: "Screenshot the final frame and use it as a starting frame",
+                            triggerTitle: "Create"
+                        )
                     }
                 }
 
@@ -355,13 +363,14 @@ struct AIEditTab: View {
                 .disabled(!isEnabled || !account.aiAllowed)
                 .help(account.aiAllowed ? "" : "Add your Venice API key to edit")
             }
-        case .edit, .rerun:
+        case .edit, .rerun, .lastFrameToVideo:
             Button(title) {
                 present(action)
             }
             .buttonStyle(.capsule(.secondary))
             .controlSize(.small)
-            .disabled(!isEnabled)
+            .disabled(!isEnabled || (action == .lastFrameToVideo && !account.aiAllowed))
+            .help(action == .lastFrameToVideo && !account.aiAllowed ? "Add your Venice API key to generate" : "")
         }
     }
 
@@ -410,7 +419,7 @@ struct AIEditTab: View {
     }
 
     private func sendToVideo(asReference: Bool) {
-        guard let stored = EditSubmitter.createVideoSeed(for: asset, asReference: asReference) else { return }
+        guard let stored = EditSubmitter.createVideoSeed(for: asset, asReference: asReference, preferredModelId: editor.lastUsedVideoModelId) else { return }
         seedPanel(stored: stored, trimmed: nil)
     }
 
@@ -418,8 +427,10 @@ struct AIEditTab: View {
         switch action {
         case .upscale, .createVideo, .editImage, .removeBackground: break // handled via menu/button
         case .edit:
-            guard let stored = EditSubmitter.editSeed(for: asset) else { return }
+            guard let stored = EditSubmitter.editSeed(for: asset, preferredModelId: editor.lastUsedVideoModelId) else { return }
             seedPanel(stored: stored, trimmed: trimmedSourceIfEnabled())
+        case .lastFrameToVideo:
+            editor.createVideoFromLastFrame(asset: asset, clipId: clipId)
         case .generateMusic:
             presentVideoAudio(kind: .music)
         case .generateSFX:

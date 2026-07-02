@@ -23,14 +23,18 @@ struct ImageMultiEditParams: Encodable, Sendable {
     /// Source images (base first), as base64 strings or `data:`/`https:` URLs.
     let sourceURLs: [String]
     let prompt: String
+    /// Requested output aspect ratio. Venice returns a square image, so this is used
+    /// to center-crop the result back to the intended shape (see `ImageAspectRestorer`).
+    let aspectRatio: String?
 
-    enum CodingKeys: String, CodingKey { case kind, sourceURLs, prompt }
+    enum CodingKeys: String, CodingKey { case kind, sourceURLs, prompt, aspectRatio }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode("imageMultiEdit", forKey: .kind)
         try c.encode(sourceURLs, forKey: .sourceURLs)
         try c.encode(prompt, forKey: .prompt)
+        try c.encodeIfPresent(aspectRatio, forKey: .aspectRatio)
     }
 }
 

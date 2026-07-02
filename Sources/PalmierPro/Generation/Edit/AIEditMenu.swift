@@ -37,6 +37,11 @@ struct AIEditMenu: View {
                         Button("Set as reference") { createVideo(asReference: true) }
                     }
                 }
+                if availableActions.contains(.lastFrameToVideo) {
+                    Button("Create Video from Last Frame") {
+                        editor.createVideoFromLastFrame(asset: asset, clipId: nil)
+                    }
+                }
             }
         }
     }
@@ -55,7 +60,7 @@ struct AIEditMenu: View {
     }
 
     private func edit() {
-        guard let stored = EditSubmitter.editSeed(for: asset) else { return }
+        guard let stored = EditSubmitter.editSeed(for: asset, preferredModelId: editor.lastUsedVideoModelId) else { return }
         editor.seedGenerationPanel(asset: asset, stored: stored)
     }
 
@@ -74,7 +79,7 @@ struct AIEditMenu: View {
     }
 
     private func createVideo(asReference: Bool) {
-        guard let stored = EditSubmitter.createVideoSeed(for: asset, asReference: asReference) else { return }
+        guard let stored = EditSubmitter.createVideoSeed(for: asset, asReference: asReference, preferredModelId: editor.lastUsedVideoModelId) else { return }
         editor.seedGenerationPanel(asset: asset, stored: stored)
     }
 }

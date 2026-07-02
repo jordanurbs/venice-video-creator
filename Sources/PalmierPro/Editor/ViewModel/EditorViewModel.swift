@@ -87,12 +87,16 @@ final class EditorViewModel {
     var pendingEditAudioPlacement: PendingAudioPlacement?
     /// Clip ids currently awaiting an AI-generated replacement.
     var pendingReplacements: Set<String> = []
+    /// Last video model submitted this session; falls back to the most recent
+    /// generated asset's model so seeds don't reset to the top of the list.
+    @ObservationIgnored var lastUsedVideoModelIdOverride: String?
     var cropEditingActive: Bool = false
     var cropAspectLock: CropAspectLock = .free
     var previewTabs: [PreviewTab] = [.timeline]
     var activePreviewTabId: String = PreviewTab.timeline.id
     var previewTabHistory: [String] = [PreviewTab.timeline.id]
     var previewTabHistoryIndex: Int = 0
+    var libraryScrubPreview: LibraryScrubPreview?
     var sourcePlayheadFrame: Int = 0 {
         didSet { playheadState.sourceFrame = sourcePlayheadFrame }
     }
@@ -209,6 +213,10 @@ final class EditorViewModel {
 
     weak var undoManager: UndoManager?
     var isDocumentEdited: Bool = false
+
+    /// Marks the backing document dirty for changes that don't register undo
+    /// (e.g. media generated into the library). Ensures `media.json` autosaves.
+    @ObservationIgnored var onProjectContentChanged: (() -> Void)?
 
     func telemetrySnapshot() -> [String: Any] {
         var mediaCounts: [String: Int] = [:]

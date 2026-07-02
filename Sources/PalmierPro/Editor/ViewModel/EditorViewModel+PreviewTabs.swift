@@ -1,11 +1,23 @@
 import AppKit
 
+struct LibraryScrubPreview: Equatable {
+    let tab: PreviewTab
+    let restoreTabId: String
+    let restoreSourceFrame: Int
+
+    var assetId: String {
+        guard case .mediaAsset(let id, _, _) = tab else { return "" }
+        return id
+    }
+}
+
 /// Preview-tab management: the timeline tab plus any media-asset source tabs
 /// opened from the media library. Also hosts preview-specific computed props.
 extension EditorViewModel {
 
     var activePreviewTab: PreviewTab {
-        previewTabs.first { $0.id == activePreviewTabId } ?? .timeline
+        if let libraryScrubPreview { return libraryScrubPreview.tab }
+        return previewTabs.first { $0.id == activePreviewTabId } ?? .timeline
     }
 
     /// Minimum zoom scale that fits the entire timeline with end padding.
@@ -30,12 +42,14 @@ extension EditorViewModel {
     }
 
     func selectMediaAsset(_ asset: MediaAsset, atSourceFrame frame: Int = 0) {
+        cancelLibraryScrubPreview()
         openPreviewTab(for: asset, atSourceFrame: frame)
         syncSelectionToActiveTab()
         showMediaPanelMediaTab()
     }
 
     func openPreviewTab(for asset: MediaAsset, atSourceFrame frame: Int = 0) {
+        cancelLibraryScrubPreview()
         let tab = PreviewTab.mediaAsset(id: asset.id, name: asset.name, type: asset.type)
         if !previewTabs.contains(where: { $0.id == tab.id }) {
             previewTabs.append(tab)
@@ -47,6 +61,7 @@ extension EditorViewModel {
     }
 
     func closePreviewTab(id: String) {
+        cancelLibraryScrubPreview()
         guard id != PreviewTab.timeline.id else { return }
         previewTabs.removeAll { $0.id == id }
         previewTabHistory.removeAll { $0 == id }
@@ -62,6 +77,7 @@ extension EditorViewModel {
     }
 
     func selectPreviewTab(id: String) {
+        cancelLibraryScrubPreview()
         guard previewTabs.contains(where: { $0.id == id }),
               activePreviewTabId != id else { return }
         activePreviewTabId = id
@@ -79,6 +95,7 @@ extension EditorViewModel {
     func goForwardPreviewTab() { stepPreviewHistory(1) }
 
     func closeAllPreviewTabs() {
+        cancelLibraryScrubPreview()
         previewTabs = [.timeline]
         activePreviewTabId = PreviewTab.timeline.id
         previewTabHistory = [PreviewTab.timeline.id]
@@ -86,7 +103,53 @@ extension EditorViewModel {
         videoEngine?.activateTab(.timeline)
     }
 
+    func scrubLibraryPreview(for asset: MediaAsset, fraction: CGFloat) {
+        guard asset.type == .video, asset.duration > 0, !asset.isGenerating, !isMediaOffline(asset.id) else { return }
+
+        let tab = PreviewTab.mediaAsset(id: asset.id, name: asset.name, type: asset.type)
+        let durationFrames = secondsToFrame(seconds: asset.duration, fps: timeline.fps)
+        let clampedFraction = min(max(0, fraction), 1)
+        let frame = min(max(0, Int(CGFloat(max(0, durationFrames)) * clampedFraction)), max(0, durationFrames))
+
+        if libraryScrubPreview?.assetId != asset.id {
+            let restoreTabId = libraryScrubPreview?.restoreTabId ?? activePreviewTabId
+            let restoreSourceFrame = libraryScrubPreview?.restoreSourceFrame ?? sourcePlayheadFrame
+            let wasAlreadyShowingAsset = libraryScrubPreview == nil && activePreviewTabId == tab.id
+
+            libraryScrubPreview = LibraryScrubPreview(
+                tab: tab,
+                restoreTabId: restoreTabId,
+                restoreSourceFrame: restoreSourceFrame
+            )
+            sourcePlayheadFrame = frame
+            isScrubbing = true
+            if isPlaying { pause() }
+            if !wasAlreadyShowingAsset {
+                videoEngine?.activateTab(tab)
+            }
+        }
+
+        seekSourceToFrame(frame, mode: .interactiveScrub)
+    }
+
+    func endLibraryScrubPreview(for assetId: String? = nil) {
+        guard let preview = libraryScrubPreview else { return }
+        guard assetId == nil || preview.assetId == assetId else { return }
+
+        sourcePlayheadFrame = preview.restoreSourceFrame
+        libraryScrubPreview = nil
+        isScrubbing = false
+        videoEngine?.activateTab(activePreviewTab)
+    }
+
+    func cancelLibraryScrubPreview() {
+        guard libraryScrubPreview != nil else { return }
+        libraryScrubPreview = nil
+        isScrubbing = false
+    }
+
     private func stepPreviewHistory(_ delta: Int) {
+        cancelLibraryScrubPreview()
         let next = previewTabHistoryIndex + delta
         guard previewTabHistory.indices.contains(next) else { return }
         previewTabHistoryIndex = next

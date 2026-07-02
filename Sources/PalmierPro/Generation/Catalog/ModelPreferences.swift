@@ -36,6 +36,7 @@ final class ModelPreferences {
     private static let disabledKey = "disabledModelIds"
     private static let defaultsKey = "defaultModelIds"
     private static let characterSlugKey = "agentCharacterSlug"
+    private static let seedanceConsentKey = "seedanceConsentGranted"
 
     private(set) var disabledIds: Set<String>
     /// task.rawValue -> model id
@@ -46,11 +47,20 @@ final class ModelPreferences {
         didSet { UserDefaults.standard.set(agentCharacterSlug, forKey: Self.characterSlugKey) }
     }
 
+    /// When true, Seedance video requests auto-attach the `consents.seedance`
+    /// acknowledgement Venice requires for face-bearing media.
+    var seedanceConsentGranted: Bool {
+        didSet { UserDefaults.standard.set(seedanceConsentGranted, forKey: Self.seedanceConsentKey) }
+    }
+
     private init() {
         let stored = UserDefaults.standard.stringArray(forKey: Self.disabledKey) ?? []
         disabledIds = Set(stored)
         defaultIds = (UserDefaults.standard.dictionary(forKey: Self.defaultsKey) as? [String: String]) ?? [:]
         agentCharacterSlug = UserDefaults.standard.string(forKey: Self.characterSlugKey)
+        // Granted by default so Seedance jobs with face-bearing media succeed out of
+        // the box; the user can revoke it in Settings → Models.
+        seedanceConsentGranted = UserDefaults.standard.object(forKey: Self.seedanceConsentKey) as? Bool ?? true
     }
 
     // MARK: - Enable / disable
@@ -62,6 +72,19 @@ final class ModelPreferences {
             disabledIds.remove(id)
         } else {
             disabledIds.insert(id)
+        }
+        UserDefaults.standard.set(Array(disabledIds), forKey: Self.disabledKey)
+    }
+
+    /// True when every id in `ids` is enabled.
+    func allEnabled(_ ids: [String]) -> Bool { ids.allSatisfy(isEnabled) }
+
+    /// Bulk enable/disable, e.g. for a section's master toggle.
+    func setEnabled(_ ids: [String], _ enabled: Bool) {
+        if enabled {
+            disabledIds.subtract(ids)
+        } else {
+            disabledIds.formUnion(ids)
         }
         UserDefaults.standard.set(Array(disabledIds), forKey: Self.disabledKey)
     }

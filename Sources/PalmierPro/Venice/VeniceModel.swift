@@ -6,6 +6,10 @@ struct VeniceTextModel: Sendable, Identifiable, Hashable {
     let displayName: String
     let supportsFunctionCalling: Bool
     let supportsVision: Bool
+    /// Total context window (input) tokens the model accepts, from Venice's spec.
+    var availableContextTokens: Int?
+    /// Max output tokens the model can produce, from Venice's spec.
+    var maxCompletionTokens: Int?
 }
 
 /// A Venice edit-capable image model (`/models?type=inpaint`) used by `/image/edit`.
@@ -52,7 +56,9 @@ enum VeniceModelMapper {
                     id: id,
                     displayName: name,
                     supportsFunctionCalling: capabilities["supportsFunctionCalling"] as? Bool ?? false,
-                    supportsVision: capabilities["supportsVision"] as? Bool ?? false
+                    supportsVision: capabilities["supportsVision"] as? Bool ?? false,
+                    availableContextTokens: spec["availableContextTokens"] as? Int,
+                    maxCompletionTokens: spec["maxCompletionTokens"] as? Int
                 ))
             case "image":
                 catalog.entries.append(imageEntry(id: id, name: name, constraints: constraints, pricing: pricing))
@@ -107,28 +113,41 @@ enum VeniceModelMapper {
         let resolutions = constraints["resolutions"] as? [String]
         let durations = parseDurations(constraints["durations"] as? [String]) 
         let modelType = (constraints["model_type"] as? String) ?? "text-to-video"
-        let isVideoToVideo = modelType == "video"
-        let isImageToVideo = modelType == "image-to-video" || modelType == "reference-to-video"
+        let videoInput = (constraints["video_input"] as? Bool) ?? false
+        let audioConfigurable = (constraints["audio_configurable"] as? Bool) ?? false
+        // Venice's model_type reports "image-to-video" for both image-to-video and
+        // reference-to-video; only the id slug distinguishes them. They route their
+        // image input to different request fields (image_url vs reference_image_urls),
+        // so they must offer different input slots.
+        let isVideoToVideo = modelType == "video" || videoInput
+        let isReferenceToVideo = !isVideoToVideo && id.contains("reference-to-video")
+        let isImageToVideo = !isVideoToVideo && !isReferenceToVideo && modelType == "image-to-video"
+        let needsImageInput = isImageToVideo || isReferenceToVideo
         // Venice exposes the same model under several variants that share a name
         // (text-to-video / image-to-video / reference-to-video). Append the
         // variant so the picker shows distinct, self-explanatory entries.
-        let displayName = "\(name) (\(variantLabel(modelType)))"
+        let variant: String = isVideoToVideo ? "Video→Video"
+            : isReferenceToVideo ? "Reference→Video"
+            : isImageToVideo ? "Image→Video"
+            : "Text→Video"
+        let displayName = "\(name) (\(variant))"
         let caps = VideoCaps(
             durations: durations.isEmpty ? [5] : durations,
             resolutions: resolutions,
             aspectRatios: aspectRatios,
             supportsFirstFrame: isImageToVideo,
             supportsLastFrame: false,
-            maxReferenceImages: isImageToVideo ? 1 : 0,
+            maxReferenceImages: isReferenceToVideo ? 4 : 0,
             maxReferenceVideos: 0,
             maxReferenceAudios: 0,
-            maxTotalReferences: isImageToVideo ? 1 : 0,
+            maxTotalReferences: nil,
             maxCombinedVideoRefSeconds: nil,
             maxCombinedAudioRefSeconds: nil,
             framesAndReferencesExclusive: false,
             referenceTagNoun: "reference",
             requiresSourceVideo: isVideoToVideo,
-            requiresReferenceImage: isImageToVideo
+            requiresReferenceImage: needsImageInput,
+            audioConfigurable: audioConfigurable
         )
         return CatalogEntry(
             id: id, kind: .video, displayName: displayName,
@@ -136,17 +155,6 @@ enum VeniceModelMapper {
             uiCapabilities: .video(caps),
             creditsPerSecond: ["": usdPrice(pricing)]
         )
-    }
-
-    /// Human-readable label for a Venice video model variant.
-    private static func variantLabel(_ modelType: String) -> String {
-        switch modelType {
-        case "text-to-video": return "Text→Video"
-        case "image-to-video": return "Image→Video"
-        case "reference-to-video": return "Reference→Video"
-        case "video": return "Video→Video"
-        default: return modelType
-        }
     }
 
     private static func audioEntry(
@@ -163,6 +171,19 @@ enum VeniceModelMapper {
         let categoryStr: String = isTTSLike ? "tts" : (isSFX ? "sfx" : "music")
         let endpoint = isSpeechEndpoint ? "audio/speech" : "audio/queue"
 
+        // Venice video-to-music / video-to-audio models score a source video.
+        // The slug is the reliable signal, but honor an explicit spec flag too.
+        let constraints = spec["constraints"] as? [String: Any] ?? [:]
+        let declaredInputs = (constraints["inputs"] as? [String]) ?? (spec["inputs"] as? [String]) ?? []
+        let hasVideoInput = !isSpeechEndpoint && (
+            lower.contains("video-to-music") || lower.contains("video to music")
+            || lower.contains("video-to-audio") || lower.contains("video to audio")
+            || (constraints["video_input"] as? Bool ?? false)
+            || (spec["video_input"] as? Bool ?? false)
+            || declaredInputs.contains { $0.lowercased().contains("video") }
+        )
+        let inputs = hasVideoInput ? ["text", "video"] : ["text"]
+
         let caps = AudioCaps(
             category: categoryStr,
             voices: nil,
@@ -172,7 +193,7 @@ enum VeniceModelMapper {
             supportsStyleInstructions: false,
             durations: nil,
             minPromptLength: 1,
-            inputs: ["text"],
+            inputs: inputs,
             promptLabel: categoryStr == "tts" ? "Text to speak"
                 : (categoryStr == "sfx" ? "Describe the sound" : "Describe the music"),
             minSeconds: 1,

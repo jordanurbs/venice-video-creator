@@ -10,7 +10,9 @@ extension EditorViewModel {
             mediaPanelToast = "Can't relink — \"\(newURL.lastPathComponent)\" is \(newType.trackLabel.lowercased()), not \(asset.type.trackLabel.lowercased())."
             return
         }
-        applyRelink(id: id, to: newURL)
+        if applyRelink(id: id, to: newURL) {
+            onProjectContentChanged?()
+        }
         notifyTimelineChanged()
     }
 
@@ -21,23 +23,35 @@ extension EditorViewModel {
         guard !offline.isEmpty else { return (0, 0) }
         let index = fileIndex(in: folder)
         var relinked = 0
+        var changed = false
         for asset in offline {
             guard let match = index[asset.url.lastPathComponent.lowercased()] else { continue }
-            applyRelink(id: asset.id, to: match)
+            changed = applyRelink(id: asset.id, to: match) || changed
             relinked += 1
         }
-        if relinked > 0 { notifyTimelineChanged() }
+        if relinked > 0 {
+            if changed { onProjectContentChanged?() }
+            notifyTimelineChanged()
+        }
         return (relinked, offline.count)
     }
 
-    private func applyRelink(id: String, to newURL: URL) {
-        guard let i = mediaAssets.firstIndex(where: { $0.id == id }) else { return }
+    @discardableResult
+    private func applyRelink(id: String, to newURL: URL) -> Bool {
+        guard let i = mediaAssets.firstIndex(where: { $0.id == id }) else { return false }
+        let oldURL = mediaAssets[i].url
         mediaAssets[i].url = newURL
+        var changed = oldURL.standardizedFileURL != newURL.standardizedFileURL
         if let j = mediaManifest.entries.firstIndex(where: { $0.id == id }) {
-            mediaManifest.entries[j].source = mediaAssets[i].toManifestEntry(projectURL: projectURL).source
+            let source = mediaAssets[i].toManifestEntry(projectURL: projectURL).source
+            if mediaManifest.entries[j].source != source {
+                mediaManifest.entries[j].source = source
+                changed = true
+            }
         }
         let asset = mediaAssets[i]
         Task { await finalizeImportedAsset(asset) }
+        return changed
     }
 
     /// Lowercased filename → URL for regular files under `folder`, first match wins.

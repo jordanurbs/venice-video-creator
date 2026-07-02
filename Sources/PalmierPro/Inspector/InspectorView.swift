@@ -9,16 +9,16 @@ struct InspectorView: View {
         case video = "Video"
         case effects = "Adjust"
         case audio = "Audio"
-        case ai = "AI Edit"
+        case ai = "AI"
     }
 
     enum AssetTab: String, Hashable {
         case details = "Details"
-        case ai = "AI Edit"
+        case ai = "AI"
     }
 
     @State private var preferredTab: ClipTab = .video
-    @State private var preferredAssetTab: AssetTab = .details
+    @State private var preferredAssetTab: AssetTab = .ai
     @State private var transformExpanded = true
     @State var collapsedAdjustSections: Set<String> = ["Curves", "Color Wheels", "Hue Curves", "LUTs", "Effects"]
     @State var collapsedAdjustSubgroups: Set<String> = [
@@ -334,7 +334,7 @@ struct InspectorView: View {
         HStack(spacing: AppTheme.Spacing.md) {
             ForEach(titles, id: \.self) { title in
                 let isActive = selected == title
-                let isAI = title == "AI Edit"
+                let isAI = title == "AI"
                 let foreground: AnyShapeStyle = isAI
                     ? AnyShapeStyle(AppTheme.aiGradient.opacity(isActive ? 1 : 0.6))
                     : AnyShapeStyle(isActive ? AppTheme.Text.primaryColor : AppTheme.Text.tertiaryColor)

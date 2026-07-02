@@ -300,6 +300,9 @@ final class VideoProject: NSDocument {
         editorViewModel.agentService.onSessionsChanged = { [weak self] in
             self?.updateChangeCount(.changeDone)
         }
+        editorViewModel.onProjectContentChanged = { [weak self] in
+            self?.updateChangeCount(.changeDone)
+        }
 
         let editorView = EditorView()
             .environment(editorViewModel)
@@ -358,6 +361,15 @@ final class VideoProject: NSDocument {
             category: "project",
             data: editorViewModel.telemetrySnapshot()
         )
+    }
+
+    /// Presenting the editor must activate the app and make the window key.
+    /// Otherwise SwiftUI's AppKit-backed selectable text (`.textSelection`) in the
+    /// agent panel renders blank until the first click makes the window key.
+    override func showWindows() {
+        super.showWindows()
+        NSApp.activate(ignoringOtherApps: true)
+        windowControllers.first?.window?.makeKeyAndOrderFront(nil)
     }
 
     // MARK: - Thumbnail
@@ -430,12 +442,17 @@ final class VideoProject: NSDocument {
     // MARK: - Media restore
 
     private func restoreAssetsFromManifest() {
-        let resolver = editorViewModel.mediaResolver
+        let projectURL = editorViewModel.projectURL
         var missing = 0
         var missingRefs: Set<String> = []
         var candidates: [RestoredMediaCandidate] = []
-        for entry in editorViewModel.mediaManifest.entries {
-            guard let url = resolver.expectedURL(for: entry.id) else {
+        var healed = false
+        for (index, entry) in editorViewModel.mediaManifest.entries.enumerated() {
+            // Prefer a file that exists on disk, healing stale/absolute/temp paths
+            // by finding the asset in the project's media/ folder.
+            let resolved = MediaResolver.existingURL(for: entry, projectURL: projectURL)
+                ?? MediaResolver.expectedURL(for: entry, projectURL: projectURL)
+            guard let url = resolved else {
                 Log.project.warning("restore: could not resolve URL for entry id=\(entry.id) name=\(entry.name)")
                 missing += 1
                 missingRefs.insert(entry.id)
@@ -444,8 +461,18 @@ final class VideoProject: NSDocument {
             let asset = MediaAsset(entry: entry, resolvedURL: url)
             editorViewModel.mediaAssets.append(asset)
             candidates.append(RestoredMediaCandidate(id: entry.id, name: entry.name, url: url))
+            // Persist the repaired path so the fix survives without manual relink.
+            let repairedSource = MediaSource.make(for: url, projectURL: projectURL)
+            if repairedSource != entry.source {
+                editorViewModel.mediaManifest.entries[index].source = repairedSource
+                healed = true
+            }
         }
         editorViewModel.missingMediaRefs = missingRefs
+        if healed {
+            Log.project.notice("restore: healed stale media paths; marking project for autosave")
+            updateChangeCount(.changeDone)
+        }
 
         let restoreCandidates = candidates
         let initialMissingRefs = missingRefs

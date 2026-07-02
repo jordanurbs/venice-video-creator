@@ -4,11 +4,15 @@ import UniformTypeIdentifiers
 
 /// Downscales images to a max longest edge and re-encodes as JPEG
 /// so its more token efficient for agent.
+///
+/// `encode(url:)` is used only to inline images into the agent chat context, where
+/// the base64 payload counts against the model's token budget — so the targets are
+/// kept modest (1024px / ~1 MB). Vision models don't benefit from larger here.
 enum ImageEncoder {
-    /// Target 3.5 MB
-    static let maxBytes = 3_500_000
+    /// Target ~1 MB inlined.
+    static let maxBytes = 1_200_000
     /// Internal downsample target.
-    static let maxLongestEdge = 1568
+    static let maxLongestEdge = 1024
 
     struct Output: Sendable {
         let data: Data

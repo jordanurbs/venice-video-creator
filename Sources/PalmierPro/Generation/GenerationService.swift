@@ -40,6 +40,7 @@ final class GenerationService {
     ) -> String {
         let count = max(1, min(4, numImages))
         let baseName = name ?? String(genInput.prompt.prefix(30))
+        editor.recordUsedModel(id: genInput.model, assetType: assetType)
 
         let resolvedFolderId = folderId.flatMap { id in
             editor.folder(id: id) != nil ? id : nil

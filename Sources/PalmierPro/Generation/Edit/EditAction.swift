@@ -9,6 +9,7 @@ enum EditAction {
     case generateSFX
     case rerun
     case createVideo
+    case lastFrameToVideo
 
     static let editMaxDurationSeconds: Double = 10.0
 
@@ -17,7 +18,7 @@ enum EditAction {
         let candidates: [EditAction]
         switch asset.type {
         case .image: candidates = [.upscale, .edit, .rerun, .createVideo]
-        case .video: candidates = [.upscale, .edit, .generateMusic, .generateSFX, .rerun]
+        case .video: candidates = [.upscale, .edit, .generateMusic, .generateSFX, .rerun, .lastFrameToVideo]
         case .audio, .text: candidates = [.upscale, .edit, .rerun]
         case .lottie: candidates = []
         }
@@ -30,16 +31,11 @@ enum EditAction {
     func availability(for asset: MediaAsset, effectiveDurationOverride: Double? = nil) -> EditActionAvailability {
         switch self {
         case .upscale:
-            guard asset.type == .video || asset.type == .image else {
-                return .disabled(reason: "Upscale only works on video or images")
+            guard asset.type == .image else {
+                return .disabled(reason: "Upscale only works on images")
             }
-            if asset.type == .video {
-                guard let h = asset.sourceHeight, h > 0 else {
-                    return .disabled(reason: "Loading video metadata…")
-                }
-                if h >= 2160 {
-                    return .disabled(reason: "Already 4K or higher")
-                }
+            guard !UpscaleModelConfig.models(for: asset.type).isEmpty else {
+                return .disabled(reason: "No image upscaler available")
             }
             if Self.isUpscaleResult(asset) {
                 return .disabled(reason: "Already upscaled")
@@ -111,6 +107,18 @@ enum EditAction {
             }
             if asset.isGenerating {
                 return .disabled(reason: "Generation in progress")
+            }
+            return .available
+
+        case .lastFrameToVideo:
+            guard asset.type == .video else {
+                return .disabled(reason: "Only works on video")
+            }
+            if asset.isGenerating {
+                return .disabled(reason: "Generation in progress")
+            }
+            guard VideoModelConfig.allModels.contains(where: { !$0.requiresSourceVideo && $0.supportsFirstFrame }) else {
+                return .disabled(reason: "No image-to-video model available")
             }
             return .available
 

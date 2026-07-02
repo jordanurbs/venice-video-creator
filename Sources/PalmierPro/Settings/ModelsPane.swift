@@ -23,6 +23,7 @@ struct ModelsPane: View {
                 agentSection
                 defaultsSection
                 transcriptionSection
+                seedanceConsentSection
                 Divider().overlay(AppTheme.Border.subtleColor)
                 searchBar
                 toggleSections
@@ -101,36 +102,40 @@ struct ModelsPane: View {
 
     // MARK: - Per-task generation defaults
 
+    private func enabledOptions(_ rows: [(String, String)]) -> [(String, String)] {
+        rows.filter { prefs.isEnabled($0.0) }
+    }
+
     private var defaultsSection: some View {
         sectionContainer(title: "Generation defaults") {
             pickerRow(
                 title: ModelPreferences.ModelTask.image.title,
                 selectionId: prefs.defaultModel(for: .image),
-                options: catalog.image.map { ($0.id, $0.displayName) },
+                options: enabledOptions(catalog.image.map { ($0.id, $0.displayName) }),
                 onSelect: { prefs.setDefaultModel($0, for: .image) }
             )
             pickerRow(
                 title: ModelPreferences.ModelTask.textToVideo.title,
                 selectionId: prefs.defaultModel(for: .textToVideo),
-                options: catalog.video.filter { !$0.requiresReferenceImage }.map { ($0.id, $0.displayName) },
+                options: enabledOptions(catalog.video.filter { !$0.requiresReferenceImage }.map { ($0.id, $0.displayName) }),
                 onSelect: { prefs.setDefaultModel($0, for: .textToVideo) }
             )
             pickerRow(
                 title: ModelPreferences.ModelTask.imageToVideo.title,
                 selectionId: prefs.defaultModel(for: .imageToVideo),
-                options: catalog.video.filter { $0.requiresReferenceImage }.map { ($0.id, $0.displayName) },
+                options: enabledOptions(catalog.video.filter { $0.requiresReferenceImage }.map { ($0.id, $0.displayName) }),
                 onSelect: { prefs.setDefaultModel($0, for: .imageToVideo) }
             )
             pickerRow(
                 title: ModelPreferences.ModelTask.audio.title,
                 selectionId: prefs.defaultModel(for: .audio),
-                options: catalog.audio.map { ($0.id, $0.displayName) },
+                options: enabledOptions(catalog.audio.map { ($0.id, $0.displayName) }),
                 onSelect: { prefs.setDefaultModel($0, for: .audio) }
             )
             pickerRow(
                 title: ModelPreferences.ModelTask.upscale.title,
                 selectionId: prefs.defaultModel(for: .upscale),
-                options: catalog.upscale.map { ($0.id, $0.displayName) },
+                options: enabledOptions(catalog.upscale.map { ($0.id, $0.displayName) }),
                 onSelect: { prefs.setDefaultModel($0, for: .upscale) }
             )
         }
@@ -166,6 +171,33 @@ struct ModelsPane: View {
                     onSelect: { transcription.veniceModel = $0 ?? TranscriptionPreferences.availableModels[0].id }
                 )
             }
+        }
+    }
+
+    // MARK: - Seedance consent
+
+    private var seedanceConsentSection: some View {
+        sectionContainer(title: "Seedance consent") {
+            HStack(spacing: AppTheme.Spacing.md) {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.xxs) {
+                    Text("Auto-consent for face-bearing media")
+                        .font(.system(size: AppTheme.FontSize.md))
+                        .foregroundStyle(AppTheme.Text.primaryColor)
+                    Text("Seedance requires consent when generating from media that contains faces. Turn this on to confirm you accept Seedance's terms and privacy policy, hold the legal right to the media, and acknowledge its screening requirements — sent automatically with every Seedance request.")
+                        .font(.system(size: AppTheme.FontSize.xs))
+                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: AppTheme.Spacing.lg)
+                Toggle("", isOn: Binding(
+                    get: { prefs.seedanceConsentGranted },
+                    set: { prefs.seedanceConsentGranted = $0 }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            }
+            .padding(.vertical, AppTheme.Spacing.xs)
         }
     }
 
@@ -240,7 +272,20 @@ struct ModelsPane: View {
     private var toggleSections: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
             ForEach(toggleSectionData) { section in
-                sectionContainer(title: "\(section.title) — enabled") {
+                let ids = section.rows.map(\.id)
+                sectionContainer(
+                    title: "\(section.title) — enabled",
+                    accessory: {
+                        Toggle("", isOn: Binding(
+                            get: { prefs.allEnabled(ids) },
+                            set: { prefs.setEnabled(ids, $0) }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .help("Turn all \(section.title.lowercased()) models on or off")
+                    }
+                ) {
                     ForEach(Array(section.rows.enumerated()), id: \.element.id) { index, row in
                         HStack(spacing: AppTheme.Spacing.md) {
                             Text(row.name)
@@ -290,15 +335,20 @@ struct ModelsPane: View {
     }
 
     @ViewBuilder
-    private func sectionContainer<Content: View>(
+    private func sectionContainer<Content: View, Accessory: View>(
         title: String,
+        @ViewBuilder accessory: () -> Accessory = { EmptyView() },
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-            Text(title.uppercased())
-                .font(.system(size: AppTheme.FontSize.xs, weight: .semibold))
-                .tracking(AppTheme.Tracking.tight)
-                .foregroundStyle(AppTheme.Text.tertiaryColor)
+            HStack(spacing: AppTheme.Spacing.sm) {
+                Text(title.uppercased())
+                    .font(.system(size: AppTheme.FontSize.xs, weight: .semibold))
+                    .tracking(AppTheme.Tracking.tight)
+                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+                Spacer(minLength: AppTheme.Spacing.sm)
+                accessory()
+            }
 
             VStack(spacing: 0) {
                 content()

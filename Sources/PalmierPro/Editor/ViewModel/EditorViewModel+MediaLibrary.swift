@@ -124,6 +124,7 @@ extension EditorViewModel {
         }
         let entry = asset.toManifestEntry(projectURL: projectURL)
         mediaManifest.entries.append(entry)
+        onProjectContentChanged?()
         Log.project.notice(
             "media imported asset=\(asset.id.prefix(8)) type=\(asset.type.rawValue)",
             telemetry: "Media asset imported",

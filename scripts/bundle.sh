@@ -101,9 +101,19 @@ install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/Mac
 touch "$APP"
 
 if [ "$MODE" = "fast" ]; then
-  echo "==> Codesigning main app with $SIGNING_IDENTITY (no timestamp, no helpers)"
-  codesign --force --sign "$SIGNING_IDENTITY" "$APP"
-  echo "==> Done: $APP (fast mode — stable identity, no dSYM, no nested re-sign)"
+  # install_name_tool above invalidated swift build's signature, so a valid
+  # re-sign here is mandatory — on Apple Silicon a bad signature is a hard
+  # launch crash (SIGKILL, "Code Signature Invalid"). Fall back to ad-hoc when
+  # the Developer ID identity isn't in this machine's keychain.
+  SIGN_ID="$SIGNING_IDENTITY"
+  if ! security find-identity -v -p codesigning 2>/dev/null | grep -qF "$SIGNING_IDENTITY"; then
+    echo "==> Signing identity '$SIGNING_IDENTITY' not found — signing ad-hoc (-)"
+    SIGN_ID="-"
+  fi
+  echo "==> Codesigning main app with $SIGN_ID"
+  codesign --force --deep --sign "$SIGN_ID" "$APP"
+  codesign --verify --strict "$APP"
+  echo "==> Done: $APP (fast mode)"
   exit 0
 fi
 

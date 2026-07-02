@@ -27,14 +27,19 @@ enum VeniceGenerationRunner {
     private static func runImageEdit(
         model: String, params: ImageEditParams, api: VeniceAPI
     ) async throws -> [String] {
+        let resolvedModel = model.isEmpty ? VeniceBuiltInModel.defaultEdit : model
         var body: [String: Any] = [
-            "model": model.isEmpty ? VeniceBuiltInModel.defaultEdit : model,
+            "model": resolvedModel,
             "prompt": params.prompt,
             "image": stripDataURLPrefix(params.sourceURL),
             "safe_mode": false,
         ]
-        if let ar = params.aspectRatio, !ar.isEmpty { body["aspect_ratio"] = ar }
+        if let aspectRatio = params.aspectRatio,
+           supportsImageEditAspectRatio(model: resolvedModel, aspectRatio: aspectRatio) {
+            body["aspect_ratio"] = aspectRatio
+        }
         let bytes = try await binaryOrBase64(path: "image/edit", body: body, accept: "image/png", api: api)
+        try assertPlausibleImage(bytes)
         return [try writeTemp(data: bytes, ext: "png").absoluteString]
     }
 
@@ -50,7 +55,10 @@ enum VeniceGenerationRunner {
             "safe_mode": false,
         ]
         let bytes = try await binaryOrBase64(path: "image/multi-edit", body: body, accept: "image/png", api: api)
-        return [try writeTemp(data: bytes, ext: "png").absoluteString]
+        // Venice multi-edit returns a square image; restore the requested shape.
+        let restored = ImageAspectRestorer.restore(pngData: bytes, toAspectRatio: params.aspectRatio)
+        try assertPlausibleImage(restored)
+        return [try writeTemp(data: restored, ext: "png").absoluteString]
     }
 
     /// Venice `/image/background-remove` — transparent cutout. Returns PNG with alpha.
@@ -67,20 +75,32 @@ enum VeniceGenerationRunner {
     private static func runImage(
         model: String, params: ImageGenerationParams, api: VeniceAPI
     ) async throws -> [String] {
+        let catalogModel = imageModel(for: model)
+        let variants = catalogModel.map {
+            min($0.maxImages, max(1, params.numImages))
+        } ?? max(1, min(4, params.numImages))
         var body: [String: Any] = [
             "model": model,
             "prompt": params.prompt,
             "format": "png",
             "safe_mode": false,
             "return_binary": false,
-            "variants": max(1, min(4, params.numImages)),
+            "variants": variants,
         ]
-        if !params.aspectRatio.isEmpty { body["aspect_ratio"] = params.aspectRatio }
-        if let resolution = params.resolution, !resolution.isEmpty { body["resolution"] = resolution }
-        if let quality = params.quality, !quality.isEmpty { body["quality"] = quality }
+        if supports(params.aspectRatio, allowed: catalogModel?.aspectRatios, knownModel: catalogModel != nil) {
+            body["aspect_ratio"] = params.aspectRatio
+        }
+        if let resolution = params.resolution,
+           supports(resolution, allowed: catalogModel?.resolutions, knownModel: catalogModel != nil) {
+            body["resolution"] = resolution
+        }
+        if let quality = params.quality,
+           supports(quality, allowed: catalogModel?.qualities, knownModel: catalogModel != nil) {
+            body["quality"] = quality
+        }
         if let style = params.stylePreset, !style.isEmpty { body["style_preset"] = style }
-        // Best-effort reference image passthrough for models that accept it.
-        if let first = params.imageURLs.first { body["image"] = first }
+        // /image/generate has no reference-image field; reference-bearing requests
+        // are routed to /image/edit or /image/multi-edit upstream (see ImageGenerationSubmission.imageParams).
 
         let obj = try await api.postJSON(path: "image/generate", body: body)
         guard let images = obj["images"] as? [String], !images.isEmpty else {
@@ -90,6 +110,7 @@ enum VeniceGenerationRunner {
             guard let data = Data(base64Encoded: stripDataURLPrefix(base64)) else {
                 throw VeniceAPI.VeniceError.decode("invalid base64 image")
             }
+            try assertPlausibleImage(data)
             return try writeTemp(data: data, ext: "png").absoluteString
         }
     }
@@ -99,17 +120,50 @@ enum VeniceGenerationRunner {
     private static func runVideo(
         model: String, params: VideoGenerationParams, api: VeniceAPI
     ) async throws -> [String] {
+        let catalogModel = videoModel(for: model)
         var body: [String: Any] = [
             "model": model,
             "prompt": params.prompt,
-            "duration": "\(max(1, params.duration))s",
         ]
-        if let resolution = params.resolution, !resolution.isEmpty { body["resolution"] = resolution }
-        if !params.aspectRatio.isEmpty { body["aspect_ratio"] = params.aspectRatio }
-        // Image-to-video / reference-to-video / video-to-video all condition on a
-        // source passed via image_url (a data URL produced by uploadReference).
-        if let imageURL = params.startFrameURL ?? params.referenceImageURLs.first ?? params.sourceVideoURL {
-            body["image_url"] = imageURL
+        if supportsVideoDuration(params.duration, model: catalogModel) {
+            body["duration"] = "\(max(1, params.duration))s"
+        }
+        if let resolution = params.resolution,
+           supports(resolution, allowed: catalogModel?.resolutions, knownModel: catalogModel != nil) {
+            body["resolution"] = resolution
+        }
+        if supports(params.aspectRatio, allowed: catalogModel?.aspectRatios, knownModel: catalogModel != nil) {
+            body["aspect_ratio"] = params.aspectRatio
+        }
+        if catalogModel?.supportsFirstFrame ?? true, let startFrame = params.startFrameURL {
+            body["image_url"] = startFrame
+        }
+        if catalogModel?.supportsLastFrame ?? true, let endFrame = params.endFrameURL {
+            body["end_image_url"] = endFrame
+        }
+        if catalogModel?.requiresSourceVideo ?? true, let sourceVideo = params.sourceVideoURL {
+            body["video_url"] = sourceVideo
+        }
+        if let imageRefs = supportedRefs(params.referenceImageURLs, limit: catalogModel?.maxReferenceImages) {
+            body["reference_image_urls"] = imageRefs
+        }
+        if let videoRefs = supportedRefs(params.referenceVideoURLs, limit: catalogModel?.maxReferenceVideos) {
+            body["reference_video_urls"] = videoRefs
+        }
+        if (catalogModel?.maxReferenceAudios ?? 1) > 0, let audioURL = params.referenceAudioURLs.first {
+            body["audio_url"] = audioURL
+        }
+        if catalogModel?.audioConfigurable == true { body["audio"] = params.generateAudio }
+        // Seedance requires an explicit consent object for face-bearing media.
+        // The user grants this once in Settings → Models; attach it for every Seedance job.
+        if isSeedance(model: model), ModelPreferences.shared.seedanceConsentGranted {
+            body["consents"] = [
+                "seedance": [
+                    "confirmed_terms_and_privacy": true,
+                    "confirmed_legal_right": true,
+                    "confirmed_screening_acknowledged": true,
+                ]
+            ]
         }
 
         let queued = try await api.postJSON(path: "video/queue", body: body)
@@ -139,6 +193,7 @@ enum VeniceGenerationRunner {
             let contentType = (http?.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
 
             if contentType.contains("video/") {
+                try assertPlausibleVideo(data)
                 return try writeTemp(data: data, ext: "mp4").absoluteString
             }
             // Otherwise it's a JSON status payload.
@@ -157,12 +212,10 @@ enum VeniceGenerationRunner {
     private static func runAudio(
         model: String, params: AudioGenerationParams, api: VeniceAPI
     ) async throws -> [String] {
+        let catalogModel = audioModel(for: model)
         // Route by the endpoint recorded in the catalog: type=tts models use the
         // synchronous /audio/speech; music/SFX use the async /audio/queue flow.
-        let usesSpeech = ModelRegistry.byId[model].map { kind -> Bool in
-            if case .audio(let m) = kind { return m.entry.allowedEndpoints.contains("audio/speech") }
-            return false
-        } ?? false
+        let usesSpeech = catalogModel?.entry.allowedEndpoints.contains("audio/speech") ?? false
 
         if usesSpeech {
             var body: [String: Any] = [
@@ -170,7 +223,10 @@ enum VeniceGenerationRunner {
                 "input": params.prompt,
                 "response_format": "mp3",
             ]
-            if let voice = params.voice, !voice.isEmpty { body["voice"] = voice }
+            if let voice = params.voice,
+               supports(voice, allowed: catalogModel?.voices, knownModel: catalogModel != nil) {
+                body["voice"] = voice
+            }
             let request = api.makeRequest(path: "audio/speech", accept: "audio/mpeg", body: try api.jsonBody(body))
             let (data, response) = try await api.data(for: request)
             try VeniceAPI.assertOK(data: data, response: response)
@@ -179,10 +235,26 @@ enum VeniceGenerationRunner {
 
         // Async queue (music / SFX).
         var body: [String: Any] = ["model": model, "prompt": params.prompt]
-        if let duration = params.durationSeconds, duration > 0 { body["duration_seconds"] = duration }
-        if let lyrics = params.lyrics, !lyrics.isEmpty { body["lyrics_prompt"] = lyrics }
-        if params.instrumental { body["force_instrumental"] = true }
-        if let voice = params.voice, !voice.isEmpty { body["voice"] = voice }
+        if let duration = params.durationSeconds, supportsAudioDuration(duration, model: catalogModel) {
+            body["duration_seconds"] = duration
+        }
+        if catalogModel?.supportsLyrics ?? true, let lyrics = params.lyrics, !lyrics.isEmpty {
+            body["lyrics_prompt"] = lyrics
+        }
+        if catalogModel?.supportsStyleInstructions == true,
+           let instructions = params.styleInstructions, !instructions.isEmpty {
+            body["style_instructions"] = instructions
+        }
+        if catalogModel?.supportsInstrumental ?? true, params.instrumental {
+            body["force_instrumental"] = true
+        }
+        if let voice = params.voice,
+           supports(voice, allowed: catalogModel?.voices, knownModel: catalogModel != nil) {
+            body["voice"] = voice
+        }
+        if catalogModel?.inputs.contains(.video) == true, let videoURL = params.videoURL {
+            body["video_url"] = videoURL
+        }
 
         let queued = try await api.postJSON(path: "audio/queue", body: body)
         guard let queueId = queued["queue_id"] as? String else {
@@ -217,6 +289,9 @@ enum VeniceGenerationRunner {
     private static func runUpscale(
         model: String, params: UpscaleGenerationParams, api: VeniceAPI
     ) async throws -> [String] {
+        if let catalogModel = upscaleModel(for: model), !catalogModel.supportedTypes.contains(.image) {
+            throw VeniceAPI.VeniceError.transport("\(catalogModel.displayName) does not support image upscale.")
+        }
         // Venice /image/upscale takes a raw base64 image (no data: prefix) + scale.
         let body: [String: Any] = [
             "image": stripDataURLPrefix(params.sourceURL),
@@ -228,6 +303,68 @@ enum VeniceGenerationRunner {
     }
 
     // MARK: - Helpers
+
+    private static func videoModel(for id: String) -> VideoModelConfig? {
+        if case .video(let model) = ModelRegistry.byId[id] { return model }
+        return nil
+    }
+
+    private static func isSeedance(model: String) -> Bool {
+        model.lowercased().contains("seedance")
+    }
+
+    private static func imageModel(for id: String) -> ImageModelConfig? {
+        if case .image(let model) = ModelRegistry.byId[id] { return model }
+        return nil
+    }
+
+    private static func audioModel(for id: String) -> AudioModelConfig? {
+        if case .audio(let model) = ModelRegistry.byId[id] { return model }
+        return nil
+    }
+
+    private static func upscaleModel(for id: String) -> UpscaleModelConfig? {
+        if case .upscale(let model) = ModelRegistry.byId[id] { return model }
+        return nil
+    }
+
+    private static func supports(_ value: String?, allowed: [String]?, knownModel: Bool) -> Bool {
+        guard let value, !value.isEmpty else { return false }
+        guard knownModel else { return true }
+        guard let allowed, !allowed.isEmpty else { return false }
+        return allowed.contains(value)
+    }
+
+    private static func supportsVideoDuration(_ duration: Int, model: VideoModelConfig?) -> Bool {
+        guard let model else { return duration > 0 }
+        return !model.durations.isEmpty && model.durations.contains(duration)
+    }
+
+    private static func supportsAudioDuration(_ duration: Int, model: AudioModelConfig?) -> Bool {
+        guard duration > 0 else { return false }
+        guard let model else { return true }
+        if model.inputs.contains(.video) { return true }
+        guard let allowed = model.durations, !allowed.isEmpty else { return false }
+        return allowed.contains(duration)
+    }
+
+    private static func supportedRefs(_ refs: [String], limit: Int?) -> [String]? {
+        guard !refs.isEmpty else { return nil }
+        guard let limit else { return refs }
+        guard limit > 0 else { return nil }
+        return Array(refs.prefix(limit))
+    }
+
+    private static func supportsImageEditAspectRatio(model: String, aspectRatio: String?) -> Bool {
+        guard let aspectRatio, !aspectRatio.isEmpty else { return false }
+        if let editModel = ModelCatalog.shared.editModels.first(where: { $0.id == model }) {
+            return !editModel.aspectRatios.isEmpty && editModel.aspectRatios.contains(aspectRatio)
+        }
+        if let imageModel = imageModel(for: model) {
+            return !imageModel.aspectRatios.isEmpty && imageModel.aspectRatios.contains(aspectRatio)
+        }
+        return true
+    }
 
     /// Performs a POST that may return either raw binary or a JSON envelope with
     /// base64 data, and normalizes both to `Data`.
@@ -261,6 +398,33 @@ enum VeniceGenerationRunner {
     private static func stripDataURLPrefix(_ s: String) -> String {
         guard let range = s.range(of: "base64,") else { return s }
         return String(s[range.upperBound...])
+    }
+
+    // MARK: - Silent-rejection guard
+
+    // Venice occasionally answers HTTP 200 with a tiny placeholder instead of real
+    // media. Treat an implausibly small payload as a failure so we never save an
+    // unusable asset as a successful generation. Thresholds are conservative floors,
+    // far below any real generated frame or clip.
+    private enum SilentReject {
+        static let imageMinBytes = 30_000
+        static let videoMinBytes = 100_000
+    }
+
+    private static func assertPlausibleImage(_ data: Data) throws {
+        if data.count < SilentReject.imageMinBytes {
+            throw VeniceAPI.VeniceError.transport(
+                "The model returned an empty or placeholder image. Try again or switch models."
+            )
+        }
+    }
+
+    private static func assertPlausibleVideo(_ data: Data) throws {
+        if data.count < SilentReject.videoMinBytes {
+            throw VeniceAPI.VeniceError.transport(
+                "The model returned an empty or placeholder video. Try again or switch models."
+            )
+        }
     }
 
     private static func writeTemp(data: Data, ext: String) throws -> URL {

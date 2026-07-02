@@ -229,8 +229,14 @@ final class AgentService {
     private var toolExecutor: ToolExecutor?
     private var currentTask: Task<Void, Never>?
 
+    /// Streaming text deltas are buffered and flushed to `messages` at a capped
+    /// rate so the UI re-renders ~20x/sec instead of on every token — token-rate
+    /// updates re-host the whole growing message and stall the main thread.
+    @ObservationIgnored private var pendingDeltas: [UUID: String] = [:]
+    @ObservationIgnored private var flushTask: Task<Void, Never>?
+
     func loadSessions(from projectURL: URL?) {
-        sessions = ChatSessionStore.load(from: projectURL)
+        var loaded = ChatSessionStore.load(from: projectURL)
             .filter { !$0.messages.isEmpty }
             .map {
                 var session = $0
@@ -239,10 +245,19 @@ final class AgentService {
             }
             .sorted { $0.updatedAt > $1.updatedAt }
 
-        let session = ChatSession()
-        sessions.insert(session, at: 0)
-        currentSessionId = session.id
-        messages = []
+        // Open the most recent conversation by default; only start a fresh chat
+        // when the project has no prior history.
+        if !loaded.isEmpty {
+            loaded[0].isOpen = true
+            sessions = loaded
+            currentSessionId = loaded[0].id
+            messages = loaded[0].messages
+        } else {
+            let session = ChatSession()
+            sessions = [session]
+            currentSessionId = session.id
+            messages = []
+        }
         draft = ""
         mentions.removeAll()
         streamError = nil
@@ -332,6 +347,9 @@ final class AgentService {
     func cancel() {
         currentTask?.cancel()
         currentTask = nil
+        flushTask?.cancel()
+        flushTask = nil
+        flushPendingDeltas()
         isStreaming = false
     }
 
@@ -340,6 +358,9 @@ final class AgentService {
         isStreaming = true
         currentTask = Task { [weak self] in
             defer {
+                self?.flushTask?.cancel()
+                self?.flushTask = nil
+                self?.flushPendingDeltas()
                 self?.isStreaming = false
                 self?.syncMessagesIntoCurrentSession()
                 self?.onSessionsChanged?()
@@ -384,6 +405,7 @@ final class AgentService {
                         stopReason = reason
                     }
                 }
+                flushPendingDeltas()
 
                 if stopReason == .toolUse {
                     await runPendingToolUses(assistantID: assistantID)
@@ -410,21 +432,40 @@ final class AgentService {
     }
 
     private func dropEmptyAssistantTurn(id: UUID) {
+        flushPendingDeltas()
         guard let index = assistantMessageIndex(id: id),
               messages[index].blocks.isEmpty else { return }
         messages.remove(at: index)
     }
 
     private func appendTextDelta(_ chunk: String, toAssistant id: UUID) {
-        guard let index = assistantMessageIndex(id: id) else { return }
-        if case .text(let existing)? = messages[index].blocks.last {
-            messages[index].blocks[messages[index].blocks.count - 1] = .text(existing + chunk)
-        } else {
-            messages[index].blocks.append(.text(chunk))
+        pendingDeltas[id, default: ""] += chunk
+        guard flushTask == nil else { return }
+        flushTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(50))
+            guard let self, !Task.isCancelled else { return }
+            self.flushTask = nil
+            self.flushPendingDeltas()
+        }
+    }
+
+    /// Applies buffered streaming text to `messages` in one batch.
+    private func flushPendingDeltas() {
+        guard !pendingDeltas.isEmpty else { return }
+        let buffered = pendingDeltas
+        pendingDeltas.removeAll()
+        for (id, chunk) in buffered {
+            guard !chunk.isEmpty, let index = assistantMessageIndex(id: id) else { continue }
+            if case .text(let existing)? = messages[index].blocks.last {
+                messages[index].blocks[messages[index].blocks.count - 1] = .text(existing + chunk)
+            } else {
+                messages[index].blocks.append(.text(chunk))
+            }
         }
     }
 
     private func appendToolUse(id toolUseID: String, name: String, inputJSON: String, toAssistant assistantID: UUID) {
+        flushPendingDeltas()
         guard let index = assistantMessageIndex(id: assistantID) else { return }
         messages[index].blocks.append(.toolUse(id: toolUseID, name: name, inputJSON: inputJSON))
     }
@@ -535,7 +576,91 @@ final class AgentService {
             guard !content.isEmpty else { continue }
             result.append(AnthropicMessage(role: msg.role == .user ? .user : .assistant, content: content))
         }
-        return result
+        return await fitToContextBudget(result)
+    }
+
+    // MARK: - Context budgeting
+
+    /// Trims the conversation to fit the active model's context window, folding
+    /// evicted turns into an AI-written recap (summarized by a cheap/fast model).
+    private static let keepRecentTurns = 6
+    private static let reservedOutputTokens = 8192  // matches VeniceAgentClient.maxTokens
+    @ObservationIgnored private var recapCache: [UUID: (evictedCount: Int, recap: String)] = [:]
+
+    private func fitToContextBudget(_ full: [AnthropicMessage]) async -> [AnthropicMessage] {
+        let model = availableModels.first { $0.id == effectiveModelId }
+        let context = model?.availableContextTokens ?? 128_000
+        let systemTokens = ContextBudget.estimateTokens(text: AgentInstructions.serverInstructions)
+        let budget = max(4_000, context - Self.reservedOutputTokens - systemTokens - ContextBudget.safetyMargin)
+
+        let used = full.reduce(0) { $0 + ContextBudget.estimateTokens($1) }
+        guard used > budget else { return full }
+
+        let fitted = ContextBudget.fit(messages: full, budget: budget, keepRecent: Self.keepRecentTurns)
+        guard !fitted.evicted.isEmpty else { return fitted.kept }
+
+        var out = fitted.kept
+        if let recap = await recapText(for: fitted.evicted), !recap.isEmpty {
+            out.insert(
+                AnthropicMessage(
+                    role: .user,
+                    content: [["type": "text", "text": "[Summary of earlier conversation, trimmed to fit context]\n\(recap)"]]
+                ),
+                at: 0
+            )
+        }
+        return out
+    }
+
+    private func recapText(for evicted: [AnthropicMessage]) async -> String? {
+        let transcript = ContextBudget.transcript(for: evicted)
+        guard let sid = currentSessionId else { return await summarizeTranscript(transcript) }
+        if let cached = recapCache[sid], cached.evictedCount == evicted.count { return cached.recap }
+        let recap = await summarizeTranscript(transcript) ?? recapCache[sid]?.recap
+        if let recap { recapCache[sid] = (evicted.count, recap) }
+        return recap
+    }
+
+    /// The fastest/cheapest available text model, for background summarization.
+    private var summaryModelId: String {
+        let ids = Set(availableModels.map(\.id))
+        if let fastest = ModelTraitsCatalog.shared.textTraits["fastest"] {
+            let resolved = ModelTraitsCatalog.shared.resolve(fastest)
+            if ids.contains(resolved) { return resolved }
+        }
+        return effectiveModelId
+    }
+
+    private var currentKey: String? {
+        let key = apiKey.isEmpty ? (VeniceKeychain.load() ?? "") : apiKey
+        return key.isEmpty ? nil : key
+    }
+
+    /// One non-streaming chat completion that condenses trimmed history into a recap.
+    private func summarizeTranscript(_ transcript: String) async -> String? {
+        guard !transcript.isEmpty, let key = currentKey else { return nil }
+        let system = """
+        You compress the earlier part of a conversation between a user and an AI \
+        video-editing agent into a concise recap for the agent's own memory. Preserve: \
+        decisions and creative direction; any script, storyboard, shot list or plan \
+        structure; asset names and placeholder/asset IDs created; folder names; and \
+        unresolved threads or next steps. Use terse bullet points. Do not invent detail.
+        """
+        let body: [String: Any] = [
+            "model": summaryModelId,
+            "max_tokens": 1024,
+            "stream": false,
+            "messages": [
+                ["role": "system", "content": system],
+                ["role": "user", "content": "Summarize this earlier conversation:\n\n\(transcript)"],
+            ],
+        ]
+        let api = VeniceAPI(apiKey: key)
+        guard let obj = try? await api.postJSON(path: "chat/completions", body: body),
+              let choices = obj["choices"] as? [[String: Any]],
+              let message = choices.first?["message"] as? [String: Any],
+              let content = message["content"] as? String else { return nil }
+        return content.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func inlineImageBlocks(for mentions: [AgentMention]) async -> AgentMentionContext.InlinedMentions {

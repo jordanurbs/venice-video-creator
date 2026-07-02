@@ -230,6 +230,7 @@ struct VideoCaps: Decodable, Sendable {
     let referenceTagNoun: String
     let requiresSourceVideo: Bool
     let requiresReferenceImage: Bool
+    let audioConfigurable: Bool
 }
 
 struct ImageCaps: Decodable, Sendable {

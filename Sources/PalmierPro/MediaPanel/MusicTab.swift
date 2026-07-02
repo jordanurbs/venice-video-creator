@@ -13,7 +13,7 @@ struct MusicTab: View {
     @State private var note: String?
 
     private var models: [AudioModelConfig] {
-        AudioModelConfig.allModels.filter { $0.inputs.contains(.video) && $0.category == .music }
+        AudioModelConfig.allModels.filter { $0.category == .music }
     }
 
     private var model: AudioModelConfig? {
@@ -21,13 +21,16 @@ struct MusicTab: View {
         return models.first
     }
 
-    private func supportsTextMode(_ m: AudioModelConfig) -> Bool {
-        m.category == .music && m.inputs.contains(.text)
-    }
+    private func supportsTextMode(_ m: AudioModelConfig) -> Bool { m.inputs.contains(.text) }
+    private func supportsVideoMode(_ m: AudioModelConfig) -> Bool { m.inputs.contains(.video) }
 
-    /// Text mode only when the selected model supports text-to-music.
+    /// Clamp the chosen mode to what the selected model can actually do.
     private var effectiveMode: MusicGenerationSubmission.Mode {
-        (model.map(supportsTextMode) ?? false) ? mode : .videoToMusic
+        guard let model else { return mode }
+        switch mode {
+        case .videoToMusic: return supportsVideoMode(model) ? .videoToMusic : .textToMusic
+        case .textToMusic: return supportsTextMode(model) ? .textToMusic : .videoToMusic
+        }
     }
     private var isTextMode: Bool { effectiveMode == .textToMusic }
 
@@ -57,7 +60,9 @@ struct MusicTab: View {
     }
 
     private var validationNote: String? {
-        guard let model else { return "No music models available." }
+        guard let model else {
+            return ModelCatalog.shared.isLoaded ? "No music models available." : "Loading models…"
+        }
         if isTextMode {
             if trimmedPrompt.isEmpty { return "Describe the music to generate." }
         } else {
@@ -113,9 +118,15 @@ struct MusicTab: View {
         .background(AppTheme.Background.surfaceColor)
     }
 
+    /// Show the input toggle only when the selected model can do both modes.
+    private var canToggleMode: Bool {
+        guard let model else { return false }
+        return supportsVideoMode(model) && supportsTextMode(model)
+    }
+
     private var sourceSection: some View {
         InspectorSection("Source") {
-            if model.map(supportsTextMode) == true {
+            if canToggleMode {
                 InspectorRow(icon: "slider.horizontal.3", label: "Input") {
                     Menu {
                         Button("Video to Music") { mode = .videoToMusic }
@@ -256,12 +267,12 @@ struct MusicTab: View {
     private var agentMenu: some View {
         Menu {
             Button {
-                musicTask("Score my timeline with music that matches the visuals. Use a video-to-music model on the full timeline span so the music follows the edit, and place it on an audio track.")
+                startAgentMusic(style: trimmedPrompt.isEmpty ? nil : trimmedPrompt)
             } label: { Label("Generate music for the timeline", systemImage: "music.note") }
             Menu {
                 ForEach(["Cinematic", "Upbeat", "Ambient", "Tense", "Lo-fi"], id: \.self) { mood in
                     Button(mood) {
-                        musicTask("Generate \(mood.lowercased()) music for my timeline and place it on an audio track aligned to the edit.")
+                        startAgentMusic(style: mood.lowercased())
                     }
                 }
             } label: { Label("Mood", systemImage: "slider.horizontal.3") }
@@ -283,11 +294,27 @@ struct MusicTab: View {
         .help("Let Agent generate music for you. Choose a starter, or ask Agent in the chat.")
     }
 
-    private func musicTask(_ prompt: String) {
+    private func startAgentMusic(style: String?) {
         let service = editor.agentService
         service.newChat()
-        service.draft = prompt
+        service.draft = composeAgentPrompt(style: style)
         editor.agentPanelVisible = true
+    }
+
+    /// Fold the panel's current model, mode, and duration into the agent prompt
+    /// so Agent Mode honors what the user set instead of re-deciding for them.
+    private func composeAgentPrompt(style: String?) -> String {
+        var prompt = style.map { "Generate \($0) music" } ?? "Generate music"
+        prompt += " for my timeline and place it on an audio track aligned to the edit."
+        guard let model else { return prompt }
+        prompt += " Use the \(model.displayName) model (model id: \(model.id))."
+        if isTextMode {
+            prompt += " Make it about \(Int(textDuration.rounded())) seconds long."
+        } else {
+            let scope = editor.validSelectedTimelineRange != nil ? "the marked range" : "the whole timeline"
+            prompt += " Score \(scope) from the video."
+        }
+        return prompt
     }
 
     private func generate() {

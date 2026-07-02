@@ -4,6 +4,14 @@ import SwiftUI
 struct AgentMessageView: View {
     let message: AgentMessage
     let toolResults: [String: ToolRunResult]
+    /// True only for the assistant turn currently streaming. While streaming we
+    /// render plain SwiftUI text (no markdown, no `textSelection`) — selectable
+    /// AppKit-backed text re-solves an O(n) Auto Layout system on every layout
+    /// pass, which stalls the main thread as the message grows.
+    var isStreaming: Bool = false
+    /// Selectable text uses AppKit `NSTextField` hosts (expensive Auto Layout);
+    /// disabled across the whole list while streaming, restored when it ends.
+    var selectable: Bool = true
     @State private var isHovering = false
 
     var body: some View {
@@ -38,7 +46,7 @@ struct AgentMessageView: View {
                         RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous)
                             .fill(Color.white.opacity(AppTheme.Opacity.faint))
                     )
-                    .textSelection(.enabled)
+                    .textSelectable(selectable)
             }
         }
         // Tool-result user messages render merged into the preceding assistant row.
@@ -50,10 +58,19 @@ struct AgentMessageView: View {
             ForEach(Array(message.blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .text(let text):
-                    MarkdownText(text: text)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if isStreaming {
+                        Text(text)
+                            .font(.body)
+                            .foregroundStyle(AppTheme.Text.primaryColor)
+                            .lineSpacing(AppTheme.Spacing.xs)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        MarkdownText(text: text, selectable: selectable)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 case .toolUse(let id, let name, let inputJSON):
-                    ToolRunRow(name: name, inputJSON: inputJSON, result: toolResults[id])
+                    ToolRunRow(name: name, inputJSON: inputJSON, result: toolResults[id], selectable: selectable)
                 case .toolResult:
                     EmptyView()
                 }
@@ -105,6 +122,7 @@ private struct ToolRunRow: View {
     let name: String
     let inputJSON: String
     let result: ToolRunResult?
+    var selectable: Bool = true
     @State private var expanded = false
 
     private var isRunning: Bool { result == nil }
@@ -158,7 +176,7 @@ private struct ToolRunRow: View {
                     RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
                         .fill(Color.white.opacity(AppTheme.Opacity.subtle))
                 )
-                .textSelection(.enabled)
+                .textSelectable(selectable)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }

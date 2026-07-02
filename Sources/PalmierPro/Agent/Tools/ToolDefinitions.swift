@@ -46,6 +46,9 @@ enum ToolName: String, CaseIterable, Sendable {
     case deleteFolder = "delete_folder"
     case sendFeedback = "send_feedback"
     case setProjectSettings = "set_project_settings"
+    case saveDocument = "save_document"
+    case readDocument = "read_document"
+    case listDocuments = "list_documents"
 }
 
 struct AgentTool: @unchecked Sendable {
@@ -427,7 +430,7 @@ enum ToolDefinitions {
                     "endFrameMediaRef": ["type": "string", "description": "Media asset ID to use as the last frame (supported by some models)"],
                     "sourceVideoMediaRef": ["type": "string", "description": "Media asset ID of a source video (required by video-to-video edit models; ignores duration/aspectRatio/resolution)"],
                     "sourceClipId": ["type": "string", "description": "Optional. Clip id (from get_timeline) referencing sourceVideoMediaRef. When set and the clip is trimmed, only the clip's visible range is sent to the model, not the full source — matches the UI's 'Use trimmed portion only'."],
-                    "referenceImageMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Media asset IDs of image references. Covers both reference-to-video generation (Seedance, Kling V3/O3 elements, Grok — refer as @Image1/@Element1 in prompt) and the single-image ref used by video-to-video edit models (Kling V3 Motion Control). See list_models maxReferenceImages for per-model cap."],
+                    "referenceImageMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Media asset IDs of image references. Covers both reference-to-video generation (Seedance, Kling V3/O3 elements, Grok — refer as @Image1/@Element1 in prompt) and the single-image ref used by video-to-video edit models (Kling V3 Motion Control). REQUIRED for reference-to-video ('R2V', requiresReferenceImage in list_models) models — they fail without at least one reference image; generate a still with generate_image first if none exists, or pick the model's text-to-video variant instead. See list_models maxReferenceImages for per-model cap."],
                     "referenceVideoMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Media asset IDs of video references (Seedance only). Refer to them as @Video1, @Video2. See maxReferenceVideos and maxCombinedVideoRefSeconds."],
                     "referenceAudioMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Media asset IDs of audio references (Seedance only). Refer to them as @Audio1, @Audio2. See maxReferenceAudios and maxCombinedAudioRefSeconds."],
                     "folderId": ["type": "string", "description": "Optional. Folder id (from list_folders or create_folder) to place the result in. Omit for the project root."],
@@ -444,7 +447,7 @@ enum ToolDefinitions {
                     "name": ["type": "string", "description": "Display name for the asset in the media library. Defaults to first 30 chars of prompt."],
                     "model": ["type": "string", "description": "Model ID (e.g. 'nano-banana-pro'). Use list_models to see options. Defaults to first available model."],
                     "aspectRatio": ["type": "string", "description": "Aspect ratio (e.g. '16:9', '9:16')"],
-                    "resolution": ["type": "string", "description": "Resolution (e.g. '2K', '4K')"],
+                    "resolution": ["type": "string", "description": "Resolution. Omit to default to the model's lowest resolution (saves credits). Only pass a higher value (e.g. '2K', '4K') when the user explicitly asks for higher resolution."],
                     "quality": ["type": "string", "description": "Image quality (e.g. 'low', 'medium', 'high'). Only supported by some models — see list_models."],
                     "referenceMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Media asset IDs to use as reference images"],
                     "folderId": ["type": "string", "description": "Optional. Folder id (from list_folders or create_folder) to place the result in. Omit for the project root."],
@@ -464,7 +467,7 @@ enum ToolDefinitions {
                     "lyrics": ["type": "string", "description": "MiniMax Music only. Lyrics with optional [Verse]/[Chorus] section tags. If omitted and instrumental=false, MiniMax auto-writes lyrics from the prompt."],
                     "styleInstructions": ["type": "string", "description": "Gemini TTS only. Optional delivery instructions (e.g. 'warm and slow', 'British accent')."],
                     "instrumental": ["type": "boolean", "description": "Music models only. true = no vocals when the selected model supports it. Defaults to false."],
-                    "duration": ["type": "integer", "description": "Length in seconds. ElevenLabs Music: 3–600. Sonilo text-to-music: up to 600. For a video source, defaults to the span/clip length. Ignored by TTS, MiniMax, and Lyria 3 Pro."],
+                    "duration": ["type": "integer", "description": "Length in seconds. ElevenLabs Music: 3–600. Sonilo text-to-music: up to 600. For a video source, defaults to the span/clip length. A length the model can't honor is auto-reconciled (snapped to its nearest supported value, clamped to its range, or dropped when the model ignores duration) — it never errors, so don't retry just to adjust duration. Ignored by TTS, MiniMax, and Lyria 3 Pro."],
                     "videoSourceStartFrame": ["type": "integer", "description": "Video-to-audio models only. Start frame (timeline) of a span to render and score — pair with videoSourceEndFrame. Use get_timeline for frame numbers; for the whole timeline use 0 to the timeline's end frame."],
                     "videoSourceEndFrame": ["type": "integer", "description": "Video-to-audio models only. End frame (exclusive) of the span to score. Must be > videoSourceStartFrame."],
                     "videoSourceMediaRef": ["type": "string", "description": "Video-to-audio models only. Score this existing video asset instead of a timeline span. Mutually exclusive with the videoSource frames."],
@@ -838,6 +841,32 @@ enum ToolDefinitions {
                 ],
                 required: ["category", "summary"]
             )
+        ),
+        AgentTool(
+            name: .saveDocument,
+            description: "Save a markdown document into the project's Documents library so substantial written deliverables persist (they survive context trimming, app restarts, and travel with the project). Use this for scripts, treatments, storyboards, shot lists, beat sheets, character/location bibles, and similar long-form work — write/update the document here rather than only emitting it in chat. Saving by an existing name overwrites that document; use a new name to create another. Returns the document id. You can still show the content in chat too.",
+            inputSchema: objectSchema(
+                properties: [
+                    "name": ["type": "string", "description": "Document title, e.g. 'Shot List' or 'S1 Script'. Reusing an existing name overwrites it."],
+                    "content": ["type": "string", "description": "Full markdown content of the document."],
+                ],
+                required: ["name", "content"]
+            )
+        ),
+        AgentTool(
+            name: .readDocument,
+            description: "Read back a saved project document's full markdown content. Provide either its id or its name (from list_documents). Use this to retrieve earlier work (script, shot list, etc.) after it has scrolled out of the conversation.",
+            inputSchema: objectSchema(
+                properties: [
+                    "id": ["type": "string", "description": "Document id from list_documents or save_document."],
+                    "name": ["type": "string", "description": "Document name (case-insensitive). Provide id or name."],
+                ]
+            )
+        ),
+        AgentTool(
+            name: .listDocuments,
+            description: "List the project's saved markdown documents (id, name, size, last updated). Call this to see what written deliverables already exist before creating or reading one.",
+            inputSchema: objectSchema()
         ),
     ]
 

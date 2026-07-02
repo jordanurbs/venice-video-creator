@@ -49,14 +49,27 @@ struct ImageModelConfig: Identifiable, Sendable {
     var maxImages: Int { max(1, min(4, caps.maxImages)) }
 
     func validate(aspectRatio: String, resolution: String?, quality: String?, imageRefCount: Int, numImages: Int) -> String? {
+        if aspectRatios.isEmpty, !aspectRatio.isEmpty {
+            return "\(displayName) does not support aspect ratio."
+        }
         if !aspectRatios.isEmpty, !aspectRatio.isEmpty, !aspectRatios.contains(aspectRatio) {
             return unsupportedValue(model: displayName, field: "aspect ratio", value: aspectRatio, allowed: aspectRatios)
         }
-        if let allowed = resolutions, let r = resolution, !r.isEmpty, !allowed.contains(r) {
-            return unsupportedValue(model: displayName, field: "resolution", value: r, allowed: allowed)
+        if let r = resolution, !r.isEmpty {
+            guard let allowed = resolutions, !allowed.isEmpty else {
+                return "\(displayName) does not support resolution."
+            }
+            if !allowed.contains(r) {
+                return unsupportedValue(model: displayName, field: "resolution", value: r, allowed: allowed)
+            }
         }
-        if let allowed = qualities, let q = quality, !q.isEmpty, !allowed.contains(q) {
-            return unsupportedValue(model: displayName, field: "quality", value: q, allowed: allowed)
+        if let q = quality, !q.isEmpty {
+            guard let allowed = qualities, !allowed.isEmpty else {
+                return "\(displayName) does not support quality."
+            }
+            if !allowed.contains(q) {
+                return unsupportedValue(model: displayName, field: "quality", value: q, allowed: allowed)
+            }
         }
         if imageRefCount > 0, !supportsImageReference {
             return "\(displayName) does not accept reference images."

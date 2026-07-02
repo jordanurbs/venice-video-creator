@@ -117,6 +117,9 @@ final class ToolExecutor {
         case .deleteFolder:  return try deleteFolder(editor, args)
         case .sendFeedback:  return try await sendFeedback(editor, args)
         case .setProjectSettings: return try setProjectSettings(editor, args)
+        case .saveDocument:  return try saveDocument(editor, args)
+        case .readDocument:  return try readDocument(editor, args)
+        case .listDocuments: return listDocuments(editor)
         }
     }
 

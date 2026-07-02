@@ -16,6 +16,7 @@ enum EditSubmitter {
         onFailure: (@MainActor () -> Void)? = nil
     ) -> String? {
         guard AccountService.shared.isSignedIn else { return nil }
+        guard model.supportedTypes.contains(asset.type) else { return nil }
 
         let effectiveDuration: Int = {
             if let trim = trimmedSource, trim.hasTrim {
@@ -190,12 +191,15 @@ enum EditSubmitter {
         let preUploaded = gen.imageURLs
 
         if let videoModel = VideoModelConfig.allModels.first(where: { $0.id == modelId }) {
-            if let err = videoModel.validate(
-                duration: gen.duration, aspectRatio: gen.aspectRatio, resolution: gen.resolution
-            ) {
-                throw RerunError.invalid(err)
-            }
             if videoModel.requiresSourceVideo {
+                if let err = videoModel.validate(
+                    duration: gen.duration,
+                    aspectRatio: gen.aspectRatio,
+                    resolution: gen.resolution,
+                    validateDuration: false
+                ) {
+                    throw RerunError.invalid(err)
+                }
                 guard let source = preUploaded?.first else { throw RerunError.missingSource }
                 let imageRefs = Array((preUploaded ?? []).dropFirst())
                 let params = VideoGenerationParams(
@@ -224,6 +228,11 @@ enum EditSubmitter {
                     onComplete: onComplete,
                     onFailure: onFailure
                 )
+            }
+            if let err = videoModel.validate(
+                duration: gen.duration, aspectRatio: gen.aspectRatio, resolution: gen.resolution
+            ) {
+                throw RerunError.invalid(err)
             }
             let params = VideoGenerationParams(
                 prompt: gen.prompt,
@@ -279,15 +288,15 @@ enum EditSubmitter {
                 numImages: count,
                 folderId: asset.folderId,
                 buildParams: { uploaded in
-                    .image(ImageGenerationParams(
+                    ImageGenerationSubmission.imageParams(
                         prompt: gen.prompt,
                         aspectRatio: gen.aspectRatio,
                         resolution: gen.resolution,
                         quality: gen.quality,
-                        imageURLs: uploaded,
+                        uploaded: uploaded,
                         numImages: count,
                         stylePreset: gen.stylePreset
-                    ))
+                    )
                 },
                 fileExtension: "jpg",
                 projectURL: editor.projectURL,
@@ -317,7 +326,7 @@ enum EditSubmitter {
                 lyrics: gen.lyrics,
                 styleInstructions: gen.styleInstructions,
                 instrumental: gen.instrumental ?? false,
-                durationSeconds: (audioModel.durations != nil || expectsVideoSource) && gen.duration > 0 ? gen.duration : nil,
+                durationSeconds: (audioModel.durations?.isEmpty == false || expectsVideoSource) && gen.duration > 0 ? gen.duration : nil,
                 videoURL: sourceVideoURL
             )
             if let err = audioModel.validate(params: params) {
@@ -340,7 +349,10 @@ enum EditSubmitter {
             )
         }
 
-        if UpscaleModelConfig.allModels.contains(where: { $0.id == modelId }) {
+        if let upscaleModel = UpscaleModelConfig.allModels.first(where: { $0.id == modelId }) {
+            guard upscaleModel.supportedTypes.contains(asset.type) else {
+                throw RerunError.invalid("\(upscaleModel.displayName) does not support \(asset.type.rawValue).")
+            }
             guard let source = preUploaded?.first else { throw RerunError.missingSource }
             let isImage = asset.type == .image
             return editor.generationService.generate(
@@ -373,11 +385,12 @@ enum EditSubmitter {
     // MARK: - Panel seeds
 
     /// GenerationInput for an Edit action — opens the generation panel pre-filled with the asset as source.
-    static func editSeed(for asset: MediaAsset) -> GenerationInput? {
+    static func editSeed(for asset: MediaAsset, preferredModelId: String? = nil) -> GenerationInput? {
         let modelId: String
         switch asset.type {
         case .video:
-            guard let m = VideoModelConfig.allModels.first(where: { $0.requiresSourceVideo }) else { return nil }
+            let candidates = VideoModelConfig.allModels.filter { $0.requiresSourceVideo }
+            guard let m = candidates.first(where: { $0.id == preferredModelId }) ?? candidates.first else { return nil }
             modelId = m.id
         case .image:
             guard let m = ImageModelConfig.nanoBananaPro else { return nil }
@@ -391,10 +404,11 @@ enum EditSubmitter {
     }
 
     /// GenerationInput for Create Video — uses the image as a first frame or as a reference.
-    static func createVideoSeed(for asset: MediaAsset, asReference: Bool) -> GenerationInput? {
-        guard let model = VideoModelConfig.allModels.first(where: {
+    static func createVideoSeed(for asset: MediaAsset, asReference: Bool, preferredModelId: String? = nil) -> GenerationInput? {
+        let candidates = VideoModelConfig.allModels.filter {
             !$0.requiresSourceVideo && (asReference ? $0.supportsReferences : $0.supportsFirstFrame)
-        }) else { return nil }
+        }
+        guard let model = candidates.first(where: { $0.id == preferredModelId }) ?? candidates.first else { return nil }
         var stored = GenerationInput(prompt: "", model: model.id, duration: 0, aspectRatio: "", resolution: nil)
         if asReference { stored.referenceImageAssetIds = [asset.id] } else { stored.imageURLAssetIds = [asset.id] }
         return stored
@@ -407,18 +421,20 @@ enum EditSubmitter {
 
     /// Seed the generation panel for a specific Venice audio model.
     ///
-    /// Venice audio is text-to-audio (no video conditioning). Seed the panel with
-    /// the chosen model + the clip's duration so the generated track matches the
-    /// clip length; the result is placed on the timeline at the clip start.
+    /// Seed with clip duration and source video when the audio model accepts video.
     static func videoAudioSeed(for asset: MediaAsset, model: AudioModelConfig) -> GenerationInput? {
         guard asset.type == .video else { return nil }
-        return GenerationInput(
+        var stored = GenerationInput(
             prompt: "",
             model: model.id,
             duration: max(0, Int(asset.duration.rounded())),
             aspectRatio: "",
             resolution: nil
         )
+        if model.inputs.contains(.video) {
+            stored.referenceVideoAssetIds = [asset.id]
+        }
+        return stored
     }
 
     // MARK: - Names

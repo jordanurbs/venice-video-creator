@@ -75,13 +75,7 @@ final class MediaAsset: Identifiable {
 
     /// Produce a serializable manifest entry from this asset.
     func toManifestEntry(projectURL: URL?) -> MediaManifestEntry {
-        let source: MediaSource
-        if let projectURL, url.path.hasPrefix(projectURL.path) {
-            let relative = String(url.path.dropFirst(projectURL.path.count + 1))
-            source = .project(relativePath: relative)
-        } else {
-            source = .external(absolutePath: url.path)
-        }
+        let source = MediaSource.make(for: url, projectURL: projectURL)
         let fresh: String? = freshRemoteURL
         return MediaManifestEntry(
             id: id, name: name, type: type, source: source, duration: duration,

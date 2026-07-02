@@ -61,6 +61,12 @@ extension TimelineView {
                 createMenu.addItem(mk("Set as reference", true))
                 createItem.submenu = createMenu
                 submenu.addItem(createItem)
+            case .lastFrameToVideo:
+                let item = NSMenuItem(title: "Create Video from Last Frame", action: #selector(performAILastFrameToVideo(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = clipId
+                item.isEnabled = aiAllowed
+                submenu.addItem(item)
             }
         }
         return submenu.items.isEmpty ? nil : submenu
@@ -96,5 +102,10 @@ extension TimelineView {
               let clipId = info["clipId"] as? String,
               let asReference = info["asReference"] as? Bool else { return }
         editor.beginAICreateVideo(clipId: clipId, asReference: asReference)
+    }
+
+    @objc private func performAILastFrameToVideo(_ sender: Any?) {
+        guard let clipId = (sender as? NSMenuItem)?.representedObject as? String else { return }
+        editor.beginAILastFrameToVideo(clipId: clipId)
     }
 }

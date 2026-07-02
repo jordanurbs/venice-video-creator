@@ -1,9 +1,20 @@
 import SwiftUI
 
+extension View {
+    /// Applies `.textSelection(.enabled)` only when `enabled`. Selectable `Text`
+    /// is backed by an AppKit `NSTextField` whose Auto Layout intrinsic-size
+    /// solve is expensive; we drop it during streaming to avoid main-thread stalls.
+    @ViewBuilder
+    func textSelectable(_ enabled: Bool) -> some View {
+        if enabled { self.textSelection(.enabled) } else { self }
+    }
+}
+
 /// Fenced code blocks render as styled panels; inline + headings collapse into a single
 /// AttributedString rendered by one Text view to minimize hosted-text count under LazyVStack.
 struct MarkdownText: View {
     let text: String
+    var selectable: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
@@ -14,7 +25,7 @@ struct MarkdownText: View {
                         .font(.body)
                         .foregroundStyle(AppTheme.Text.primaryColor)
                         .lineSpacing(AppTheme.Spacing.xs)
-                        .textSelection(.enabled)
+                        .textSelectable(selectable)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -29,7 +40,7 @@ struct MarkdownText: View {
                         Text(code)
                             .font(.system(size: AppTheme.FontSize.sm, design: .monospaced))
                             .foregroundStyle(AppTheme.Text.primaryColor)
-                            .textSelection(.enabled)
+                            .textSelectable(selectable)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(AppTheme.Spacing.md)
                             .background(
@@ -45,7 +56,7 @@ struct MarkdownText: View {
                                 Text(cell)
                                     .font(.body.weight(.semibold))
                                     .foregroundStyle(AppTheme.Text.primaryColor)
-                                    .textSelection(.enabled)
+                                    .textSelectable(selectable)
                                     .gridColumnAlignment(columnAlign(alignments, at: idx))
                             }
                         }
@@ -56,7 +67,7 @@ struct MarkdownText: View {
                                     Text(cell)
                                         .font(.body)
                                         .foregroundStyle(AppTheme.Text.primaryColor)
-                                        .textSelection(.enabled)
+                                        .textSelectable(selectable)
                                 }
                             }
                         }

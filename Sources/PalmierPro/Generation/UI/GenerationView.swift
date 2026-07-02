@@ -188,6 +188,13 @@ struct GenerationView: View {
     private var trimmedPrompt: String { prompt.trimmingCharacters(in: .whitespaces) }
     private var isPromptEmpty: Bool { trimmedPrompt.isEmpty }
 
+    /// Advisory-only: warns when an image prompt is longer than the model's budget.
+    /// Never blocks submission.
+    private var promptBudgetWarning: String? {
+        guard selectedType == .image, !isPromptEmpty else { return nil }
+        return PromptBudget.warning(prompt: prompt, modelId: imageModel.id, modelName: imageModel.displayName)
+    }
+
     private var canSubmit: Bool {
         guard canAffordGeneration else { return false }
         if selectedType == .video && videoModel.requiresSourceVideo {
@@ -241,9 +248,9 @@ struct GenerationView: View {
 
     private var hasAnySettings: Bool {
         switch selectedType {
-        case .video: return !videoModel.durations.isEmpty || !videoModel.aspectRatios.isEmpty || videoModel.resolutions != nil || videoModel.audioDiscountRate != nil
-        case .image: return !imageModel.aspectRatios.isEmpty || imageModel.resolutions != nil || imageModel.qualities != nil || imageModel.maxImages > 1 || !styleCatalog.styles.isEmpty
-        case .audio: return audioModel.supportsInstrumental || audioModel.durations != nil
+        case .video: return !videoModel.durations.isEmpty || !videoModel.aspectRatios.isEmpty || currentResolutions != nil || videoModel.audioConfigurable
+        case .image: return !currentAspectRatios.isEmpty || currentResolutions != nil || currentQualities != nil || supportsImageVariants || supportsImageStylePreset
+        case .audio: return audioModel.supportsInstrumental || (audioModel.durations?.isEmpty == false)
         }
     }
 
@@ -266,17 +273,20 @@ struct GenerationView: View {
     private var currentAspectRatios: [String] {
         switch selectedType {
         case .video: videoModel.aspectRatios
-        case .image: imageModel.aspectRatios
+        case .image: imageReferences.count >= 2 ? [] : imageModel.aspectRatios
         case .audio: []
         }
     }
 
     private var currentResolutions: [String]? {
+        let resolutions: [String]?
         switch selectedType {
-        case .video: videoModel.resolutions
-        case .image: imageModel.resolutions
-        case .audio: nil
+        case .video: resolutions = videoModel.resolutions
+        case .image: resolutions = imageReferences.isEmpty ? imageModel.resolutions : nil
+        case .audio: resolutions = nil
         }
+        guard let resolutions, !resolutions.isEmpty else { return nil }
+        return resolutions
     }
 
     private var effectiveResolution: String? {
@@ -284,7 +294,17 @@ struct GenerationView: View {
     }
 
     private var currentQualities: [String]? {
-        selectedType == .image ? imageModel.qualities : nil
+        guard selectedType == .image, imageReferences.isEmpty,
+              let qualities = imageModel.qualities, !qualities.isEmpty else { return nil }
+        return qualities
+    }
+
+    private var supportsImageVariants: Bool {
+        selectedType == .image && imageReferences.isEmpty && imageModel.maxImages > 1
+    }
+
+    private var supportsImageStylePreset: Bool {
+        selectedType == .image && imageReferences.isEmpty && !styleCatalog.styles.isEmpty
     }
 
     private var audioPromptHint: String {
@@ -292,7 +312,7 @@ struct GenerationView: View {
     }
 
     private var supportsAudioToggle: Bool {
-        selectedType == .video && videoModel.audioDiscountRate != nil
+        selectedType == .video && videoModel.audioConfigurable
     }
 
     private var effectiveGenerateAudio: Bool {
@@ -350,7 +370,7 @@ struct GenerationView: View {
                 generateAudio: effectiveGenerateAudio
             )
         case .image:
-            let quality = imageModel.qualities != nil ? selectedQuality : nil
+            let quality = currentQualities != nil ? selectedQuality : nil
             return CostEstimator.imageCost(
                 model: imageModel,
                 resolution: effectiveResolution,
@@ -360,7 +380,7 @@ struct GenerationView: View {
         case .audio:
             let duration: Int? = audioModel.inputs.contains(.video)
                 ? (audioVideoSource == nil ? nil : effectiveAudioVideoSeconds)
-                : (audioModel.durations != nil ? selectedAudioDuration : nil)
+                : (audioModel.durations?.isEmpty == false ? selectedAudioDuration : nil)
             return CostEstimator.audioCost(
                 model: audioModel, prompt: trimmedPrompt, durationSeconds: duration
             )
@@ -399,7 +419,7 @@ struct GenerationView: View {
     private var settingsSummary: String {
         var parts: [String] = []
         if selectedType == .audio {
-            if audioModel.durations != nil { parts.append("\(selectedAudioDuration)s") }
+            if audioModel.durations?.isEmpty == false { parts.append("\(selectedAudioDuration)s") }
             if audioModel.supportsInstrumental && instrumental { parts.append("Instrumental") }
             return parts.isEmpty ? "Settings" : parts.joined(separator: " \u{00B7} ")
         }
@@ -409,7 +429,7 @@ struct GenerationView: View {
         if !selectedAspectRatio.isEmpty, !currentAspectRatios.isEmpty {
             parts.append(selectedAspectRatio)
         }
-        if selectedType == .image, imageModel.maxImages > 1, selectedNumImages > 1 {
+        if supportsImageVariants, selectedNumImages > 1 {
             parts.append("×\(selectedNumImages)")
         }
         return parts.joined(separator: " \u{00B7} ")
@@ -543,6 +563,14 @@ struct GenerationView: View {
                         )
                 }
                 .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.concentric(outer: AppTheme.Radius.lg, padding: AppTheme.Spacing.sm)))
+
+                if let promptBudgetWarning {
+                    Text(promptBudgetWarning)
+                        .font(.system(size: AppTheme.FontSize.xs))
+                        .foregroundStyle(Color.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .transition(.opacity)
+                }
             }
             .padding(.horizontal, AppTheme.Spacing.sm)
             .padding(.bottom, AppTheme.Spacing.sm)
@@ -590,22 +618,27 @@ struct GenerationView: View {
             guard !isPopulatingPanel else { return }
             if selectedType == .video {
                 resetSettings()
-                if !videoModel.requiresSourceVideo {
-                    sourceVideo = nil
-                }
                 framesRefsMode = .firstLast
-                resetRefPools()
+                sanitizeVideoReferences()
             }
         }
         .onChange(of: selectedImageModelIndex) { _, _ in
             guard !isPopulatingPanel else { return }
             if selectedType == .image {
                 resetSettings()
+                if !imageModel.supportsImageReference {
+                    imageReferences.removeAll()
+                }
             }
         }
         .onChange(of: selectedAudioModelIndex) { _, _ in
             guard !isPopulatingPanel else { return }
-            if selectedType == .audio { resetAudioState() }
+            if selectedType == .audio {
+                resetAudioState()
+                if !audioModel.inputs.contains(.video) {
+                    audioVideoSource = nil
+                }
+            }
         }
     }
 
@@ -878,13 +911,13 @@ struct GenerationView: View {
                 aspectRatio: selectedAspectRatio
             )
         case .audio:
-            let secs: Int? = audioModel.durations != nil
+            let secs: Int? = audioModel.durations?.isEmpty == false
                 ? selectedAudioDuration
                 : (audioModel.inputs.contains(.video) && audioVideoSource != nil ? effectiveAudioVideoSeconds : nil)
             estimatedUSD = await api.audioQuote(model: currentModelId, durationSeconds: secs, characterCount: nil)
         case .image:
             if let cents = imageModel.creditsPerImage[""], cents > 0 {
-                estimatedUSD = (cents / 100.0) * Double(max(1, selectedNumImages))
+                estimatedUSD = (cents / 100.0) * Double(supportsImageVariants ? max(1, selectedNumImages) : 1)
             } else {
                 estimatedUSD = nil
             }
@@ -1171,6 +1204,21 @@ struct GenerationView: View {
         refImages.removeAll()
         refVideos.removeAll()
         refAudios.removeAll()
+    }
+
+    private func sanitizeVideoReferences() {
+        if videoModel.requiresSourceVideo {
+            firstFrame = nil
+            lastFrame = nil
+            resetRefPools()
+            imageReferences = videoModel.supportsReferences ? Array(imageReferences.prefix(1)) : []
+            return
+        }
+        sourceVideo = nil
+        imageReferences.removeAll()
+        if !videoModel.supportsFirstFrame { firstFrame = nil }
+        if !videoModel.supportsLastFrame { lastFrame = nil }
+        if !showsRefSections { resetRefPools() }
     }
 
     private var refCounterLabel: String {
@@ -1526,7 +1574,7 @@ struct GenerationView: View {
             if selectedType == .video {
                 settingsPicker("Duration", selection: $selectedDuration, options: videoModel.durations) { "\($0)s" }
             }
-            if selectedType == .audio, let durations = audioModel.durations {
+            if selectedType == .audio, let durations = audioModel.durations, !durations.isEmpty {
                 settingsPicker("Duration", selection: $selectedAudioDuration, options: durations) { "\($0)s" }
             }
             if !currentAspectRatios.isEmpty {
@@ -1538,14 +1586,14 @@ struct GenerationView: View {
             if let qualities = currentQualities {
                 settingsPicker("Quality", selection: $selectedQuality, options: qualities) { $0.capitalized }
             }
-            if selectedType == .image, imageModel.maxImages > 1 {
+            if supportsImageVariants {
                 settingsPicker(
                     "Count",
                     selection: $selectedNumImages,
                     options: Array(1...imageModel.maxImages)
                 ) { "\($0)" }
             }
-            if selectedType == .image, !styleCatalog.styles.isEmpty {
+            if supportsImageStylePreset {
                 stylePickerMenu
             }
             if selectedType == .audio && audioModel.supportsInstrumental {
@@ -1554,7 +1602,7 @@ struct GenerationView: View {
                     .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
             }
-            if selectedType == .video, videoModel.audioDiscountRate != nil {
+            if supportsAudioToggle {
                 let discount = videoModel.audioDiscount(for: effectiveResolution)
                 let savings = discount.map { Int(((1 - $0) * 100).rounded()) }
                 Toggle("Generate audio", isOn: $generateAudio)
@@ -1667,7 +1715,9 @@ struct GenerationView: View {
             let inputAssets = videoInputAssets(for: videoModel)
             let modelError: String?
             if videoModel.requiresSourceVideo {
-                modelError = videoModel.validate(duration: 0, aspectRatio: "", resolution: nil)
+                modelError = videoModel.validate(
+                    duration: 0, aspectRatio: "", resolution: nil, validateDuration: false
+                )
             } else {
                 modelError = videoModel.validate(
                     duration: selectedDuration,
@@ -1677,9 +1727,10 @@ struct GenerationView: View {
             }
             return modelError ?? inputAssets.validate(for: videoModel)
         case .image:
-            let quality = imageModel.qualities != nil ? selectedQuality : nil
+            let quality = currentQualities != nil ? selectedQuality : nil
             let imageCount = imageModel.maxImages > 1
-                ? min(imageModel.maxImages, max(1, selectedNumImages)) : 1
+                ? (supportsImageVariants ? min(imageModel.maxImages, max(1, selectedNumImages)) : 1)
+                : 1
             return imageModel.validate(
                 aspectRatio: selectedAspectRatio,
                 resolution: effectiveResolution,
@@ -1704,7 +1755,8 @@ struct GenerationView: View {
             styleInstructions: audioModel.supportsStyleInstructions && !styleInstructions.isEmpty
                 ? styleInstructions : nil,
             instrumental: audioModel.supportsInstrumental ? instrumental : false,
-            durationSeconds: (audioModel.durations != nil || audioModel.inputs.contains(.video)) ? audioDuration : nil,
+            durationSeconds: (audioModel.durations?.isEmpty == false || audioModel.inputs.contains(.video))
+                ? audioDuration : nil,
             videoURL: videoURL
         )
     }
@@ -1713,7 +1765,7 @@ struct GenerationView: View {
         let audioDuration: Int = {
             guard selectedType == .audio else { return 0 }
             if audioModel.inputs.contains(.video) { return effectiveAudioVideoSeconds }
-            return audioModel.durations != nil ? selectedAudioDuration : 0
+            return audioModel.durations?.isEmpty == false ? selectedAudioDuration : 0
         }()
         if let err = preflightValidation(audioDuration: audioDuration) {
             flashDropError(err)
@@ -1725,7 +1777,7 @@ struct GenerationView: View {
             duration: selectedType == .video ? effectiveVideoSeconds : audioDuration,
             aspectRatio: selectedAspectRatio,
             resolution: effectiveResolution,
-            quality: selectedType == .image && imageModel.qualities != nil ? selectedQuality : nil,
+            quality: selectedType == .image && currentQualities != nil ? selectedQuality : nil,
             voice: selectedType == .audio && audioModel.voices != nil && !selectedVoice.isEmpty
                 ? selectedVoice : nil,
             lyrics: selectedType == .audio && audioModel.supportsLyrics && !lyrics.isEmpty
@@ -1736,11 +1788,11 @@ struct GenerationView: View {
                 ? instrumental : nil,
             generateAudio: supportsAudioToggle ? generateAudio : nil
         )
-        if selectedType == .image, !selectedStyle.isEmpty {
+        if supportsImageStylePreset, !selectedStyle.isEmpty {
             genInput.stylePreset = selectedStyle
         }
         let imageCount: Int = {
-            guard selectedType == .image, imageModel.maxImages > 1 else { return 1 }
+            guard supportsImageVariants else { return 1 }
             return min(imageModel.maxImages, max(1, selectedNumImages))
         }()
         if imageCount > 1 {
@@ -1996,13 +2048,15 @@ struct GenerationView: View {
         if !model.supportsLyrics { lyrics = "" }
         if !model.supportsStyleInstructions { styleInstructions = "" }
         if !model.supportsInstrumental { instrumental = false }
-        if let durations = model.durations, !durations.contains(selectedAudioDuration) {
+        if let durations = model.durations, !durations.isEmpty, !durations.contains(selectedAudioDuration) {
             selectedAudioDuration = durations.first ?? 30
         }
     }
 
     private func resetSettings() {
-        if !currentAspectRatios.contains(selectedAspectRatio) {
+        if currentAspectRatios.isEmpty {
+            selectedAspectRatio = ""
+        } else if !currentAspectRatios.contains(selectedAspectRatio) {
             selectedAspectRatio = currentAspectRatios.first ?? "16:9"
         }
         if let resolutions = currentResolutions, !resolutions.contains(selectedResolution) {
@@ -2014,9 +2068,16 @@ struct GenerationView: View {
         if selectedType == .video, !videoModel.durations.contains(selectedDuration) {
             selectedDuration = videoModel.durations.first ?? 5
         }
-        if selectedType == .video { generateAudio = true }
         if selectedType == .image {
-            selectedNumImages = min(max(1, selectedNumImages), imageModel.maxImages)
+            selectedNumImages = supportsImageVariants
+                ? min(max(1, selectedNumImages), imageModel.maxImages)
+                : 1
+            if !supportsImageStylePreset
+                || (!styleCatalog.styles.isEmpty && !styleCatalog.styles.contains(selectedStyle)) {
+                selectedStyle = ""
+            }
+        } else {
+            selectedStyle = ""
         }
     }
 }

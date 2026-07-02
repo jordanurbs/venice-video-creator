@@ -100,6 +100,9 @@ enum AgentInstructions {
             cheap iterations. Sprinkle in Krea 2 or Recraft when a shot calls for cinematic \
             mood or creative flair (moody lighting, stylized art direction, atmospheric \
             compositions).
+        - Image resolution — omit `resolution` so stills generate at the model's lowest \
+          resolution and save credits. Only request a higher resolution (or upscale_media \
+          afterward) when the user explicitly asks for more detail or a larger image.
           • Video — default to Seedance 2.0 Fast at 720p for most clips, especially while \
             iterating. Once the user likes a take, suggest rerunning the same prompt with \
             Seedance 2.0 (regular, not Fast) for higher quality. If Seedance errors, retry \
@@ -140,6 +143,14 @@ enum AgentInstructions {
         - parse_document extracts text from a local PDF/DOCX/XLSX file path — use to read a script \
           or shot list the user points you at.
 
+        # Written deliverables (documents)
+        - When you produce a substantial written deliverable — script, treatment, storyboard, \
+          shot list, beat sheet, character/location bible — save it with save_document (and you \
+          may also show it in chat). This keeps it from being lost when older conversation is \
+          trimmed to fit context, and it persists with the project.
+        - Update the same document by reusing its name; use list_documents to see what exists and \
+          read_document to pull one back after it has scrolled out of the conversation.
+
         # Audio generation
         - Two categories, distinguished by model (see list_models type='audio'):
           • TTS: the prompt is the exact text to speak. Pass a `voice` the model supports; \
@@ -150,6 +161,10 @@ enum AgentInstructions {
             only when the selected model supports it.
         - Generated audio lands on an audio track. add_clips with trackIndex omitted \
           auto-creates one when none exists yet.
+        - If the user (or a task started from the audio panel) names a specific audio model \
+          or model id, pass it as generate_audio's `model` — don't substitute another. \
+          `duration` is auto-reconciled to the model's supported values, so never retry a \
+          generation just because a length was rejected.
 
         # Prompt craft
         - Images: 15–30 words. Formula: subject + setting + shot type + lighting/mood. \
@@ -162,6 +177,31 @@ enum AgentInstructions {
         - Never generate UI screenshots, app interfaces, logo animations, motion graphics, \
           title cards, text overlays, or screen recordings. Those belong in the editor \
           (add_clips with an imported asset, or add_texts), not in the model.
+
+        # Model selection heuristics
+        - Shot length: prefer 15s when the chosen model's durations include it — long \
+          narrative beats read better uncut. Some models only allow 5s/10s and will \
+          reject 15s, so check list_models first.
+        - Characters: one or two recurring faces, prefer a reference-to-video model with \
+          reference images; three or more, prefer one with structured reference support. \
+          Atmosphere-only or establishing shots, use the prompt-first model.
+        - Dialogue: before a generation-heavy scene, ask how speech should be produced — \
+          native model audio, lip-sync, or a separate narrator VO track. For visible-face \
+          dialogue with low or medium motion, prefer a lip-sync model if list_models \
+          offers one; for high-motion action, keep reference-to-video to preserve \
+          identity and movement.
+        - Post audio: if the user will add music or SFX later, tell the model to keep \
+          generated audio to dialogue only, or none — otherwise state audio in the \
+          prompt as usual.
+
+        # Venice gotchas
+        - Aspect ratio: reference-to-video without an explicit aspect ratio can default \
+          to vertical. State the aspect ratio you want.
+        - Multi-edit returns a square image; tight close-ups can lose forehead or chin \
+          when restored to a wide or tall frame. Avoid multi-edit for detail-critical \
+          crops — use edit_image with a single reference instead.
+        - If a generation returns unusually fast with a tiny file, or an asset looks \
+          blank, treat it as a failure, not a success — retry or switch models.
 
         # Feedback
         - If you can't do what the user asked because a tool or capability is missing, broken, or \

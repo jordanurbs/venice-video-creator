@@ -82,6 +82,20 @@ struct AudioModelConfig: Identifiable, Sendable {
     var minSeconds: Int { caps.minSeconds ?? 1 }
     var maxSeconds: Int { caps.maxSeconds ?? 900 }
 
+    /// Coerce a requested duration into something this model accepts: clamp
+    /// within a video model's span range, snap to the nearest allowed value for
+    /// a fixed-duration model, or drop it when the model ignores duration.
+    /// Keeps agent generations from failing on a length the model can't honor.
+    func reconciledDuration(_ requested: Int?) -> Int? {
+        guard let requested else { return nil }
+        if inputs.contains(.video) {
+            return min(max(requested, minSeconds), maxSeconds)
+        }
+        guard let allowed = durations, !allowed.isEmpty else { return nil }
+        if allowed.contains(requested) { return requested }
+        return allowed.min { abs($0 - requested) < abs($1 - requested) }
+    }
+
     func validate(spanSeconds: Double) -> String? {
         let s = Int(spanSeconds.rounded())
         if s < minSeconds {
@@ -104,18 +118,46 @@ struct AudioModelConfig: Identifiable, Sendable {
 
     func validate(params: AudioGenerationParams) -> String? {
         let promptLen = params.prompt.trimmingCharacters(in: .whitespaces).count
-        if promptLen < minPromptLength {
+        if inputs.contains(.text), promptLen < minPromptLength {
             return "\(displayName) requires prompt ≥ \(minPromptLength) characters (got \(promptLen))."
         }
-        if let allowed = voices, let v = params.voice, !v.isEmpty, !allowed.contains(v) {
-            let shown = Array(allowed.prefix(6)) + (allowed.count > 6 ? ["…"] : [])
-            return unsupportedValue(model: displayName, field: "voice", value: v, allowed: shown)
+        if let v = params.voice, !v.isEmpty {
+            guard let allowed = voices, !allowed.isEmpty else {
+                return "\(displayName) does not support voice."
+            }
+            if !allowed.contains(v) {
+                let shown = Array(allowed.prefix(6)) + (allowed.count > 6 ? ["…"] : [])
+                return unsupportedValue(model: displayName, field: "voice", value: v, allowed: shown)
+            }
         }
-        if let allowed = durations, let d = params.durationSeconds, !allowed.contains(d) {
-            return unsupportedValue(
-                model: displayName, field: "duration",
-                value: "\(d)s", allowed: allowed.map { "\($0)s" }
-            )
+        if let d = params.durationSeconds {
+            if inputs.contains(.video) {
+                if d < minSeconds || d > maxSeconds {
+                    return "\(displayName) accepts \(minSeconds)…\(maxSeconds)s of video (got \(d)s)."
+                }
+            } else {
+                guard let allowed = durations, !allowed.isEmpty else {
+                    return "\(displayName) does not support duration."
+                }
+                if !allowed.contains(d) {
+                    return unsupportedValue(
+                        model: displayName, field: "duration",
+                        value: "\(d)s", allowed: allowed.map { "\($0)s" }
+                    )
+                }
+            }
+        }
+        if let lyrics = params.lyrics, !lyrics.isEmpty, !supportsLyrics {
+            return "\(displayName) does not support lyrics."
+        }
+        if let instructions = params.styleInstructions, !instructions.isEmpty, !supportsStyleInstructions {
+            return "\(displayName) does not support style instructions."
+        }
+        if params.instrumental, !supportsInstrumental {
+            return "\(displayName) does not support instrumental mode."
+        }
+        if params.videoURL != nil, !inputs.contains(.video) {
+            return "\(displayName) does not accept video input."
         }
         return nil
     }

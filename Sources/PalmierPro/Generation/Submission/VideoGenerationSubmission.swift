@@ -206,9 +206,16 @@ struct VideoGenerationSubmission {
             if frames.count > 1, !model.supportsLastFrame {
                 return "\(model.displayName) does not accept a last frame"
             }
-            if model.framesAndReferencesExclusive, !frames.isEmpty, !allRefs.isEmpty {
-                return "\(model.displayName) uses frames OR references, not both. Clear one side."
-            }
+        if model.framesAndReferencesExclusive, !frames.isEmpty, !allRefs.isEmpty {
+            return "\(model.displayName) uses frames OR references, not both. Clear one side."
+        }
+        // Reference/image-to-video models need at least one visual input; Venice
+        // rejects them with a generic 400 otherwise. Catch it here with guidance.
+        if model.requiresReferenceImage, frames.isEmpty, imageRefs.isEmpty, videoRefs.isEmpty {
+            return model.supportsFirstFrame
+                ? "\(model.displayName) needs a starting image. Pass startFrameMediaRef (or referenceImageMediaRefs)."
+                : "\(model.displayName) is a reference-to-video model — pass at least one image via referenceImageMediaRefs."
+        }
             if imageRefs.count > model.maxReferenceImages {
                 return "\(model.displayName) accepts at most \(model.maxReferenceImages) image references"
             }

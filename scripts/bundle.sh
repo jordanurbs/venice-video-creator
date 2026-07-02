@@ -36,11 +36,11 @@ fi
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-Developer ID Application: Palmier, Inc. (MMFLRC7562)}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-palmier-notary}"
 SENTRY_DSN="${SENTRY_DSN:-}"
-PROVISION_PROFILE="${PROVISION_PROFILE:-$ROOT/scripts/Palmier_Pro_Developer_ID.provisionprofile}"
-ENTITLEMENTS="$ROOT/scripts/PalmierPro.entitlements"
-RESOURCES="$ROOT/Sources/PalmierPro/Resources"
-# User-facing app + executable names (the Swift module stays "PalmierPro").
-EXE="VeniceVideoEditor"
+PROVISION_PROFILE="${PROVISION_PROFILE:-$ROOT/scripts/Venice_Video_Creator_Developer_ID.provisionprofile}"
+ENTITLEMENTS="$ROOT/scripts/VeniceVideoCreator.entitlements"
+RESOURCES="$ROOT/Sources/VeniceVideoCreator/Resources"
+# User-facing app + executable names.
+EXE="VeniceVideoCreator"
 APP="$ROOT/.build/Venice Video Creator.app"
 ZIP="$ROOT/.build/VeniceVideoCreator.zip"
 DMG="$ROOT/.build/VeniceVideoCreator.dmg"
@@ -68,7 +68,7 @@ cp "$RESOURCES/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 cp -R "$SPARKLE_FW" "$APP/Contents/Frameworks/Sparkle.framework"
 
 # Flatten SwiftPM's resource bundle into the app's Resources tree.
-RES_BUNDLE="$(dirname "$BIN")/PalmierPro_PalmierPro.bundle"
+RES_BUNDLE="$(dirname "$BIN")/VeniceVideoCreator_VeniceVideoCreator.bundle"
 if [ -d "$RES_BUNDLE/Fonts" ]; then
   cp -R "$RES_BUNDLE/Fonts" "$APP/Contents/Resources/"
 else
@@ -117,7 +117,7 @@ if [ "$MODE" = "fast" ]; then
   exit 0
 fi
 
-DSYM="$ROOT/.build/PalmierPro.dSYM"
+DSYM="$ROOT/.build/VeniceVideoCreator.dSYM"
 echo "==> Generating dSYM"
 rm -rf "$DSYM"
 dsymutil "$APP/Contents/MacOS/$EXE" -o "$DSYM"

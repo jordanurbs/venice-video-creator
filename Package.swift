@@ -3,12 +3,10 @@
 import PackageDescription
 
 let package = Package(
-    name: "PalmierPro",
+    name: "VeniceVideoCreator",
     platforms: [.macOS(.v26)],
     products: [
-        // User-facing executable name. The target/module stays "PalmierPro" so
-        // internal resource-bundle paths (PalmierPro_PalmierPro.bundle) are unchanged.
-        .executable(name: "VeniceVideoEditor", targets: ["PalmierPro"]),
+        .executable(name: "VeniceVideoCreator", targets: ["VeniceVideoCreator"]),
     ],
     dependencies: [
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
@@ -18,14 +16,14 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "PalmierPro",
+            name: "VeniceVideoCreator",
             dependencies: [
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "Tokenizers", package: "swift-transformers"),
                 .product(name: "Lottie", package: "lottie-ios"),
             ],
-            path: "Sources/PalmierPro",
+            path: "Sources/VeniceVideoCreator",
             exclude: [
                 "Resources/Info.plist",
                 "Resources/AppIcon.icon",
@@ -42,9 +40,9 @@ let package = Package(
         ),
         .plugin(name: "MetalCIKernelPlugin", capability: .buildTool()),
         .testTarget(
-            name: "PalmierProTests",
-            dependencies: ["PalmierPro"],
-            path: "Tests/PalmierProTests"
+            name: "VeniceVideoCreatorTests",
+            dependencies: ["VeniceVideoCreator"],
+            path: "Tests/VeniceVideoCreatorTests"
         ),
     ]
 )

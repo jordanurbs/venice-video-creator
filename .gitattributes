@@ -4,8 +4,8 @@
 # Info.plist are intentionally NOT here, because upstream may add permission keys
 # we actually need; those should be resolved by hand.
 
-Sources/PalmierPro/Resources/AppIcon.icns merge=ours
-Sources/PalmierPro/Resources/AppIcon.png  merge=ours
+Sources/VeniceVideoCreator/Resources/AppIcon.icns merge=ours
+Sources/VeniceVideoCreator/Resources/AppIcon.png  merge=ours
 
 # Treat icon assets as binary so git never attempts a line merge.
 *.icns binary

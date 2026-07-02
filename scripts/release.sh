@@ -29,7 +29,7 @@ if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PLIST="$ROOT/Sources/PalmierPro/Resources/Info.plist"
+PLIST="$ROOT/Sources/VeniceVideoCreator/Resources/Info.plist"
 APPCAST="$ROOT/appcast.xml"
 DMG="$ROOT/.build/VeniceVideoCreator.dmg"
 RELEASE_BRANCH="${RELEASE_BRANCH:-venice-integration}"

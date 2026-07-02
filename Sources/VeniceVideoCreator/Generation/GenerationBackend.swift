@@ -3,7 +3,7 @@ import Combine
 
 /// Venice-backed generation backend.
 ///
-/// Replaces the original Convex/Palmier cloud backend. The public surface is
+/// Replaces the original Convex/Venice cloud backend. The public surface is
 /// unchanged so `GenerationService` keeps working: `submit` kicks off a job and
 /// returns an id, `subscribe` exposes job updates as a Combine publisher, and
 /// `uploadReference` turns a local file into something Venice can ingest.

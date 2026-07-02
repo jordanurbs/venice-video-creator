@@ -4,7 +4,7 @@ import UserNotifications
 
 @MainActor
 enum AppNotifications {
-    private static let enabledKey = "io.palmier.pro.notifications.enabled"
+    private static let enabledKey = "ai.venice.videocreator.notifications.enabled"
 
     static var isEnabled: Bool {
         get {

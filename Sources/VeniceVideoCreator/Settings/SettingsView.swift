@@ -196,7 +196,7 @@ final class SettingsWindowController: NSWindowController {
         window.setContentSize(AppTheme.Window.settingsDefault)
         window.minSize = AppTheme.Window.settingsMin
         window.title = "Settings"
-        window.setFrameAutosaveName("PalmierProSettings-v4")
+        window.setFrameAutosaveName("VeniceVideoCreatorSettings-v4")
         window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = AppTheme.Background.base.withAlphaComponent(0.4)
         window.isOpaque = false

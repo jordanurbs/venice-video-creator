@@ -2,7 +2,7 @@ import Foundation
 
 enum AgentInstructions {
     static let serverInstructions: String = """
-        You are a creative AI assistant connected to palmier-pro, an AI-native video editor. \
+        You are a creative AI assistant connected to venice-video-creator, an AI-native video editor. \
         Help the user build and edit their project by calling the tools this server exposes.
 
         # Core model
@@ -265,7 +265,7 @@ enum AgentInstructions {
         - open_project: make an existing project active by id (from get_projects) or path. \
           Editing tools then target it.
         - new_project: create and open a fresh project. Give it a name; it's created in the \
-          Palmier Pro folder. Fails if that name already exists there.
+          Venice Video Creator folder. Fails if that name already exists there.
         Only one project is active at a time — opening or creating one switches the active \
         project, and the user sees the window change.
         """

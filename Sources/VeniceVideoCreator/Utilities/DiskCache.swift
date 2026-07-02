@@ -1,9 +1,9 @@
 import Foundation
 
-/// A named directory under ~/Library/Caches/PalmierPro with size/clear helpers.
+/// A named directory under ~/Library/Caches/VeniceVideoCreator with size/clear helpers.
 struct DiskCache: Sendable {
     static let rootDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("PalmierPro", isDirectory: true)
+        .appendingPathComponent("VeniceVideoCreator", isDirectory: true)
 
     let directory: URL
 

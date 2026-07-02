@@ -165,7 +165,7 @@ final class SampleProjectService {
         let base = (try? FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
         )) ?? FileManager.default.temporaryDirectory
-        return base.appendingPathComponent("PalmierPro/Samples", isDirectory: true)
+        return base.appendingPathComponent("VeniceVideoCreator/Samples", isDirectory: true)
     }
 
     private static func safeName(_ name: String) -> String {

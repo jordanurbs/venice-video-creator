@@ -5,8 +5,8 @@ import UniformTypeIdentifiers
 // MARK: - Folder-drag string contract
 
 extension MediaTab {
-    static let folderDragScheme = "palmier-folder://"
-    static let assetDragScheme = "palmier-asset://"
+    static let folderDragScheme = "venice-folder://"
+    static let assetDragScheme = "venice-asset://"
 
     static func folderDragString(forFolderId id: String) -> String {
         folderDragScheme + id
@@ -20,7 +20,7 @@ extension MediaTab {
         assetDragScheme + id
     }
 
-    /// A search "moment": `palmier-asset://<id>#<start>-<end>` in source seconds
+    /// A search "moment": `venice-asset://<id>#<start>-<end>` in source seconds
     static func assetDragString(forAssetId id: String, segment: ClosedRange<Double>) -> String {
         assetDragScheme + id + String(format: "#%.3f-%.3f", segment.lowerBound, segment.upperBound)
     }

@@ -6,18 +6,18 @@ struct MCPInstructionsPane: View {
     private var mcpEndpoint: String { "\(serverURL)/mcp" }
 
     private var claudeCodeCommand: String {
-        "claude mcp add --transport http palmier-pro \(mcpEndpoint)"
+        "claude mcp add --transport http venice-video-creator \(mcpEndpoint)"
     }
 
     private var codexCommand: String {
-        "codex mcp add palmier-pro --url \(mcpEndpoint)"
+        "codex mcp add venice-video-creator --url \(mcpEndpoint)"
     }
 
     private var cursorJSONConfig: String {
         """
         {
           "mcpServers": {
-            "palmier-pro": {
+            "venice-video-creator": {
               "type": "http",
               "url": "\(mcpEndpoint)"
             }
@@ -30,7 +30,7 @@ struct MCPInstructionsPane: View {
         """
         {
           "mcpServers": {
-            "palmier-pro": {
+            "venice-video-creator": {
               "command": "npx",
               "args": [
                 "-y",
@@ -52,7 +52,7 @@ struct MCPInstructionsPane: View {
             let data = try? JSONSerialization.data(withJSONObject: config, options: [.sortedKeys]),
             let encoded = data.base64EncodedString().addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
         else { return nil }
-        return URL(string: "cursor://anysphere.cursor-deeplink/mcp/install?name=palmier-pro&config=\(encoded)")
+        return URL(string: "cursor://anysphere.cursor-deeplink/mcp/install?name=venice-video-creator&config=\(encoded)")
     }
 
     var body: some View {

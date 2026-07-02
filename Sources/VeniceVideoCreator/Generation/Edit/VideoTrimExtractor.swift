@@ -82,7 +82,7 @@ enum VideoTrimExtractor {
         let videoComposition = try await AVVideoComposition.videoComposition(
             withPropertiesOf: composition
         )
-        var videoConfig = videoComposition.palmierConfiguration()
+        var videoConfig = videoComposition.veniceConfiguration()
         videoConfig.frameDuration = CMTime(value: 1, timescale: targetFps)
         session.videoComposition = AVVideoComposition(configuration: videoConfig)
 

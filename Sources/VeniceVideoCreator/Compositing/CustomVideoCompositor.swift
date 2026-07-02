@@ -20,7 +20,7 @@ final class CustomVideoCompositor: NSObject, AVVideoCompositing, @unchecked Send
         return CIContext(options: options)
     }()
 
-    private let queue = DispatchQueue(label: "io.palmier.compositor", qos: .userInteractive)
+    private let queue = DispatchQueue(label: "ai.venice.compositor", qos: .userInteractive)
     private let lock = NSLock()
     private var pending: [ObjectIdentifier: AVAsynchronousVideoCompositionRequest] = [:]
 

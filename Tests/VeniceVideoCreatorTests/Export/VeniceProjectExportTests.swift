@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import VeniceVideoCreator
 
-@Suite("Palmier project export (collect media)")
-struct PalmierProjectExportTests {
+@Suite("Venice project export (collect media)")
+struct VeniceProjectExportTests {
 
     private let fm = FileManager.default
 
@@ -41,7 +41,7 @@ struct PalmierProjectExportTests {
         let (root, source, dest, externalContents) = try makeFixture()
         defer { try? fm.removeItem(at: root) }
 
-        let report = try PalmierProjectExporter.export(
+        let report = try VeniceProjectExporter.export(
             timeline: Fixtures.timeline(),
             manifest: manifest(externalPath: root.appendingPathComponent("external-clip.mov").path),
             generationLog: GenerationLog(),
@@ -80,7 +80,7 @@ struct PalmierProjectExportTests {
         let (root, source, dest, _) = try makeFixture()
         defer { try? fm.removeItem(at: root) }
 
-        try PalmierProjectExporter.export(
+        try VeniceProjectExporter.export(
             timeline: Fixtures.timeline(),
             manifest: manifest(externalPath: root.appendingPathComponent("external-clip.mov").path),
             generationLog: GenerationLog(),
@@ -108,7 +108,7 @@ struct PalmierProjectExportTests {
             MediaManifestEntry(id: "b", name: "B", type: .video, source: .external(absolutePath: externalPath), duration: 1),
         ]
 
-        let report = try PalmierProjectExporter.export(
+        let report = try VeniceProjectExporter.export(
             timeline: Fixtures.timeline(), manifest: m, generationLog: GenerationLog(),
             sourceProjectURL: source, to: dest
         )

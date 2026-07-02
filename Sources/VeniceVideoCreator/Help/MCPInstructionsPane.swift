@@ -142,7 +142,7 @@ struct MCPInstructionsPane: View {
 
     private func openClaudeDesktopBundle() {
         guard let resourceURL = Bundle.main.resourceURL else { return }
-        let url = resourceURL.appendingPathComponent("palmier-pro.mcpb")
+        let url = resourceURL.appendingPathComponent("venice-video-creator.mcpb")
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         NSWorkspace.shared.open(url, configuration: .init(), completionHandler: nil)
     }

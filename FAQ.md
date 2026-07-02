@@ -1,6 +1,6 @@
 # FAQ
 
-**Why was Palmier Pro built?**
+**Why was Venice Video Creator built?**
 
 We are a YC startup that has been making AI launch videos for other companies. We noticed a big gap between generative AI and the video editor, so we built this to solve our biggest pain points. First, let's talk about how we make our AI videos better:
 
@@ -12,7 +12,7 @@ With these two requirements, the pain points we've encountered:
 1. Most generative platforms live on the web. To make a production-grade video, we have to go through the editing process inside the video editor. So each iteration looks like: generate on the web → download to your laptop → import to your timeline editor → replace the clip and redo the editing → repeat.
 2. Projects get large, and they become extremely hard to maintain. We have files of all the versions of each shot, which require us to manually rename them to stay organized. We have context spread across different AI agents that we talk to: Claude for scripting, AI chat from the generative platform for generation.
 
-So we built Palmier Pro to solve these issues. The video editor is the single source of truth. You can use your own AI agent to do scripting, generating, and editing with all the context you need.
+So we built Venice Video Creator to solve these issues. The video editor is the single source of truth. You can use your own AI agent to do scripting, generating, and editing with all the context you need.
 
 **Do you have feature parity with Adobe Premiere Pro or CapCut?**
 
@@ -38,18 +38,18 @@ In-app chat:
 External chat with MCP server:
 1. Centralized spending on tokens. You don't have to worry about paying for another service.
 2. A more mature chat client. Claude/Cursor/Codex handles context window/memory/web search and they will continue to get better.
-3. Much more interesting use cases with integrating with other workflows. Since Palmier Pro is just a MCP server, you can connect your video editor with other MCP servers all in one chat, so context is centralized.
+3. Much more interesting use cases with integrating with other workflows. Since Venice Video Creator is just a MCP server, you can connect your video editor with other MCP servers all in one chat, so context is centralized.
 
-Some examples on using Palmier Pro MCP server with Claude:
+Some examples on using Venice Video Creator MCP server with Claude:
 
-1. Write your idea and script in Claude, then ask it to generate videos inside Palmier Pro
-2. Pull sound effect from Epidemic Sound MCP server and import to Palmier Pro MCP server
-3. Pull your team's idea in #marketing Slack channel and create a quick prototype in Palmier Pro
+1. Write your idea and script in Claude, then ask it to generate videos inside Venice Video Creator
+2. Pull sound effect from Epidemic Sound MCP server and import to Venice Video Creator MCP server
+3. Pull your team's idea in #marketing Slack channel and create a quick prototype in Venice Video Creator
 
 **What models are supported?**
 
 We support most SOTA generation models. For images, the most common ones are Nano Banana Pro, GPT-image-2. For videos, Seedance2, Kling3, Grok, Veo, etc. We constantly push update for more. The in-app chat runs on Venice text models (pick one in Settings → Models). You can also connect external clients via MCP.
 
-**What is the future of Palmier Pro?**
+**What is the future of Venice Video Creator?**
 
-We envision Palmier Pro as the future of video editing, a UI for both humans and agents. We strongly believe agents cannot replicate human creativity, but in the process of generating and editing videos, there is a lot of manual work that AI can help with.
+We envision Venice Video Creator as the future of video editing, a UI for both humans and agents. We strongly believe agents cannot replicate human creativity, but in the process of generating and editing videos, there is a lot of manual work that AI can help with.

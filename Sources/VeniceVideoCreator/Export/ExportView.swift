@@ -501,7 +501,7 @@ struct ExportView: View {
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             Task {
-                let report = await service.exportPalmierProject(
+                let report = await service.exportVeniceProject(
                     timeline: editor.timeline,
                     manifest: editor.mediaManifest,
                     generationLog: editor.generationLog,

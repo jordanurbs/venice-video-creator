@@ -2,7 +2,7 @@ import Foundation
 
 /// Writes a self-contained `.palmier` package: every resolvable media reference is copied
 /// into the new bundle's `media/` directory and rewritten to a project-relative source
-enum PalmierProjectExporter {
+enum VeniceProjectExporter {
 
     struct Report: Equatable {
         /// Entry ids that were `.external` and are now bundled.

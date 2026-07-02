@@ -173,7 +173,7 @@ extension ToolExecutor {
         defer { ExportCoordinator.endExport() }
 
         let service = ExportService()
-        guard let report = await service.exportPalmierProject(
+        guard let report = await service.exportVeniceProject(
             timeline: editor.timeline,
             manifest: editor.mediaManifest,
             generationLog: editor.generationLog,
@@ -181,7 +181,7 @@ extension ToolExecutor {
             outputURL: outputURL,
             acquireSlot: false
         ) else {
-            throw ToolError("export_project: \(service.error ?? "Palmier project export failed")")
+            throw ToolError("export_project: \(service.error ?? "Venice project export failed")")
         }
 
         let missing = report.missing.map { ["id": $0.id, "name": $0.name] }

@@ -75,10 +75,10 @@ else
   echo "!! missing Fonts/ in SwiftPM resource bundle at $RES_BUNDLE" >&2
   exit 1
 fi
-if [ -f "$RES_BUNDLE/palmier-pro.mcpb" ]; then
-  cp "$RES_BUNDLE/palmier-pro.mcpb" "$APP/Contents/Resources/"
+if [ -f "$RES_BUNDLE/venice-video-creator.mcpb" ]; then
+  cp "$RES_BUNDLE/venice-video-creator.mcpb" "$APP/Contents/Resources/"
 else
-  echo "!! missing palmier-pro.mcpb in SwiftPM resource bundle at $RES_BUNDLE" >&2
+  echo "!! missing venice-video-creator.mcpb in SwiftPM resource bundle at $RES_BUNDLE" >&2
   exit 1
 fi
 if [ -d "$RES_BUNDLE/Images" ]; then

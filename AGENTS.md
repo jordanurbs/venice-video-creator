@@ -1,4 +1,4 @@
-# PalmierPro
+# Venice Video Creator
 
 AI-native macOS video editor. Swift 6.2, SwiftUI + AppKit, AVFoundation. macOS 26 only, arm64 only. Non-sandboxed Developer ID app.
 
@@ -15,7 +15,7 @@ swift run
 
 ## Design System
 
-All UI styling MUST use `AppTheme` constants from `Sources/PalmierPro/UI/AppTheme.swift`. Never use hardcoded numeric values for:
+All UI styling MUST use `AppTheme` constants from `Sources/VeniceVideoCreator/UI/AppTheme.swift`. Never use hardcoded numeric values for:
 
 - **Spacing/padding** → `AppTheme.Spacing.*` (xxs through xxl)
 - **Font sizes** → `AppTheme.FontSize.*` (xxs through display)
@@ -34,11 +34,11 @@ If a needed value doesn't exist in AppTheme, add it there first — don't hardco
 
 SwiftUI `.onDrop` on a parent view shadows every drop target inside its layout area on macOS 26 — even AppKit `NSDraggingDestination` children registered directly with the window. Inner `.onDrop` modifiers silently never fire while a parent `.onDrop` is active.
 
-Rule: **any drop target that spans an area containing other drop targets must use native AppKit** (see `MediaPanelDropArea` in `Sources/PalmierPro/MediaPanel/`). Inner / leaf drops can stay SwiftUI `.onDrop`. Do not stack SwiftUI `.onDrop` modifiers in parent/child layouts.
+Rule: **any drop target that spans an area containing other drop targets must use native AppKit** (see `MediaPanelDropArea` in `Sources/VeniceVideoCreator/MediaPanel/`). Inner / leaf drops can stay SwiftUI `.onDrop`. Do not stack SwiftUI `.onDrop` modifiers in parent/child layouts.
 
 ## Voice
 
-Palmier Pro speaks like a quietly capable native Mac app for filmmakers: direct, technical, calm, and 
+Venice Video Creator speaks like a quietly capable native Mac app for filmmakers: direct, technical, calm, and 
 confident. Prefer Apple HIG-style terseness over warmth. Never chatty or cute. Never marketing. When the
 product needs to ask for action, lead with the action verb; when it reports state, name the thing.
 

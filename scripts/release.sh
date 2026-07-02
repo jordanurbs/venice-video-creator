@@ -137,7 +137,7 @@ b = os.environ["NEW_BUILD"]
 d = os.environ["PUBDATE"]
 l = os.environ["LENGTH"]
 s = os.environ["SIGNATURE"]
-url = f"https://github.com/jordanurbs/venice-video-editor/releases/download/v{v}/VeniceVideoCreator.dmg"
+url = f"https://github.com/jordanurbs/venice-video-creator/releases/download/v{v}/VeniceVideoCreator.dmg"
 
 item = f"""        <item>
             <title>Version {v}</title>
@@ -166,4 +166,4 @@ git push origin "$RELEASE_BRANCH"
 
 echo ""
 echo "==> Released $TAG"
-echo "    https://github.com/jordanurbs/venice-video-editor/releases/tag/$TAG"
+echo "    https://github.com/jordanurbs/venice-video-creator/releases/tag/$TAG"

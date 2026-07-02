@@ -2,7 +2,7 @@
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
     <channel>
         <title>Venice Video Creator</title>
-        <link>https://raw.githubusercontent.com/jordanurbs/venice-video-editor/venice-integration/appcast.xml</link>
+        <link>https://raw.githubusercontent.com/jordanurbs/venice-video-creator/venice-integration/appcast.xml</link>
         <description>Updates for Venice Video Creator</description>
         <language>en</language>
         <!--

@@ -18,7 +18,7 @@ UPSTREAM_REMOTE="${UPSTREAM_REMOTE:-upstream}" # palmier-io/palmier-pro
 UPSTREAM_BRANCH="${UPSTREAM_BRANCH:-main}"
 MIRROR_BRANCH="${MIRROR_BRANCH:-main}"          # local pristine mirror of upstream
 WORK_BRANCH="${WORK_BRANCH:-venice-integration}" # our Venice branch
-FORK_REMOTE="${FORK_REMOTE:-origin}"            # jordanurbs/venice-video-editor (our repo)
+FORK_REMOTE="${FORK_REMOTE:-origin}"            # jordanurbs/venice-video-creator (our repo)
 
 do_push=false
 do_build=true

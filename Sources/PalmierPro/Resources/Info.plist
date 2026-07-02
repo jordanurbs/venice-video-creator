@@ -53,7 +53,7 @@
 	<key>SUEnableAutomaticChecks</key>
 	<false/>
 	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/jordanurbs/venice-video-editor/venice-integration/appcast.xml</string>
+	<string>https://raw.githubusercontent.com/jordanurbs/venice-video-creator/venice-integration/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>Jh56mT+7YZSRsLylQIPyP+4/ahRtTPzfQQaKDZoBsio=</string>
 	<key>UTExportedTypeDeclarations</key>

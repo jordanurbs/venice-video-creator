@@ -21,7 +21,7 @@ concurrency:
 jobs:
   open-sync-pr:
     # Only run on the fork itself, never on the upstream repo.
-    if: github.repository == 'jordanurbs/venice-video-editor'
+    if: github.repository == 'jordanurbs/venice-video-creator'
     runs-on: ubuntu-latest
     env:
       UPSTREAM_URL: https://github.com/palmier-io/palmier-pro.git

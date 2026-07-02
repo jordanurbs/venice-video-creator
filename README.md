@@ -16,7 +16,7 @@ Venice Video Creator is an open-source video editor for Mac. You and your agent 
 
 **Don't use GitHub? No problem — it's a normal Mac app.**
 
-1. Go to the **[latest release page](https://github.com/jordanurbs/venice-video-editor/releases/latest)**.
+1. Go to the **[latest release page](https://github.com/jordanurbs/venice-video-creator/releases/latest)**.
 2. Under **Assets**, download **`VeniceVideoCreator.dmg`**.
 3. Open the downloaded `.dmg`, then drag **Venice Video Creator** onto the **Applications** folder.
 4. Launch it from Applications.

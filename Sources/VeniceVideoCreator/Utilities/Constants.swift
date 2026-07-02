@@ -103,9 +103,12 @@ enum Trim {
 }
 
 enum Project {
-    static let fileExtension = "palmier"
+    static let fileExtension = "venice"
     static let registryFilename = "project-registry.json"
-    static let typeIdentifier = "io.palmier.project"
+    static let typeIdentifier = "ai.venice.videocreator.project"
+    // Legacy Palmier Pro project format, still openable for backward compatibility.
+    static let legacyFileExtension = "palmier"
+    static let legacyTypeIdentifier = "io.palmier.project"
     static let defaultProjectName = "Untitled Project"
     static let timelineFilename = "project.json"
     static let manifestFilename = "media.json"

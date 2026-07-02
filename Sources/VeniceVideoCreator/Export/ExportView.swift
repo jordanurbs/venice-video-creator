@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 enum ExportDestination: String, CaseIterable, Identifiable {
     case video = "Video"
     case timeline = "Timeline"
-    case palmierProject = "Palmier Project"
+    case veniceProject = "Venice Project"
 
     var id: String { rawValue }
 }
@@ -60,8 +60,8 @@ struct ExportView: View {
     @State private var fcpxmlTarget: FCPXMLTarget = .default
     @State private var codec: VideoCodec = .h264
     @State private var resolution: ExportResolution = .matchTimeline
-    @State private var palmierResult: String?
-    @State private var palmierSummary: (collect: Int, missing: Int, bytes: Int64) = (0, 0, 0)
+    @State private var veniceResult: String?
+    @State private var veniceSummary: (collect: Int, missing: Int, bytes: Int64) = (0, 0, 0)
 
     var body: some View {
         VStack(spacing: 0) {
@@ -74,7 +74,7 @@ struct ExportView: View {
                 .background(.ultraThinMaterial)
         }
         .task {
-            palmierSummary = computePalmierSummary()
+            veniceSummary = computeVeniceSummary()
         }
     }
 
@@ -105,8 +105,8 @@ struct ExportView: View {
                         videoSettings
                     case .timeline:
                         timelineSettings
-                    case .palmierProject:
-                        palmierProjectSettings
+                    case .veniceProject:
+                        veniceProjectSettings
                     }
                 }
 
@@ -129,8 +129,8 @@ struct ExportView: View {
                         .padding(.top, AppTheme.Spacing.sm)
                 }
 
-                if let palmierResult {
-                    Text(palmierResult)
+                if let veniceResult {
+                    Text(veniceResult)
                         .font(.system(size: AppTheme.FontSize.xs))
                         .foregroundStyle(AppTheme.Text.secondaryColor)
                         .padding(.top, AppTheme.Spacing.sm)
@@ -250,14 +250,14 @@ struct ExportView: View {
         .padding(.leading, AppTheme.IconSize.sm + AppTheme.Spacing.md)
     }
 
-    private var palmierProjectSettings: some View {
+    private var veniceProjectSettings: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
             Text("Saves a copy of this project with all media bundled inside, so it opens on any machine.")
                 .font(.system(size: AppTheme.FontSize.sm))
                 .foregroundStyle(AppTheme.Text.secondaryColor)
 
-            if palmierSummary.missing > 0 {
-                Text("\(palmierSummary.missing) media file\(palmierSummary.missing == 1 ? "" : "s") missing - they'll be skipped.")
+            if veniceSummary.missing > 0 {
+                Text("\(veniceSummary.missing) media file\(veniceSummary.missing == 1 ? "" : "s") missing - they'll be skipped.")
                     .font(.system(size: AppTheme.FontSize.xs))
                     .foregroundStyle(AppTheme.Status.errorColor)
             }
@@ -288,10 +288,10 @@ struct ExportView: View {
                 case .timeline:
                     Text("\(editor.timeline.width)×\(editor.timeline.height)")
                     Text(timelineFormat.extensionLabel)
-                case .palmierProject:
+                case .veniceProject:
                     HStack(spacing: AppTheme.Spacing.xs) {
                         Image(systemName: "shippingbox")
-                        Text("~\(ByteCountFormatter.string(fromByteCount: palmierSummary.bytes, countStyle: .file))")
+                        Text("~\(ByteCountFormatter.string(fromByteCount: veniceSummary.bytes, countStyle: .file))")
                     }
                     Text(".\(Project.fileExtension)")
                 }
@@ -433,13 +433,13 @@ struct ExportView: View {
     private var exportFormat: ExportFormat {
         switch destination {
         case .timeline: timelineFormat.exportFormat
-        case .palmierProject: .xml   // Palmier Project has its own path; never rendered.
+        case .veniceProject: .xml   // Venice Project has its own path; never rendered.
         case .video: codec.exportFormat
         }
     }
 
-    /// Quick estimate for exporting a Palmier Project
-    private func computePalmierSummary() -> (collect: Int, missing: Int, bytes: Int64) {
+    /// Quick estimate for exporting a Venice Project
+    private func computeVeniceSummary() -> (collect: Int, missing: Int, bytes: Int64) {
         var collect = 0, missing = 0
         var bytes: Int64 = 0
         for entry in editor.mediaManifest.entries {
@@ -455,7 +455,7 @@ struct ExportView: View {
     }
 
     private func startExport() {
-        if destination == .palmierProject { startPalmierExport(); return }
+        if destination == .veniceProject { startVeniceExport(); return }
         let format = exportFormat
         let panel = NSSavePanel()
         let contentType: UTType = switch format {
@@ -491,8 +491,8 @@ struct ExportView: View {
         }
     }
 
-    private func startPalmierExport() {
-        palmierResult = nil
+    private func startVeniceExport() {
+        veniceResult = nil
         let panel = NSSavePanel()
         panel.allowedContentTypes = [UTType(Project.typeIdentifier) ?? .package]
         let base = editor.projectURL?.deletingPathExtension().lastPathComponent ?? Project.defaultProjectName
@@ -514,7 +514,7 @@ struct ExportView: View {
                     editor.showExportDialog = false
                 } else {
                     // Keep the dialog open so the user sees what couldn't be included.
-                    palmierResult = "Exported, but \(report.missing.count) media file\(report.missing.count == 1 ? "" : "s") were missing and couldn't be included."
+                    veniceResult = "Exported, but \(report.missing.count) media file\(report.missing.count == 1 ? "" : "s") were missing and couldn't be included."
                 }
             }
         }

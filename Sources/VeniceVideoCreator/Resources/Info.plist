@@ -13,6 +13,7 @@
 			<string>Editor</string>
 			<key>LSItemContentTypes</key>
 			<array>
+				<string>ai.venice.videocreator.project</string>
 				<string>io.palmier.project</string>
 			</array>
 			<key>LSTypeIsPackage</key>
@@ -65,6 +66,26 @@
 			</array>
 			<key>UTTypeDescription</key>
 			<string>Venice Project</string>
+			<key>UTTypeIdentifier</key>
+			<string>ai.venice.videocreator.project</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>venice</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>com.apple.package</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Palmier Project (legacy)</string>
 			<key>UTTypeIdentifier</key>
 			<string>io.palmier.project</string>
 			<key>UTTypeTagSpecification</key>

@@ -48,7 +48,7 @@ extension ToolExecutor {
                 target = .default
             }
             return try await exportFCPXML(editor, target: target, outputURL: outputURL)
-        case .palmier:
+        case .venice:
             return try await exportPalmier(editor, outputURL: outputURL)
         }
     }
@@ -191,7 +191,7 @@ extension ToolExecutor {
 
         return try jsonResult([
             "status": warnings.isEmpty ? "exported" : "exportedWithWarnings",
-            "mode": ExportProjectMode.palmier.rawValue,
+            "mode": ExportProjectMode.venice.rawValue,
             "path": outputURL.path,
             "collectedMediaRefs": report.collected,
             "copiedInternalMediaCount": report.copiedInternal,
@@ -239,7 +239,7 @@ extension ToolExecutor {
         var isDirectory = ObjCBool(false)
         if fm.fileExists(atPath: expanded, isDirectory: &isDirectory),
            isDirectory.boolValue,
-           !(mode == .palmier && rawExtension == expectedExtension) {
+           !(mode == .venice && rawExtension == expectedExtension) {
             throw ToolError("export_project: outputPath must include a filename")
         }
 
@@ -302,15 +302,17 @@ private enum ExportProjectMode: String {
     case video
     case xml
     case fcpxml
-    case palmier
+    case venice
 
     init(named raw: String?) throws {
         guard let raw else {
             self = .video
             return
         }
-        guard let mode = Self(rawValue: raw.normalizedExportOption) else {
-            throw ToolError("export_project: mode must be video, xml, fcpxml, or palmier")
+        // Accept the legacy "palmier" mode name as an alias for "venice".
+        let normalized = raw.normalizedExportOption == "palmier" ? "venice" : raw.normalizedExportOption
+        guard let mode = Self(rawValue: normalized) else {
+            throw ToolError("export_project: mode must be video, xml, fcpxml, or venice")
         }
         self = mode
     }
@@ -320,7 +322,7 @@ private enum ExportProjectMode: String {
         case .video: format?.fileExtension ?? ExportFormat.h264.fileExtension
         case .xml: "xml"
         case .fcpxml: "fcpxml"
-        case .palmier: Project.fileExtension
+        case .venice: Project.fileExtension
         }
     }
 
@@ -335,7 +337,7 @@ private enum ExportProjectMode: String {
         case .video: format?.displayName ?? "Video"
         case .xml: "XML"
         case .fcpxml: "FCPXML"
-        case .palmier: "Palmier Project"
+        case .venice: "Venice Project"
         }
     }
 }

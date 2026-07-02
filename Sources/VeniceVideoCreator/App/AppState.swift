@@ -252,7 +252,7 @@ final class AppState {
 
     func openProjectFromPanel() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [Self.projectContentType]
+        panel.allowedContentTypes = Self.projectContentTypes
         panel.canChooseDirectories = false
         panel.treatsFilePackagesAsDirectories = false
         panel.allowsMultipleSelection = false
@@ -267,6 +267,13 @@ final class AppState {
         UTType(Project.typeIdentifier)
             ?? UTType(filenameExtension: Project.fileExtension, conformingTo: .package)
             ?? .package
+    }()
+
+    // Open panel accepts the current .venice format and legacy .palmier projects.
+    private static let projectContentTypes: [UTType] = {
+        let legacy = UTType(Project.legacyTypeIdentifier)
+            ?? UTType(filenameExtension: Project.legacyFileExtension, conformingTo: .package)
+        return [projectContentType, legacy].compactMap { $0 }
     }()
 
 }

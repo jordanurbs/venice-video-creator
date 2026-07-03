@@ -107,4 +107,19 @@ extension Updater: SPUUpdaterDelegate {
         guard let error = error as NSError?, shouldClearAfterNoUpdateFound(error) else { return }
         clearUpdateAvailability()
     }
+
+    // Keeps "Install and Relaunch" from killing an in-progress export.
+    @objc func updater(
+        _ updater: SPUUpdater,
+        shouldPostponeRelaunchForUpdate item: SUAppcastItem,
+        untilInvokingBlock installHandler: @escaping () -> Void
+    ) -> Bool {
+        guard ExportCoordinator.isExportActive else { return false }
+        nonisolated(unsafe) let install = installHandler
+        Task { @MainActor in
+            try? await ExportCoordinator.waitWhileExportActive()
+            install()
+        }
+        return true
+    }
 }

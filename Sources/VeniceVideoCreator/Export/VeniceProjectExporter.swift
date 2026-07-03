@@ -38,6 +38,7 @@ enum VeniceProjectExporter {
         let total = max(1, manifest.entries.count)
 
         for (index, entry) in manifest.entries.enumerated() {
+            try Task.checkCancellation()
             defer { progress?(Double(index + 1) / Double(total)) }
 
             guard let srcURL = sourceURL(for: entry.source, projectURL: sourceProjectURL),

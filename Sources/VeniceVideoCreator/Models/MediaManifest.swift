@@ -92,6 +92,9 @@ struct GenerationInput: Codable, Sendable, Equatable {
     var backendJobId: String?
     var outputIndex: Int?
     var resultURLs: [String]?
+    /// Venice queue id for async video/audio jobs; the handle that survives relaunch.
+    var queueId: String?
+    var queueDownloadURL: String?
 }
 
 enum MediaSource: Codable, Sendable, Equatable {

@@ -4,6 +4,27 @@ import Foundation
 @MainActor
 enum EditSubmitter {
 
+    /// Marks the source asset busy for the life of the job so a second click
+    /// can't submit (and charge for) a duplicate.
+    private static func trackJob(
+        sourceAssetId: String,
+        editor: EditorViewModel,
+        onComplete: (@MainActor (MediaAsset) -> Void)?,
+        onFailure: (@MainActor () -> Void)?
+    ) -> (onComplete: @MainActor (MediaAsset) -> Void, onFailure: @MainActor () -> Void) {
+        editor.activeAIEditSourceIds.insert(sourceAssetId)
+        return (
+            { [weak editor] asset in
+                editor?.activeAIEditSourceIds.remove(sourceAssetId)
+                onComplete?(asset)
+            },
+            { [weak editor] in
+                editor?.activeAIEditSourceIds.remove(sourceAssetId)
+                onFailure?()
+            }
+        )
+    }
+
     // MARK: - Upscale
 
     @discardableResult
@@ -17,6 +38,8 @@ enum EditSubmitter {
     ) -> String? {
         guard AccountService.shared.isSignedIn else { return nil }
         guard model.supportedTypes.contains(asset.type) else { return nil }
+        guard !editor.activeAIEditSourceIds.contains(asset.id) else { return nil }
+        let tracked = trackJob(sourceAssetId: asset.id, editor: editor, onComplete: onComplete, onFailure: onFailure)
 
         let effectiveDuration: Int = {
             if let trim = trimmedSource, trim.hasTrim {
@@ -64,8 +87,8 @@ enum EditSubmitter {
             fileExtension: isImage ? "jpg" : "mp4",
             projectURL: editor.projectURL,
             editor: editor,
-            onComplete: onComplete,
-            onFailure: onFailure
+            onComplete: tracked.onComplete,
+            onFailure: tracked.onFailure
         )
     }
 
@@ -79,6 +102,8 @@ enum EditSubmitter {
         onFailure: (@MainActor () -> Void)? = nil
     ) -> String? {
         guard AccountService.shared.isSignedIn, asset.type == .image else { return nil }
+        guard !editor.activeAIEditSourceIds.contains(asset.id) else { return nil }
+        let tracked = trackJob(sourceAssetId: asset.id, editor: editor, onComplete: onComplete, onFailure: onFailure)
         let genInput = GenerationInput(
             prompt: "", model: VeniceBuiltInModel.backgroundRemove,
             duration: 0, aspectRatio: "", resolution: nil
@@ -101,8 +126,8 @@ enum EditSubmitter {
             fileExtension: "png",
             projectURL: editor.projectURL,
             editor: editor,
-            onComplete: onComplete,
-            onFailure: onFailure
+            onComplete: tracked.onComplete,
+            onFailure: tracked.onFailure
         )
     }
 
@@ -120,6 +145,8 @@ enum EditSubmitter {
         guard AccountService.shared.isSignedIn, asset.type == .image else { return nil }
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
+        guard !editor.activeAIEditSourceIds.contains(asset.id) else { return nil }
+        let tracked = trackJob(sourceAssetId: asset.id, editor: editor, onComplete: onComplete, onFailure: onFailure)
         let model = modelId
             ?? ModelCatalog.shared.editModels.first?.id
             ?? VeniceBuiltInModel.defaultEdit
@@ -149,8 +176,8 @@ enum EditSubmitter {
             fileExtension: "png",
             projectURL: editor.projectURL,
             editor: editor,
-            onComplete: onComplete,
-            onFailure: onFailure
+            onComplete: tracked.onComplete,
+            onFailure: tracked.onFailure
         )
     }
 
@@ -162,6 +189,7 @@ enum EditSubmitter {
         case missingSource
         case invalid(String)
         case unauthorized
+        case busy
 
         var errorDescription: String? {
             switch self {
@@ -170,6 +198,7 @@ enum EditSubmitter {
             case .missingSource: "Cannot rerun: source not recorded"
             case .invalid(let msg): msg
             case .unauthorized: "Add your Venice API key to rerun generations"
+            case .busy: "A generation from this asset is already running"
             }
         }
     }
@@ -184,6 +213,25 @@ enum EditSubmitter {
         guard AccountService.shared.isSignedIn else {
             throw RerunError.unauthorized
         }
+        guard !editor.activeAIEditSourceIds.contains(asset.id) else { throw RerunError.busy }
+        let tracked = trackJob(sourceAssetId: asset.id, editor: editor, onComplete: onComplete, onFailure: onFailure)
+        do {
+            return try rerunSubmission(
+                asset: asset, editor: editor,
+                onComplete: tracked.onComplete, onFailure: tracked.onFailure
+            )
+        } catch {
+            editor.activeAIEditSourceIds.remove(asset.id)
+            throw error
+        }
+    }
+
+    private static func rerunSubmission(
+        asset: MediaAsset,
+        editor: EditorViewModel,
+        onComplete: (@MainActor (MediaAsset) -> Void)? = nil,
+        onFailure: (@MainActor () -> Void)? = nil
+    ) throws -> String {
         guard let stored = asset.generationInput else { throw RerunError.notGenerated }
         var gen = stored
         gen.createdAt = nil

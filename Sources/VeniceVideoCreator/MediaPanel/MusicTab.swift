@@ -10,6 +10,8 @@ struct MusicTab: View {
     @State private var textDuration: Double = 90
     @State private var isGenerating = false
     @State private var generatingLabel = "Generating..."
+    @State private var generatingAssetId: String?
+    @State private var runTask: Task<Void, Never>?
     @State private var note: String?
 
     private var models: [AudioModelConfig] {
@@ -107,7 +109,10 @@ struct MusicTab: View {
             }
             if isGenerating {
                 AppTheme.Background.surfaceColor.opacity(AppTheme.Opacity.prominent)
-                GeneratingOverlay(label: generatingLabel, size: .preview)
+                VStack(spacing: AppTheme.Spacing.md) {
+                    GeneratingOverlay(label: generatingLabel, size: .preview)
+                    Button("Cancel") { cancelGeneration() }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -335,19 +340,37 @@ struct MusicTab: View {
 
         isGenerating = true
         generatingLabel = (isTextMode ? MusicGenerationSubmission.Phase.generating : .exporting).label
-        Task {
+        runTask = Task {
             do {
                 try await submission.run(
                     service: editor.generationService,
                     projectURL: editor.projectURL,
                     editor: editor,
                     onPhase: { generatingLabel = $0.label },
-                    onFinished: { isGenerating = false }
+                    onPlaceholder: { generatingAssetId = $0 },
+                    onFinished: { finishGenerating() }
                 )
+            } catch is CancellationError {
+                finishGenerating()
             } catch {
                 note = error.localizedDescription
-                isGenerating = false
+                finishGenerating()
             }
+        }
+    }
+
+    private func finishGenerating() {
+        isGenerating = false
+        generatingAssetId = nil
+        runTask = nil
+    }
+
+    private func cancelGeneration() {
+        if let id = generatingAssetId {
+            editor.generationService.cancelGeneration(assetId: id, editor: editor)
+        } else {
+            runTask?.cancel()
+            finishGenerating()
         }
     }
 }

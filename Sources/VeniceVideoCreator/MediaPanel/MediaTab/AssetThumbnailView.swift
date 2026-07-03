@@ -95,6 +95,12 @@ struct AssetThumbnailView: View {
             Divider()
         }
         if ids.count == 1, ids.first == asset.id {
+            if asset.generationStatus == .preparing || asset.generationStatus == .generating {
+                Button("Cancel Generation") {
+                    editor.generationService.cancelGeneration(assetId: asset.id, editor: editor)
+                }
+                Divider()
+            }
             if isMissing {
                 Button("Relink…") { relinkFile() }
                 Divider()
@@ -168,6 +174,8 @@ struct AssetThumbnailView: View {
                 .clipped()
             } else if case .failed(let error) = asset.generationStatus {
                 failedThumbnail(error: error)
+            } else if asset.generationStatus == .cancelled {
+                cancelledThumbnail
             } else if isMissing {
                 missingThumbnail
             } else if let thumbnail = asset.thumbnail {
@@ -265,6 +273,18 @@ struct AssetThumbnailView: View {
                 .padding(.horizontal, AppTheme.Spacing.xs)
         }
         .help(error)
+    }
+
+    private var cancelledThumbnail: some View {
+        VStack(spacing: AppTheme.Spacing.xxs) {
+            Image(systemName: "slash.circle")
+                .font(.system(size: AppTheme.FontSize.mdLg))
+                .foregroundStyle(AppTheme.Text.tertiaryColor)
+            Text("Cancelled")
+                .font(.system(size: AppTheme.FontSize.xs, weight: AppTheme.FontWeight.semibold))
+                .foregroundStyle(AppTheme.Text.secondaryColor)
+        }
+        .help("Generation cancelled. Rerun to generate again.")
     }
 
     private var missingThumbnail: some View {

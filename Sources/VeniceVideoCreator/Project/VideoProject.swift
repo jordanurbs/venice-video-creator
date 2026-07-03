@@ -47,6 +47,7 @@ final class VideoProject: NSDocument {
     private nonisolated(unsafe) var snapshotSourceProjectURL: URL?
     private nonisolated(unsafe) var snapshotPreparedForWrite = false
     private var projectCheckpointAutosaveScheduled = false
+    private var isClosed = false
 
     // MARK: - Persistence
 
@@ -280,12 +281,12 @@ final class VideoProject: NSDocument {
     }
 
     private func scheduleProjectCheckpointAutosave() {
-        guard fileURL != nil, !projectCheckpointAutosaveScheduled else { return }
+        guard fileURL != nil, !isClosed, !projectCheckpointAutosaveScheduled else { return }
         projectCheckpointAutosaveScheduled = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.projectCheckpointAutosaveScheduled = false
-            guard self.fileURL != nil else { return }
+            guard self.fileURL != nil, !self.isClosed else { return }
             self.autosave(withImplicitCancellability: false) { error in
                 if let error {
                     Log.project.error("project checkpoint autosave failed: \(error.localizedDescription)")
@@ -317,6 +318,13 @@ final class VideoProject: NSDocument {
 
     override func close() {
         super.close()
+        // A generation finishing after close must not autosave this zombie document
+        // over a reopened copy. Jobs keep running server-side; reopen resumes them.
+        isClosed = true
+        editorViewModel.generationService.detachAll()
+        editorViewModel.onProjectCheckpointRequired = nil
+        editorViewModel.onProjectContentChanged = nil
+        editorViewModel.agentService.onSessionsChanged = nil
         DispatchQueue.main.async {
             if AppState.shared.activeProject === self {
                 AppState.shared.showHome()
@@ -570,6 +578,15 @@ final class VideoProject: NSDocument {
                     asset.generationStatus = .generating
                     editorViewModel.updateManifestMetadata(for: asset)
                     continue
+                }
+                if asset.isGenerated {
+                    if case .failed = asset.generationStatus { continue }
+                    if asset.generationStatus == .cancelled { continue }
+                    if asset.isGenerating {
+                        asset.generationStatus = .failed("Generation interrupted. Rerun to generate again.")
+                        editorViewModel.updateManifestMetadata(for: asset)
+                        continue
+                    }
                 }
                 Log.project.warning("restore: media file missing id=\(candidate.id) name=\(candidate.name) path=\(candidate.url.path)")
                 missing += 1

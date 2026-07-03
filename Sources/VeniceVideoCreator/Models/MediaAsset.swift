@@ -38,6 +38,7 @@ final class MediaAsset: Identifiable {
         case downloading
         case rendering
         case failed(String)
+        case cancelled
 
         var serialized: String {
             switch self {
@@ -47,6 +48,7 @@ final class MediaAsset: Identifiable {
             case .downloading: "downloading"
             case .rendering: "rendering"
             case .failed(let message): "failed: \(message)"
+            case .cancelled: "cancelled"
             }
         }
 
@@ -64,6 +66,7 @@ final class MediaAsset: Identifiable {
             case "generating": self = .generating
             case "downloading": self = .downloading
             case "rendering": self = .rendering
+            case "cancelled": self = .cancelled
             case let value? where value.hasPrefix("failed: "):
                 self = .failed(String(value.dropFirst("failed: ".count)))
             default: self = .none

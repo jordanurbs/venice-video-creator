@@ -12,9 +12,9 @@ enum ExportCoordinator {
         return true
     }
 
-    static func acquireExport() async {
+    static func acquireExport() async throws {
         while exportActive {
-            try? await Task.sleep(for: .milliseconds(50))
+            try await Task.sleep(for: .milliseconds(50))
         }
         exportActive = true
     }

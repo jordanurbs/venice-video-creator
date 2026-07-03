@@ -23,6 +23,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let exporting = ExportCoordinator.isExportActive
+        let generating = GenerationBackend.activeJobCount
+        guard exporting || generating > 0 else { return .terminateNow }
+
+        let subject: String = switch (exporting, generating) {
+        case (true, 0): "An export is in progress."
+        case (false, 1): "A generation is in progress."
+        case (false, let n): "\(n) generations are in progress."
+        case (true, 1): "An export and a generation are in progress."
+        case (true, let n): "An export and \(n) generations are in progress."
+        }
+
+        let alert = NSAlert()
+        alert.messageText = subject
+        alert.informativeText = (exporting && generating > 0) || generating > 1
+            ? "Quitting cancels them." : "Quitting cancels it."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Quit Anyway")
+        return alert.runModal() == .alertFirstButtonReturn ? .terminateCancel : .terminateNow
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
             AppState.shared.showHome()

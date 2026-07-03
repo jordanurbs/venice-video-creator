@@ -224,8 +224,9 @@ struct AIEditTab: View {
             for: asset,
             effectiveDurationOverride: effectiveDurationForAvailability
         )
-        let isEnabled = availability.isAvailable
-        let disabledReason = availability.reason
+        let inFlight = chargesOnSubmit(action) && editor.activeAIEditSourceIds.contains(asset.id)
+        let isEnabled = availability.isAvailable && !inFlight
+        let disabledReason = inFlight ? "Generating from this asset…" : availability.reason
 
         HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.sm) {
             Image(systemName: icon)
@@ -246,6 +247,14 @@ struct AIEditTab: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .help(disabledReason ?? "")
+    }
+
+    /// Actions that submit a paid job directly (vs. seeding the generation panel).
+    private func chargesOnSubmit(_ action: EditAction) -> Bool {
+        switch action {
+        case .upscale, .removeBackground, .editImage, .rerun: true
+        default: false
+        }
     }
 
     private func videoAudioActionRow(kind: VideoToAudioEditKind) -> some View {

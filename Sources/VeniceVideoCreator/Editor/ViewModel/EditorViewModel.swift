@@ -87,6 +87,8 @@ final class EditorViewModel {
     var pendingEditAudioPlacement: PendingAudioPlacement?
     /// Clip ids currently awaiting an AI-generated replacement.
     var pendingReplacements: Set<String> = []
+    /// Source asset ids with an AI Edit job in flight; gates re-submission (double-fire = double charge).
+    var activeAIEditSourceIds: Set<String> = []
     /// Last video model submitted this session; falls back to the most recent
     /// generated asset's model so seeds don't reset to the top of the list.
     @ObservationIgnored var lastUsedVideoModelIdOverride: String?

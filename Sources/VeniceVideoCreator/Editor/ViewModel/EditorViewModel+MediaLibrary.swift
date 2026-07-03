@@ -472,7 +472,8 @@ extension EditorViewModel {
         let entry = asset.toManifestEntry(projectURL: projectURL)
         if let idx = mediaManifest.entries.firstIndex(where: { $0.id == asset.id }) {
             mediaManifest.entries[idx] = entry
-        } else {
+        } else if mediaAssets.contains(where: { $0.id == asset.id }) {
+            // Late generation updates for deleted assets must not resurrect entries.
             mediaManifest.entries.append(entry)
         }
     }

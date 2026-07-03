@@ -18,6 +18,8 @@ final class GenerationService {
 
     private static let uploadCacheTTL: TimeInterval = 6 * 24 * 60 * 60
     private var resumedBackendJobIds: Set<String> = []
+    /// Placeholder id -> the task driving its generation, for pre-submit cancellation.
+    private var generationTasks: [String: Task<Void, Never>] = [:]
 
     private struct PreparedReferences {
         let uploaded: [String]
@@ -71,7 +73,10 @@ final class GenerationService {
         }
         let primaryId = placeholders[0].id
 
-        Task { @MainActor in
+        let task = Task { @MainActor in
+            defer {
+                for placeholder in placeholders { self.generationTasks[placeholder.id] = nil }
+            }
             do {
                 let prepared = try await self.prepareReferences(
                     references: references,
@@ -109,6 +114,11 @@ final class GenerationService {
                     onComplete: onComplete,
                     onFailure: onFailure
                 )
+            } catch is CancellationError {
+                for placeholder in placeholders {
+                    updateGenerationMetadata(placeholder, editor: editor, status: .cancelled)
+                }
+                onFailure?()
             } catch {
                 let message = error.localizedDescription
                 Log.generation.error("upload failed model=\(genInput.model) error=\(message)")
@@ -118,8 +128,27 @@ final class GenerationService {
                 onFailure?()
             }
         }
+        for placeholder in placeholders { generationTasks[placeholder.id] = task }
 
         return primaryId
+    }
+
+    /// Stops this service's monitor tasks on document close. Submitted Venice jobs
+    /// keep running server-side and resume by queue id when the project reopens.
+    func detachAll() {
+        for task in generationTasks.values { task.cancel() }
+        generationTasks.removeAll()
+    }
+
+    /// Cancels the generation behind a placeholder: the Venice poll when the job is
+    /// already submitted, otherwise the preparation/upload task.
+    func cancelGeneration(assetId: String, editor: EditorViewModel) {
+        guard let asset = editor.mediaAssets.first(where: { $0.id == assetId }) else { return }
+        if let jobId = asset.generationInput?.backendJobId, !jobId.isEmpty,
+           GenerationBackend.cancel(jobId: jobId) {
+            return
+        }
+        generationTasks[assetId]?.cancel()
     }
 
     private func prepareReferences(
@@ -293,15 +322,81 @@ final class GenerationService {
             resumedBackendJobIds.insert(backendJobId)
             Task { @MainActor [weak self, weak editor] in
                 guard let self, let editor else { return }
-                await self.monitorBackendJob(
-                    backendJobId: backendJobId,
-                    placeholders: placeholders,
-                    editor: editor,
-                    onComplete: nil,
-                    onFailure: nil
-                )
+                if GenerationBackend.subscribe(jobId: backendJobId) != nil {
+                    await self.monitorBackendJob(
+                        backendJobId: backendJobId,
+                        placeholders: placeholders,
+                        editor: editor,
+                        onComplete: nil,
+                        onFailure: nil
+                    )
+                } else {
+                    await self.resumeFromQueue(placeholders: placeholders, editor: editor)
+                }
                 self.resumedBackendJobIds.remove(backendJobId)
             }
+        }
+    }
+
+    /// After relaunch the in-memory job is gone; finish from persisted results,
+    /// re-poll Venice by queue id, or fail visibly — never leave an eternal shimmer.
+    private func resumeFromQueue(placeholders: [MediaAsset], editor: EditorViewModel) async {
+        let input = placeholders.first?.generationInput
+
+        if let persisted = input?.resultURLs, !persisted.isEmpty {
+            await finalizeSuccess(
+                urlStrings: persisted,
+                placeholders: placeholders,
+                editor: editor,
+                onComplete: nil,
+                onFailure: nil
+            )
+            return
+        }
+
+        guard let input, let queueId = input.queueId, !queueId.isEmpty,
+              let kind = Self.queueKind(for: placeholders.first) else {
+            markUnresumable(placeholders, editor: editor)
+            return
+        }
+
+        do {
+            let jobId = try GenerationBackend.resume(
+                queueId: queueId,
+                model: input.model,
+                kind: kind,
+                downloadURL: input.queueDownloadURL
+            )
+            Log.generation.notice("resuming queue job \(queueId) as \(jobId)")
+            await monitorBackendJob(
+                backendJobId: jobId,
+                placeholders: placeholders,
+                editor: editor,
+                failIfUnavailable: true,
+                onComplete: nil,
+                onFailure: nil
+            )
+        } catch {
+            markUnresumable(placeholders, editor: editor, message: error.localizedDescription)
+        }
+    }
+
+    private func markUnresumable(
+        _ placeholders: [MediaAsset],
+        editor: EditorViewModel,
+        message: String = "Generation interrupted. Rerun to generate again."
+    ) {
+        for placeholder in placeholders {
+            updateGenerationMetadata(placeholder, editor: editor, status: .failed(message))
+        }
+        editor.onProjectCheckpointRequired?()
+    }
+
+    private static func queueKind(for asset: MediaAsset?) -> VeniceQueueKind? {
+        switch asset?.type {
+        case .video: .video
+        case .audio: .audio
+        default: nil
         }
     }
 
@@ -423,6 +518,17 @@ final class GenerationService {
         }
         editor.onProjectCheckpointRequired?()
 
+        // Cancelled between placeholder creation and submit: stop the job we just started.
+        if Task.isCancelled {
+            GenerationBackend.cancel(jobId: jobId)
+            for placeholder in placeholders {
+                updateGenerationMetadata(placeholder, editor: editor, status: .cancelled)
+            }
+            editor.onProjectCheckpointRequired?()
+            onFailure?()
+            return
+        }
+
         await monitorBackendJob(
             backendJobId: jobId,
             placeholders: placeholders,
@@ -528,12 +634,30 @@ final class GenerationService {
             editor.onProjectCheckpointRequired?()
             onFailure?()
             return true
+        case .cancelled:
+            Log.generation.notice("job \(backendJobId) cancelled")
+            for placeholder in placeholders {
+                updateGenerationMetadata(placeholder, editor: editor, status: .cancelled)
+            }
+            editor.onProjectCheckpointRequired?()
+            onFailure?()
+            return true
         case .queued, .running:
-            if updateBackendJobMetadata(
+            var changed = updateBackendJobMetadata(
                 placeholders,
                 backendJobId: backendJobId,
                 editor: editor
-            ) {
+            )
+            if let queueId = job.queueId {
+                for placeholder in placeholders where placeholder.generationInput?.queueId != queueId {
+                    updateGenerationMetadata(placeholder, editor: editor) { input in
+                        input.queueId = queueId
+                        input.queueDownloadURL = job.queueDownloadURL
+                    }
+                    changed = true
+                }
+            }
+            if changed {
                 editor.onProjectCheckpointRequired?()
             }
             return false

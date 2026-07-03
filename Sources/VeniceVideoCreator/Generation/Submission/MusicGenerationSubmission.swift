@@ -29,6 +29,7 @@ struct MusicGenerationSubmission {
         projectURL: URL?,
         editor: EditorViewModel,
         onPhase: @MainActor (Phase) -> Void = { _ in },
+        onPlaceholder: @MainActor (String) -> Void = { _ in },
         onFinished: @escaping @MainActor () -> Void = {}
     ) async throws {
         var videoURL: String?
@@ -84,6 +85,7 @@ struct MusicGenerationSubmission {
             },
             onFailure: { onFinished() }
         )
+        onPlaceholder(placeholderId)
         editor.placeGeneratingAudioClip(
             placeholderId: placeholderId, startFrame: startFrame, spanSeconds: spanSeconds,
             actionName: "Add Music"

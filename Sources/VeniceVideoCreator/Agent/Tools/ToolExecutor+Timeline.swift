@@ -292,6 +292,8 @@ extension ToolExecutor {
                 throw ToolError("Asset \(asset.id) is still rendering. Poll get_media and retry once generationStatus becomes 'none'.")
             case .failed(let msg):
                 throw ToolError("Asset \(asset.id) failed: \(msg)")
+            case .cancelled:
+                throw ToolError("Asset \(asset.id) generation was cancelled. Rerun to generate again.")
             case .none:
                 throw ToolError("Media file not on disk: \(url.lastPathComponent)")
             }

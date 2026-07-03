@@ -14,6 +14,9 @@ import Combine
 enum GenerationBackend {
     private static let store = VeniceJobStore()
 
+    /// Jobs still queued or running; consulted by the quit guard.
+    static var activeJobCount: Int { store.activeCount }
+
     /// Reactive subscription to a single generation job.
     static func subscribe(
         jobId: String
@@ -43,6 +46,25 @@ enum GenerationBackend {
         }
         return store.start(model: model, params: params, api: api)
     }
+
+    /// Re-polls a queued Venice job by its persisted queue id and returns a fresh local id.
+    static func resume(
+        queueId: String,
+        model: String,
+        kind: VeniceQueueKind,
+        downloadURL: String?
+    ) throws -> String {
+        guard let api = VeniceAPI.fromKeychain() else {
+            throw GenerationBackendError.notConfigured
+        }
+        return store.resume(queueId: queueId, model: model, kind: kind, downloadURL: downloadURL, api: api)
+    }
+
+    /// Cancels a tracked job's poll task. Returns false if the job is unknown.
+    @discardableResult
+    static func cancel(jobId: String) -> Bool {
+        store.cancel(jobId: jobId)
+    }
 }
 
 // MARK: - Backend generation types
@@ -71,7 +93,7 @@ enum BackendGenerationParams: Encodable, Sendable {
 }
 
 enum BackendGenerationStatus: String, Decodable, Sendable {
-    case queued, running, succeeded, failed
+    case queued, running, succeeded, failed, cancelled
 }
 
 struct BackendGenerationJob: Decodable, Sendable {
@@ -81,6 +103,8 @@ struct BackendGenerationJob: Decodable, Sendable {
     let errorMessage: String?
     let costCredits: Int?
     let completedAt: Double?
+    let queueId: String?
+    let queueDownloadURL: String?
 
     init(
         id: String,
@@ -88,7 +112,9 @@ struct BackendGenerationJob: Decodable, Sendable {
         resultUrls: [String]? = nil,
         errorMessage: String? = nil,
         costCredits: Int? = nil,
-        completedAt: Double? = nil
+        completedAt: Double? = nil,
+        queueId: String? = nil,
+        queueDownloadURL: String? = nil
     ) {
         self._id = id
         self.status = status
@@ -96,6 +122,8 @@ struct BackendGenerationJob: Decodable, Sendable {
         self.errorMessage = errorMessage
         self.costCredits = costCredits
         self.completedAt = completedAt
+        self.queueId = queueId
+        self.queueDownloadURL = queueDownloadURL
     }
 }
 
@@ -119,6 +147,16 @@ enum GenerationBackendError: LocalizedError {
 @MainActor
 final class VeniceJobStore {
     private var subjects: [String: CurrentValueSubject<BackendGenerationJob?, Never>] = [:]
+    private var tasks: [String: Task<Void, Never>] = [:]
+
+    var activeCount: Int {
+        subjects.values.filter {
+            switch $0.value?.status {
+            case .queued, .running: true
+            default: false
+            }
+        }.count
+    }
 
     func publisher(for jobId: String) -> AnyPublisher<BackendGenerationJob?, Never>? {
         subjects[jobId]?.eraseToAnyPublisher()
@@ -131,22 +169,72 @@ final class VeniceJobStore {
         )
         subjects[jobId] = subject
 
-        Task { @MainActor in
+        tasks[jobId] = Task { @MainActor in
             subject.send(BackendGenerationJob(id: jobId, status: .running))
-            do {
-                let urls = try await VeniceGenerationRunner.run(model: model, params: params, api: api)
-                subject.send(BackendGenerationJob(id: jobId, status: .succeeded, resultUrls: urls,
-                                                  completedAt: Date().timeIntervalSince1970))
-            } catch {
-                subject.send(BackendGenerationJob(id: jobId, status: .failed,
-                                                  errorMessage: error.localizedDescription))
-            }
-            // Allow late subscribers one cycle, then release.
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                self.subjects[jobId] = nil
+            await self.settle(jobId: jobId, subject: subject) {
+                try await VeniceGenerationRunner.run(model: model, params: params, api: api) { queueId, downloadURL in
+                    subject.send(BackendGenerationJob(id: jobId, status: .running,
+                                                      queueId: queueId, queueDownloadURL: downloadURL))
+                }
             }
         }
         return jobId
+    }
+
+    func resume(
+        queueId: String,
+        model: String,
+        kind: VeniceQueueKind,
+        downloadURL: String?,
+        api: VeniceAPI
+    ) -> String {
+        let jobId = UUID().uuidString
+        let subject = CurrentValueSubject<BackendGenerationJob?, Never>(
+            BackendGenerationJob(id: jobId, status: .running, queueId: queueId, queueDownloadURL: downloadURL)
+        )
+        subjects[jobId] = subject
+
+        tasks[jobId] = Task { @MainActor in
+            await self.settle(jobId: jobId, subject: subject) {
+                try await VeniceGenerationRunner.resume(
+                    queueId: queueId, model: model, kind: kind, downloadURL: downloadURL, api: api
+                )
+            }
+        }
+        return jobId
+    }
+
+    @discardableResult
+    func cancel(jobId: String) -> Bool {
+        guard let task = tasks[jobId] else { return false }
+        task.cancel()
+        return true
+    }
+
+    private func settle(
+        jobId: String,
+        subject: CurrentValueSubject<BackendGenerationJob?, Never>,
+        operation: @MainActor () async throws -> [String]
+    ) async {
+        do {
+            let urls = try await operation()
+            subject.send(BackendGenerationJob(id: jobId, status: .succeeded, resultUrls: urls,
+                                              completedAt: Date().timeIntervalSince1970))
+        } catch {
+            // VeniceAPI wraps URLError, so a cancelled request surfaces as .transport;
+            // the task's own cancellation flag is the reliable signal.
+            if Task.isCancelled || error is CancellationError {
+                subject.send(BackendGenerationJob(id: jobId, status: .cancelled))
+            } else {
+                subject.send(BackendGenerationJob(id: jobId, status: .failed,
+                                                  errorMessage: error.localizedDescription))
+            }
+        }
+        tasks[jobId] = nil
+        // Allow late subscribers one cycle, then release.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            self.subjects[jobId] = nil
+        }
     }
 }

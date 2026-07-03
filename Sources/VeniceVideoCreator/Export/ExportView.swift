@@ -112,12 +112,22 @@ struct ExportView: View {
 
                 if service.isExporting {
                     VStack(spacing: AppTheme.Spacing.xs) {
-                        ProgressView(value: service.progress)
-                            .progressViewStyle(.linear)
-                        Text("\(Int(service.progress * 100))%")
-                            .font(.system(size: AppTheme.FontSize.xs))
-                            .monospacedDigit()
-                            .foregroundStyle(AppTheme.Text.secondaryColor)
+                        if service.isWaitingForSlot {
+                            HStack(spacing: AppTheme.Spacing.sm) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Waiting for current export…")
+                                    .font(.system(size: AppTheme.FontSize.xs))
+                                    .foregroundStyle(AppTheme.Text.secondaryColor)
+                            }
+                        } else {
+                            ProgressView(value: service.progress)
+                                .progressViewStyle(.linear)
+                            Text("\(Int(service.progress * 100))%")
+                                .font(.system(size: AppTheme.FontSize.xs))
+                                .monospacedDigit()
+                                .foregroundStyle(AppTheme.Text.secondaryColor)
+                        }
                     }
                     .padding(.top, AppTheme.Spacing.md)
                 }
@@ -301,8 +311,14 @@ struct ExportView: View {
 
             Spacer()
 
-            Button("Cancel") { editor.showExportDialog = false }
-                .keyboardShortcut(.cancelAction)
+            Button(service.isExporting ? "Cancel Export" : "Cancel") {
+                if service.isExporting {
+                    service.cancel()
+                } else {
+                    editor.showExportDialog = false
+                }
+            }
+            .keyboardShortcut(.cancelAction)
             Button("Export") { startExport() }
                 .buttonStyle(.glassProminent)
                 .buttonBorderShape(.capsule)

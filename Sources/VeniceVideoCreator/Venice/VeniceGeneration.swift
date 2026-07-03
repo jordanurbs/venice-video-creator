@@ -1,5 +1,10 @@
 import Foundation
 
+/// Which Venice async queue a job went through; picks the retrieve endpoint on resume.
+enum VeniceQueueKind: String, Sendable {
+    case video, audio
+}
+
 /// Executes a single Venice generation request and returns result URLs that
 /// `GenerationService` can download/finalize. Image generation is synchronous;
 /// video generation goes through Venice's async queue/retrieve flow.
@@ -8,16 +13,31 @@ enum VeniceGenerationRunner {
     static func run(
         model: String,
         params: BackendGenerationParams,
-        api: VeniceAPI
+        api: VeniceAPI,
+        onQueue: (@MainActor (String, String?) -> Void)? = nil
     ) async throws -> [String] {
         switch params {
         case .image(let p): return try await runImage(model: model, params: p, api: api)
-        case .video(let p): return try await runVideo(model: model, params: p, api: api)
-        case .audio(let p): return try await runAudio(model: model, params: p, api: api)
+        case .video(let p): return try await runVideo(model: model, params: p, api: api, onQueue: onQueue)
+        case .audio(let p): return try await runAudio(model: model, params: p, api: api, onQueue: onQueue)
         case .upscale(let p): return try await runUpscale(model: model, params: p, api: api)
         case .imageEdit(let p): return try await runImageEdit(model: model, params: p, api: api)
         case .imageMultiEdit(let p): return try await runImageMultiEdit(model: model, params: p, api: api)
         case .backgroundRemove(let p): return try await runBackgroundRemove(params: p, api: api)
+        }
+    }
+
+    /// Re-polls an already-queued Venice job by its persisted queue id (after relaunch).
+    static func resume(
+        queueId: String,
+        model: String,
+        kind: VeniceQueueKind,
+        downloadURL: String?,
+        api: VeniceAPI
+    ) async throws -> [String] {
+        switch kind {
+        case .video: [try await pollVideo(queueId: queueId, model: model, downloadURL: downloadURL, api: api)]
+        case .audio: [try await pollAudio(queueId: queueId, model: model, api: api)]
         }
     }
 
@@ -118,7 +138,8 @@ enum VeniceGenerationRunner {
     // MARK: - Video (async queue + poll)
 
     private static func runVideo(
-        model: String, params: VideoGenerationParams, api: VeniceAPI
+        model: String, params: VideoGenerationParams, api: VeniceAPI,
+        onQueue: (@MainActor (String, String?) -> Void)? = nil
     ) async throws -> [String] {
         let catalogModel = videoModel(for: model)
         var body: [String: Any] = [
@@ -171,6 +192,7 @@ enum VeniceGenerationRunner {
             throw VeniceAPI.VeniceError.decode("missing queue_id")
         }
         let downloadURL = queued["download_url"] as? String
+        onQueue?(queueId, downloadURL)
 
         return [try await pollVideo(queueId: queueId, model: model, downloadURL: downloadURL, api: api)]
     }
@@ -210,7 +232,8 @@ enum VeniceGenerationRunner {
     // MARK: - Audio
 
     private static func runAudio(
-        model: String, params: AudioGenerationParams, api: VeniceAPI
+        model: String, params: AudioGenerationParams, api: VeniceAPI,
+        onQueue: (@MainActor (String, String?) -> Void)? = nil
     ) async throws -> [String] {
         let catalogModel = audioModel(for: model)
         // Route by the endpoint recorded in the catalog: type=tts models use the
@@ -260,6 +283,7 @@ enum VeniceGenerationRunner {
         guard let queueId = queued["queue_id"] as? String else {
             throw VeniceAPI.VeniceError.decode("missing queue_id")
         }
+        onQueue?(queueId, nil)
         return [try await pollAudio(queueId: queueId, model: model, api: api)]
     }
 

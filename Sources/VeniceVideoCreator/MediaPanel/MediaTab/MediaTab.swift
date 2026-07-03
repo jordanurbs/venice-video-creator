@@ -18,6 +18,7 @@ struct MediaTab: View {
     @State var renamingFolderId: String?
     @State var pendingFolderFocusId: String?
     @State var dropTargetFolderId: String?
+    @State var breadcrumbDropTargetId: String?
     /// Hovered grouped-section key; "" = root.
     @State var dropTargetGroupedKey: String?
     /// Collapsed grouped-section keys; "" = root.
@@ -93,7 +94,8 @@ struct MediaTab: View {
             ZStack(alignment: .top) {
                 MediaPanelDropArea(
                     isTargeted: $isDropTargeted,
-                    onDrop: { urls in handlePanelFinderDrop(urls: urls) }
+                    onDrop: { urls in handlePanelFinderDrop(urls: urls) },
+                    onTextDrop: { text in Self.resolveTextDrop(text, into: currentFolderId, editor: editor) }
                 ) {
                     VStack(spacing: 0) {
                         if showsEmptyState {
@@ -417,20 +419,30 @@ struct MediaTab: View {
 
     private func breadcrumbChip(item: BreadcrumbItem, isLeaf: Bool) -> some View {
         let textColor = isLeaf ? AppTheme.Text.primaryColor : AppTheme.Text.tertiaryColor
+        let isDropTarget = Binding<Bool>(
+            get: { breadcrumbDropTargetId == item.id },
+            set: { breadcrumbDropTargetId = $0 ? item.id : nil }
+        )
         return Button {
             if !isLeaf { navigateToFolder(item.folderId) }
         } label: {
             Text(item.name)
                 .font(.system(size: AppTheme.FontSize.xs, weight: isLeaf ? .semibold : .regular))
-                .foregroundStyle(textColor)
+                .foregroundStyle(breadcrumbDropTargetId == item.id ? AppTheme.Accent.primary : textColor)
                 .lineLimit(1)
                 .padding(.horizontal, AppTheme.Spacing.sm)
                 .padding(.vertical, AppTheme.Spacing.xxs)
+                .background(
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.xsSm)
+                        .fill(breadcrumbDropTargetId == item.id
+                            ? AppTheme.Accent.primary.opacity(AppTheme.Opacity.faint)
+                            : Color.clear)
+                )
                 .hoverHighlight(cornerRadius: AppTheme.Radius.xsSm)
         }
         .buttonStyle(.plain)
         .focusable(false)
-        .onDrop(of: [.fileURL, .text], isTargeted: nil) { providers in
+        .onDrop(of: [.fileURL, .text], isTargeted: isDropTarget) { providers in
             handleProviderDrop(providers, into: item.folderId)
             return true
         }
@@ -648,6 +660,8 @@ struct MediaTab: View {
     func setViewMode(_ mode: ViewMode) {
         viewMode = mode
         folderReturnViewMode = nil
+        // Leaving folder browsing must clear the (now invisible) import destination.
+        if mode != .folder { currentFolderId = nil }
     }
 
     func navigateToFolder(_ folderId: String?) {

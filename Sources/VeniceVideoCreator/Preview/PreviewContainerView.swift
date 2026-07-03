@@ -42,6 +42,28 @@ struct PreviewContainerView: View {
                     } else {
                         TransformOverlayView()
                     }
+                    if isTimeline {
+                        PreviewDropArea(
+                            onAssetPayload: { payload in
+                                var assets = editor.assetsFromDragPayload(payload)
+                                if assets.isEmpty { assets = editor.assetsFromFolderDragPayload(payload) }
+                                guard !assets.isEmpty else { return }
+                                editor.insertAtPlayhead(assets: assets, segments: editor.segmentsFromDragPayload(payload))
+                            },
+                            onFileURLs: { urls in
+                                Task { @MainActor in
+                                    let existing = Set(editor.mediaAssets.map(\.id))
+                                    _ = await editor.importFinderItems(urls, into: nil)
+                                    let imported = editor.mediaAssets.filter { !existing.contains($0.id) }
+                                    guard !imported.isEmpty else { return }
+                                    for asset in imported where asset.duration <= 0 {
+                                        await asset.loadMetadata()
+                                    }
+                                    editor.insertAtPlayhead(assets: imported)
+                                }
+                            }
+                        )
+                    }
                 }
                 .frame(width: scaledWidth, height: scaledHeight)
                 .simultaneousGesture(

@@ -145,6 +145,22 @@ extension EditorViewModel {
         }
     }
 
+    /// Assets inside dragged folders (`venice-folder://<id>` lines), depth-first.
+    func assetsFromFolderDragPayload(_ payload: String) -> [MediaAsset] {
+        payload.split(separator: "\n").flatMap { line -> [MediaAsset] in
+            guard let folderId = MediaTab.folderId(fromDragString: String(line)) else { return [] }
+            return orderedAssets(inFolderTree: folderId)
+        }
+    }
+
+    private func orderedAssets(inFolderTree folderId: String) -> [MediaAsset] {
+        var result = assetsIn(folderId: folderId)
+        for sub in subfolders(of: folderId) {
+            result += orderedAssets(inFolderTree: sub.id)
+        }
+        return result
+    }
+
     /// Source-second ranges carried by search-moment drags, keyed by asset id.
     func segmentsFromDragPayload(_ payload: String) -> [String: ClosedRange<Double>] {
         var segments: [String: ClosedRange<Double>] = [:]

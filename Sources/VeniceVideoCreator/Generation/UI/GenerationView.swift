@@ -1403,12 +1403,39 @@ struct GenerationView: View {
                     )
             )
             .overlay {
-                DropTargetOverlay(isTargeted: isTargeted) { payload in
-                    for asset in editor.assetsFromDragPayload(payload)
-                    where acceptedTypes.contains(asset.type) {
-                        onDrop(asset)
+                DropTargetOverlay(
+                    isTargeted: isTargeted,
+                    onDrop: { payload in
+                        let assets = editor.assetsFromDragPayload(payload)
+                        if assets.isEmpty, payload.contains(MediaTab.folderDragScheme) {
+                            flashDropError("Drop media, not a folder.")
+                            return
+                        }
+                        var accepted = false
+                        for asset in assets where acceptedTypes.contains(asset.type) {
+                            onDrop(asset)
+                            accepted = true
+                        }
+                        if !accepted, !assets.isEmpty {
+                            let kinds = acceptedTypes.map(\.rawValue).sorted().joined(separator: " or ")
+                            flashDropError("Drop \(kinds) here.")
+                        }
+                    },
+                    onFileDrop: { urls in
+                        for url in urls {
+                            guard let asset = editor.addMediaAsset(from: url) else {
+                                flashDropError("Can't use \"\(url.lastPathComponent)\" — unsupported file type.")
+                                continue
+                            }
+                            if acceptedTypes.contains(asset.type) {
+                                onDrop(asset)
+                            } else {
+                                let kinds = acceptedTypes.map(\.rawValue).sorted().joined(separator: " or ")
+                                flashDropError("Drop \(kinds) here.")
+                            }
+                        }
                     }
-                }
+                )
             }
     }
 

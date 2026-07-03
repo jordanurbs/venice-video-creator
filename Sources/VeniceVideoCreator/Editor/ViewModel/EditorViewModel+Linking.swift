@@ -299,6 +299,33 @@ extension EditorViewModel {
         }
     }
 
+    /// Drop on the preview canvas: place at the playhead as a timeline drop would.
+    func insertAtPlayhead(assets: [MediaAsset], segments: [String: ClosedRange<Double>] = [:]) {
+        guard !assets.isEmpty else { return }
+        let targetFrame = currentFrame
+        let cursor: TrackDropTarget = timeline.tracks.isEmpty ? .newTrackAt(0) : .existingTrack(0)
+
+        let operation: @MainActor () -> Void = { [weak self] in
+            guard let self else { return }
+            self.undoManager?.beginUndoGrouping()
+            let plan = self.resolveDropPlan(cursor: cursor, assets: assets, atFrame: targetFrame, segments: segments)
+            let (visualIdx, audioIdx) = self.materialize(plan: plan)
+            let visualAssets = plan.visualAssets
+            if !visualAssets.isEmpty, let vIdx = visualIdx {
+                self.addClips(assets: visualAssets, trackIndex: vIdx, startFrame: targetFrame,
+                              linkedAudioTrackIndex: audioIdx, segments: segments)
+            }
+            let audioOnlyAssets = plan.audioOnlyAssets
+            if !audioOnlyAssets.isEmpty, let aIdx = audioIdx {
+                self.addClips(assets: audioOnlyAssets, trackIndex: aIdx, startFrame: targetFrame,
+                              linkedAudioTrackIndex: nil, segments: segments)
+            }
+            self.undoManager?.endUndoGrouping()
+            self.undoManager?.setActionName("Add Clips")
+        }
+        addClipsWithSettingsCheck(assets: assets, operation: operation)
+    }
+
     /// Compute the ghost+commit plan for dropping `assets` at `atFrame` with the cursor over `cursor`.
     func resolveDropPlan(cursor: TrackDropTarget, assets: [MediaAsset], atFrame: Int, segments: [String: ClosedRange<Double>] = [:]) -> DropPlan {
         var placements: [DropPlan.Placement] = []

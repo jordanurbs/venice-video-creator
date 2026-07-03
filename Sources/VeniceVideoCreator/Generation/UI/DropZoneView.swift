@@ -5,32 +5,56 @@ import SwiftUI
 struct DropTargetOverlay: NSViewRepresentable {
     @Binding var isTargeted: Bool
     var onDrop: (String) -> Void
+    var onFileDrop: (([URL]) -> Void)?
+
+    init(
+        isTargeted: Binding<Bool>,
+        onDrop: @escaping (String) -> Void,
+        onFileDrop: (([URL]) -> Void)? = nil
+    ) {
+        self._isTargeted = isTargeted
+        self.onDrop = onDrop
+        self.onFileDrop = onFileDrop
+    }
 
     func makeNSView(context: Context) -> DropTargetNSView {
         let view = DropTargetNSView()
         view.onTargetChanged = { isTargeted = $0 }
         view.onDrop = onDrop
+        view.onFileDrop = onFileDrop
         return view
     }
 
     func updateNSView(_ nsView: DropTargetNSView, context: Context) {
         nsView.onTargetChanged = { isTargeted = $0 }
         nsView.onDrop = onDrop
+        nsView.onFileDrop = onFileDrop
     }
 }
 
 final class DropTargetNSView: NSView {
     var onTargetChanged: ((Bool) -> Void)?
     var onDrop: ((String) -> Void)?
+    var onFileDrop: (([URL]) -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        registerForDraggedTypes([.string])
+        registerForDraggedTypes([.string, .fileURL])
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
+    private func fileURLs(_ sender: any NSDraggingInfo) -> [URL] {
+        (sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL]) ?? []
+    }
+
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        let accepts = sender.draggingPasteboard.string(forType: .string) != nil
+            || (onFileDrop != nil && !fileURLs(sender).isEmpty)
+        guard accepts else { return [] }
         onTargetChanged?(true)
         return .copy
     }
@@ -43,12 +67,17 @@ final class DropTargetNSView: NSView {
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
         onTargetChanged?(false)
-        guard let payload = sender.draggingPasteboard.string(forType: .string) else {
-            Log.generation.notice("drop perform: no string payload")
-            return false
+        if let payload = sender.draggingPasteboard.string(forType: .string) {
+            Log.generation.notice("drop perform payloadLen=\(payload.count) tail=\(payload.suffix(60))")
+            onDrop?(payload)
+            return true
         }
-        Log.generation.notice("drop perform payloadLen=\(payload.count) tail=\(payload.suffix(60))")
-        onDrop?(payload)
-        return true
+        let urls = fileURLs(sender)
+        if !urls.isEmpty, let onFileDrop {
+            onFileDrop(urls)
+            return true
+        }
+        Log.generation.notice("drop perform: no usable payload")
+        return false
     }
 }

@@ -1153,22 +1153,59 @@ final class TimelineView: NSView {
         snapOverlay.setExternalX(nil)
         externalSnapState = SnapEngine.SnapState()
         externalDragIsRippleInsert = false
+        needsDisplay = true
 
-        guard let urlString = sender.draggingPasteboard.string(forType: .string) else { return false }
+        let ripple = NSEvent.modifierFlags.contains(.command)
+
+        if let urlString = sender.draggingPasteboard.string(forType: .string) {
+            let assets = editor.assetsFromDragPayload(urlString)
+            if !assets.isEmpty {
+                place(assets: assets, segments: editor.segmentsFromDragPayload(urlString),
+                      cursor: cursorTarget, atFrame: targetFrame, ripple: ripple)
+                return true
+            }
+            let folderAssets = editor.assetsFromFolderDragPayload(urlString)
+            if !folderAssets.isEmpty {
+                place(assets: folderAssets, segments: [:], cursor: cursorTarget, atFrame: targetFrame, ripple: ripple)
+                return true
+            }
+        }
+
+        // Finder files: import to the library first, then place at the drop point.
+        let fileURLs = (sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL]) ?? []
+        guard !fileURLs.isEmpty else { return false }
 
         let editor = self.editor
-        let assets = editor.assetsFromDragPayload(urlString)
-        let segments = editor.segmentsFromDragPayload(urlString)
-        guard !assets.isEmpty else { return false }
+        Task { @MainActor [weak self] in
+            let existing = Set(editor.mediaAssets.map(\.id))
+            _ = await editor.importFinderItems(fileURLs, into: nil)
+            let imported = editor.mediaAssets.filter { !existing.contains($0.id) }
+            guard !imported.isEmpty else { return }
+            // Durations must be known before the drop plan sizes clips.
+            for asset in imported where asset.duration <= 0 {
+                await asset.loadMetadata()
+            }
+            self?.place(assets: imported, segments: [:], cursor: cursorTarget, atFrame: targetFrame, ripple: ripple)
+        }
+        return true
+    }
 
-        let mods = NSEvent.modifierFlags
+    private func place(
+        assets: [MediaAsset],
+        segments: [String: ClosedRange<Double>],
+        cursor: TrackDropTarget,
+        atFrame targetFrame: Int,
+        ripple: Bool
+    ) {
+        let editor = self.editor
 
         let operation: @MainActor () -> Void = {
             editor.undoManager?.beginUndoGrouping()
 
-            let plan = editor.resolveDropPlan(cursor: cursorTarget, assets: assets, atFrame: targetFrame, segments: segments)
+            let plan = editor.resolveDropPlan(cursor: cursor, assets: assets, atFrame: targetFrame, segments: segments)
             let (visualIdx, audioIdx) = editor.materialize(plan: plan)
-            let ripple = mods.contains(.command)
 
             let insert: ([MediaAsset], Int, Int?) -> Void = { assets, trackIdx, linkedAudio in
                 if ripple {
@@ -1192,9 +1229,7 @@ final class TimelineView: NSView {
         }
 
         editor.addClipsWithSettingsCheck(assets: assets, operation: operation)
-
         needsDisplay = true
-        return true
     }
 }
 

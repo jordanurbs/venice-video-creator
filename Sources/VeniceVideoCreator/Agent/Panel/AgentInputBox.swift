@@ -50,6 +50,16 @@ struct AgentInputBox<LeadingTools: View>: View {
     }
 
     var body: some View {
+        AgentInputDropArea(
+            isTargeted: $isDropTargeted,
+            onAssetIds: attachMentions(assetIds:),
+            onFileURLs: importAndAttach(urls:)
+        ) {
+            boxContent
+        }
+    }
+
+    private var boxContent: some View {
         VStack(spacing: 0) {
             textField
                 .popover(isPresented: Binding(
@@ -81,7 +91,6 @@ struct AgentInputBox<LeadingTools: View>: View {
         }
         .animation(.easeOut(duration: 0.15), value: focused)
         .animation(.easeOut(duration: 0.15), value: isDropTargeted)
-        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted, perform: handleDrop)
     }
 
     private var textField: some View {
@@ -258,20 +267,19 @@ struct AgentInputBox<LeadingTools: View>: View {
         highlightedMentionIndex = 0
     }
 
-    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
-        var handled = false
-        for provider in providers where provider.canLoadObject(ofClass: URL.self) {
-            handled = true
-            _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                guard let url else { return }
-                Task { @MainActor in
-                    if let asset = editor.addMediaAsset(from: url) {
-                        editor.agentService.attachMention(for: asset)
-                    }
-                }
+    private func attachMentions(assetIds: [String]) {
+        for id in assetIds {
+            guard let asset = editor.mediaAssets.first(where: { $0.id == id }) else { continue }
+            editor.agentService.attachMention(for: asset)
+        }
+    }
+
+    private func importAndAttach(urls: [URL]) {
+        for url in urls {
+            if let asset = editor.addMediaAsset(from: url) {
+                editor.agentService.attachMention(for: asset)
             }
         }
-        return handled
     }
 
     private func handlePaste(_: [NSItemProvider]) {

@@ -271,8 +271,32 @@ struct AssetThumbnailView: View {
                 .lineLimit(3)
                 .truncationMode(.tail)
                 .padding(.horizontal, AppTheme.Spacing.xs)
+            retryButton
         }
         .help(error)
+    }
+
+    @ViewBuilder
+    private var retryButton: some View {
+        if asset.pendingDownloadURL != nil {
+            Button("Retry Download") { editor.generationService.retryDownload(asset: asset, editor: editor) }
+                .buttonStyle(.plain)
+                .font(.system(size: AppTheme.FontSize.xxs, weight: AppTheme.FontWeight.semibold))
+                .foregroundStyle(AppTheme.Accent.primary)
+        } else if asset.generationInput != nil {
+            Button("Rerun") { rerunGeneration() }
+                .buttonStyle(.plain)
+                .font(.system(size: AppTheme.FontSize.xxs, weight: AppTheme.FontWeight.semibold))
+                .foregroundStyle(AppTheme.Accent.primary)
+        }
+    }
+
+    private func rerunGeneration() {
+        do {
+            _ = try EditSubmitter.rerun(asset: asset, editor: editor)
+        } catch {
+            editor.mediaPanelToast = MediaPanelToast(message: error.localizedDescription)
+        }
     }
 
     private var cancelledThumbnail: some View {
@@ -283,6 +307,7 @@ struct AssetThumbnailView: View {
             Text("Cancelled")
                 .font(.system(size: AppTheme.FontSize.xs, weight: AppTheme.FontWeight.semibold))
                 .foregroundStyle(AppTheme.Text.secondaryColor)
+            retryButton
         }
         .help("Generation cancelled. Rerun to generate again.")
     }

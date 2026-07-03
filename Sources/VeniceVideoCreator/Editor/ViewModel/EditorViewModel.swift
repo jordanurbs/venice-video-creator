@@ -177,7 +177,14 @@ final class EditorViewModel {
     var mediaPanelNewFolderRequestTick: Int = 0
     var mediaPanelNavigateUpRequestTick: Int = 0
     var mediaPanelShowMediaTabTick: Int = 0
-    var mediaPanelToast: MediaPanelToast?
+    /// The editor-wide notice surface, shown at the window's bottom edge so
+    /// results can't fire into a hidden panel.
+    var editorToast: MediaPanelToast?
+    /// Legacy name; every setter lands on the editor-level surface.
+    var mediaPanelToast: MediaPanelToast? {
+        get { editorToast }
+        set { editorToast = newValue }
+    }
     @ObservationIgnored var mediaImportTail: Task<MediaImportSummary, Never>?
     @ObservationIgnored var mediaImportSequence: Int = 0
 

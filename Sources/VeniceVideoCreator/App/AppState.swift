@@ -25,6 +25,7 @@ final class AppState {
     static let shared = AppState()
 
     private(set) var activeProject: VideoProject?
+    private(set) var isOpeningProject = false
 
     var openProjects: [VideoProject] {
         NSDocumentController.shared.documents.compactMap { $0 as? VideoProject }
@@ -226,6 +227,8 @@ final class AppState {
         if let existing = showExistingProject(at: resolved, register: register, options: options) {
             return existing
         }
+        isOpeningProject = true
+        defer { isOpeningProject = false }
         let doc = try await VideoProject.load(from: resolved)
         if let existing = showExistingProject(at: resolved, register: register, options: options) {
             return existing

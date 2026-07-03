@@ -18,14 +18,18 @@ enum AgentClientError: LocalizedError {
 
     static func from(status: Int, body: String) -> AgentClientError {
         let parsed = parseErrorEnvelope(body)
-        let message = parsed?.message ?? body.prefix(500).description
+        // Unparseable bodies are HTML dumps or truncated JSON — never show them raw.
+        let message = parsed?.message ?? ""
         switch parsed?.code {
         case "unauthenticated": return .unauthenticated
-        case "insufficient_credits": return .insufficientCredits(message)
+        case "insufficient_credits":
+            return .insufficientCredits(message.isEmpty ? "Venice account is out of credit. Top up at venice.ai." : message)
         default:
             if status == 401 { return .unauthenticated }
-            if status == 402 { return .insufficientCredits(message) }
-            return .upstream(message.isEmpty ? "HTTP \(status)" : message)
+            if status == 402 {
+                return .insufficientCredits(message.isEmpty ? "Venice account is out of credit. Top up at venice.ai." : message)
+            }
+            return .upstream(message.isEmpty ? "Venice error (HTTP \(status)). Try again." : message)
         }
     }
 

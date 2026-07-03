@@ -529,9 +529,23 @@ struct ExportView: View {
                     missingMediaRefs: editor.missingMediaRefs,
                     outputURL: url
                 )
-                guard service.error == nil else { return }
+                if let error = service.error {
+                    // Long renders often finish in the background; cancels stay quiet.
+                    if !NSApp.isActive, error != "Export cancelled" {
+                        AppNotifications.exportFailed(name: url.lastPathComponent, reason: error)
+                    }
+                    return
+                }
                 let offline = service.lastReport?.offlineMediaRefs.count ?? 0
                 let unprocessable = service.lastReport?.unprocessableMediaRefs.count ?? 0
+                if !NSApp.isActive {
+                    AppNotifications.exportComplete(
+                        name: url.lastPathComponent,
+                        outputURL: url,
+                        size: service.lastReport?.outputSize,
+                        warningCount: offline + unprocessable
+                    )
+                }
                 if offline + unprocessable > 0 {
                     // Keep the dialog open so the user sees what shipped incomplete.
                     resultNote = exportProblemsNote(offline: offline, unprocessable: unprocessable)

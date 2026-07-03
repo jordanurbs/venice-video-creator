@@ -29,10 +29,11 @@ enum GenerationBackend {
         fileURL: URL,
         contentType: String
     ) async throws -> String {
-        let data = try await Task.detached(priority: .utility) {
-            try Data(contentsOf: fileURL)
+        // Encoding a video reference can be hundreds of MB; keep it off the main actor.
+        let encoded = try await Task.detached(priority: .utility) {
+            try Data(contentsOf: fileURL).base64EncodedString()
         }.value
-        return "data:\(contentType);base64,\(data.base64EncodedString())"
+        return "data:\(contentType);base64,\(encoded)"
     }
 
     /// Starts a Venice generation job and returns its local id.

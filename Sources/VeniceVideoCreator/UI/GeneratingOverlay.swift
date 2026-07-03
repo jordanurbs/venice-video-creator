@@ -6,54 +6,40 @@ struct GeneratingOverlay: View {
         case preview
 
         var fontSize: CGFloat { self == .preview ? AppTheme.FontSize.xl : AppTheme.FontSize.xs }
+        var elapsedFontSize: CGFloat { self == .preview ? AppTheme.FontSize.sm : AppTheme.FontSize.xxs }
         var spacing: CGFloat { self == .preview ? AppTheme.Spacing.lg : AppTheme.Spacing.smMd }
-        var barWidth: CGFloat { self == .preview ? 160 : 60 }
-        var barHeight: CGFloat { self == .preview ? 4 : 3 }
     }
 
     var label: String = "Generating…"
     var size: Size = .thumbnail
 
-    @State private var progress: CGFloat = 0
+    @State private var startedAt = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private static let progressDuration: Double = 45
-    private static let progressTarget: CGFloat = 0.9
 
     var body: some View {
         content
             .shimmering(active: !reduceMotion)
-            .onAppear {
-                if reduceMotion {
-                    progress = Self.progressTarget
-                } else {
-                    withAnimation(.easeOut(duration: Self.progressDuration)) {
-                        progress = Self.progressTarget
-                    }
-                }
-            }
     }
 
+    // Phase label + honest elapsed time; a fake progress bar makes bounded
+    // waits (video jobs run to 15 min) read as hangs.
     private var content: some View {
         VStack(spacing: size.spacing) {
             Text(label)
                 .font(.system(size: size.fontSize, weight: .semibold))
                 .foregroundStyle(AppTheme.aiGradient)
-            progressBar
+            SwiftUI.TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                Text(Self.elapsedString(from: startedAt, to: context.date))
+                    .font(.system(size: size.elapsedFontSize, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.white.opacity(AppTheme.Opacity.strong))
+            }
         }
     }
 
-    private var progressBar: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.white.opacity(AppTheme.Opacity.muted))
-                Capsule()
-                    .fill(Color.white.opacity(AppTheme.Opacity.strong))
-                    .frame(width: geo.size.width * progress)
-            }
-        }
-        .frame(width: size.barWidth, height: size.barHeight)
+    private static func elapsedString(from start: Date, to now: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(start)))
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }
 

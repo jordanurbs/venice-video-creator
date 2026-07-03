@@ -140,6 +140,14 @@ final class VideoProject: NSDocument {
         super.save(to: url, ofType: typeName, for: saveOperation, completionHandler: completionHandler)
     }
 
+    override func canAsynchronouslyWrite(
+        to url: URL,
+        ofType typeName: String,
+        for saveOperation: NSDocument.SaveOperationType
+    ) -> Bool {
+        true
+    }
+
     override func write(to url: URL, ofType typeName: String) throws {
         if !snapshotPreparedForWrite {
             guard Thread.isMainThread else {
@@ -159,6 +167,8 @@ final class VideoProject: NSDocument {
             Log.project.error("save: snapshotTimeline missing at write()")
             throw CocoaError(.fileWriteUnknown)
         }
+        // Snapshot captured — the UI may resume while the package writes.
+        unblockUserInteraction()
 
         try Self.writeProjectPackage(
             ProjectPackageSnapshot(
@@ -389,6 +399,10 @@ final class VideoProject: NSDocument {
                 ProjectSettingsMismatchView(mismatch: mismatch)
                     .environment(editorViewModel)
             }
+            .overlay(alignment: .bottom) {
+                EditorToastOverlay()
+                    .environment(editorViewModel)
+            }
             .overlay {
                 TourOverlay()
                     .environment(editorViewModel)
@@ -414,6 +428,14 @@ final class VideoProject: NSDocument {
         window.standardWindowButton(.documentIconButton)?.isHidden = true
 
         AppState.shared.showEditor(for: self)
+
+        if manifestLoadFailed {
+            let alert = NSAlert()
+            alert.messageText = "The media list couldn't be read."
+            alert.informativeText = "The project opened without its media library. The original \(Project.manifestFilename) is preserved inside the package for recovery — saving won't overwrite it."
+            alert.addButton(withTitle: "OK")
+            alert.beginSheetModal(for: window)
+        }
 
         if let log = loadedGenerationLog {
             editorViewModel.generationLog = log
@@ -510,16 +532,31 @@ final class VideoProject: NSDocument {
 
     private func restoreAssetsFromManifest() {
         let projectURL = editorViewModel.projectURL
+        let entries = editorViewModel.mediaManifest.entries
+        Task { @MainActor [weak self] in
+            // Per-entry disk checks; large projects stat hundreds of files — off main.
+            let pairs: [(String, URL?)] = await Task.detached(priority: .userInitiated) {
+                entries.map { entry in
+                    (entry.id,
+                     MediaResolver.existingURL(for: entry, projectURL: projectURL)
+                        ?? MediaResolver.expectedURL(for: entry, projectURL: projectURL))
+                }
+            }.value
+            self?.applyManifestRestore(resolvedByEntryId: Dictionary(uniqueKeysWithValues: pairs))
+        }
+    }
+
+    private func applyManifestRestore(resolvedByEntryId: [String: URL?]) {
+        let projectURL = editorViewModel.projectURL
         var missing = 0
         var missingRefs: Set<String> = []
         var candidates: [RestoredMediaCandidate] = []
         var healed = false
         for (index, entry) in editorViewModel.mediaManifest.entries.enumerated() {
-            // Prefer a file that exists on disk, healing stale/absolute/temp paths
-            // by finding the asset in the project's media/ folder.
-            let resolved = MediaResolver.existingURL(for: entry, projectURL: projectURL)
-                ?? MediaResolver.expectedURL(for: entry, projectURL: projectURL)
-            guard let url = resolved else {
+            // Entries imported after open began are already live; only restore
+            // what existed when the resolution snapshot was taken.
+            guard let resolution = resolvedByEntryId[entry.id] else { continue }
+            guard let url = resolution else {
                 Log.project.warning("restore: could not resolve URL for entry id=\(entry.id) name=\(entry.name)")
                 missing += 1
                 missingRefs.insert(entry.id)

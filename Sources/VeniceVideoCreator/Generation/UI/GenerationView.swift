@@ -23,6 +23,7 @@ struct GenerationView: View {
 
     // Audio extras
     @State private var selectedVoice = ""
+    @State private var isCloningVoice = false
     @State private var lyrics = ""
     @State private var styleInstructions = ""
     @State private var instrumental = false
@@ -920,6 +921,14 @@ struct GenerationView: View {
                             Button(clone.label) { selectedVoice = clone.id }
                         }
                     }
+                    Menu("Delete a cloned voice…") {
+                        ForEach(clones) { clone in
+                            Button(clone.label, role: .destructive) {
+                                ClonedVoiceStore.shared.remove(clone)
+                                if selectedVoice == clone.id { selectedVoice = "" }
+                            }
+                        }
+                    }
                 }
                 Divider()
                 Menu("Clone a voice from…") {
@@ -934,10 +943,16 @@ struct GenerationView: View {
             }
         } label: {
             HStack(spacing: AppTheme.Spacing.xs) {
-                Image(systemName: "person.wave.2")
-                    .font(.system(size: AppTheme.FontSize.xxs))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-                Text(selectedVoice.isEmpty ? (audioModel.defaultVoice ?? "Voice") : selectedVoice)
+                if isCloningVoice {
+                    ProgressView()
+                        .controlSize(.mini)
+                } else {
+                    Image(systemName: "person.wave.2")
+                        .font(.system(size: AppTheme.FontSize.xxs))
+                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                }
+                Text(isCloningVoice ? "Cloning voice…"
+                     : selectedVoice.isEmpty ? (audioModel.defaultVoice ?? "Voice") : selectedVoice)
                     .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
                     .foregroundStyle(AppTheme.Text.secondaryColor)
                     .lineLimit(1)
@@ -959,10 +974,13 @@ struct GenerationView: View {
             flashDropError("Add your Venice API key to clone voices.")
             return
         }
+        guard !isCloningVoice else { return }
         let model = audioModel.id
         let label = "Clone of \(asset.name)"
         let sourceURL = asset.url
+        isCloningVoice = true
         Task { @MainActor in
+            defer { isCloningVoice = false }
             do {
                 // Voice cloning wants an audio sample; export audio for video sources.
                 let sampleURL: URL

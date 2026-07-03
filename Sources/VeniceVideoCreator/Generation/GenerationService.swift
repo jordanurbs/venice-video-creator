@@ -550,7 +550,7 @@ final class GenerationService {
         guard let publisher = GenerationBackend.subscribe(jobId: backendJobId) else {
             if failIfUnavailable {
                 for placeholder in placeholders {
-                    updateGenerationMetadata(placeholder, editor: editor, status: .failed("Backend not configured"))
+                    updateGenerationMetadata(placeholder, editor: editor, status: .failed("Generation couldn't start. Check your Venice key in Settings."))
                 }
                 editor.onProjectCheckpointRequired?()
                 onFailure?()
@@ -631,6 +631,15 @@ final class GenerationService {
                     input.backendJobId = backendJobId
                 }
             }
+            if let first = placeholders.first {
+                AppNotifications.generationFailed(
+                    assetId: first.id,
+                    projectURL: editor.projectURL,
+                    assetName: first.name,
+                    assetType: first.type,
+                    reason: message
+                )
+            }
             editor.onProjectCheckpointRequired?()
             onFailure?()
             return true
@@ -695,7 +704,7 @@ final class GenerationService {
         guard !urlStrings.isEmpty else {
             Log.generation.error("backend job succeeded with no resultUrls")
             for placeholder in placeholders {
-                updateGenerationMetadata(placeholder, editor: editor, status: .failed("No URL in response"))
+                updateGenerationMetadata(placeholder, editor: editor, status: .failed("Venice returned no result. Rerun to try again."))
             }
             onFailure?()
             return
@@ -708,7 +717,7 @@ final class GenerationService {
         for (i, placeholder) in placeholders.enumerated() {
             let outputIndex = placeholder.generationInput?.outputIndex ?? i
             guard outputIndex < urlStrings.count, let remote = URL(string: urlStrings[outputIndex]) else {
-                updateGenerationMetadata(placeholder, editor: editor, status: .failed("No URL for placeholder"))
+                updateGenerationMetadata(placeholder, editor: editor, status: .failed("Venice returned fewer results than expected. Rerun to try again."))
                 continue
             }
             updateGenerationMetadata(placeholder, editor: editor, status: .downloading) { input in

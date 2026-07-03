@@ -30,11 +30,23 @@ extension MediaTab {
                     resultsGrid { ForEach(nameMatches) { fileCard($0) } }
                 }
                 if visualHits.isEmpty, spokenHits.isEmpty, nameMatches.isEmpty {
-                    Text("No matches for “\(trimmedSearchQuery)”")
-                        .font(.system(size: AppTheme.FontSize.sm))
-                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                    if editor.searchIndex.indexingActive {
+                        HStack(spacing: AppTheme.Spacing.sm) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Building the search index — results may be incomplete.")
+                                .font(.system(size: AppTheme.FontSize.sm))
+                                .foregroundStyle(AppTheme.Text.tertiaryColor)
+                        }
                         .frame(maxWidth: .infinity)
                         .padding(.top, AppTheme.Spacing.xl)
+                    } else {
+                        Text("No matches for “\(trimmedSearchQuery)”")
+                            .font(.system(size: AppTheme.FontSize.sm))
+                            .foregroundStyle(AppTheme.Text.tertiaryColor)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, AppTheme.Spacing.xl)
+                    }
                 }
             }
             .padding(.top, AppTheme.Spacing.sm)

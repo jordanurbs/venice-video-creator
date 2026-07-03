@@ -413,7 +413,7 @@ struct PreviewContainerView: View {
                 }
                 if isUnprocessable {
                     Button("Report a Problem") {
-                        FeedbackWindowController.shared.show(prefill: Self.unprocessablePrefill(path: path))
+                        FeedbackReporter.openIssue(prefill: Self.unprocessablePrefill(path: path))
                     }
                     .buttonStyle(.capsule(.prominent, size: .regular))
                     .padding(.top, AppTheme.Spacing.xs)

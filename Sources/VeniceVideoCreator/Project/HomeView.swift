@@ -35,7 +35,19 @@ struct HomeView: View {
         .task { await VisualModelLoader.shared.prepare() }
         .onAppear { changelog.checkForWhatsNew() }
         .overlay {
-            if !hasSeenWelcome {
+            if AppState.shared.isOpeningProject {
+                ZStack {
+                    Color.black.opacity(AppTheme.Opacity.medium)
+                    VStack(spacing: AppTheme.Spacing.md) {
+                        ProgressView()
+                            .controlSize(.large)
+                        Text("Opening project…")
+                            .font(.system(size: AppTheme.FontSize.md))
+                            .foregroundStyle(AppTheme.Text.secondaryColor)
+                    }
+                }
+                .transition(.opacity)
+            } else if !hasSeenWelcome {
                 WelcomeOverlay { withAnimation { hasSeenWelcome = true } }
             } else if let entry = changelog.pending {
                 UpdateOverlay(entry: entry, changelogURL: changelog.changelogURL) {

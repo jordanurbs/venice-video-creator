@@ -28,7 +28,18 @@ struct VeniceAPI: Sendable {
             switch self {
             case .missingKey: return "No Venice API key set. Add your key in Settings."
             case .http(let status, let message):
-                return message.isEmpty ? "Venice API error (HTTP \(status))." : message
+                switch status {
+                case 401, 403:
+                    return "Venice rejected the API key. Check your key in Settings."
+                case 402:
+                    return message.isEmpty ? "Venice account is out of credit. Top up at venice.ai." : message
+                case 429:
+                    return "Venice rate limit reached. Wait a moment and try again."
+                case 500...599:
+                    return "Venice is having trouble (HTTP \(status)). Try again shortly."
+                default:
+                    return message.isEmpty ? "Venice API error (HTTP \(status))." : message
+                }
             case .transport(let m): return m
             case .decode(let m): return "Venice response error: \(m)"
             case .empty: return "Venice returned an empty response."
@@ -161,7 +172,7 @@ struct VeniceAPI: Sendable {
     /// Pulls a human-readable message out of Venice's error envelopes.
     static func extractError(from data: Data) -> String {
         guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
-            return String(data: data, encoding: .utf8)?.prefix(300).description ?? ""
+            return plainTextError(from: data)
         }
         var base = ""
         if let error = obj["error"] as? String { base = error }
@@ -183,7 +194,17 @@ struct VeniceAPI: Sendable {
             let joined = Array(Set(issues)).sorted().joined(separator: " | ")
             base = base.isEmpty ? joined : "\(base) (\(joined))"
         }
-        if base.isEmpty { base = String(data: data, encoding: .utf8)?.prefix(300).description ?? "" }
+        if base.isEmpty { base = plainTextError(from: data) }
         return base
+    }
+
+    /// Raw bodies reach failed-generation tiles; only short plain text is fit to show.
+    private static func plainTextError(from data: Data) -> String {
+        guard let text = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !text.isEmpty, text.count <= 160,
+            !text.contains("<"), !text.contains("{")
+        else { return "" }
+        return text
     }
 }

@@ -114,13 +114,6 @@ struct MediaTab: View {
                 .overlay {
                     if isDropTargeted { dropHighlight.allowsHitTesting(false) }
                 }
-                .overlay(alignment: .bottom) {
-                    if let toast = editor.mediaPanelToast {
-                        toastBanner(toast)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                }
-                .animation(.easeInOut(duration: AppTheme.Anim.transition), value: editor.mediaPanelToast)
             }
             .layoutPriority(1)
             .onChange(of: searchQuery) { _, _ in scheduleMomentSearch() }
@@ -193,38 +186,6 @@ struct MediaTab: View {
             Rectangle()
                 .fill(tint.opacity(AppTheme.Opacity.muted))
                 .frame(height: AppTheme.BorderWidth.hairline)
-        }
-    }
-
-    private func toastBanner(_ toast: MediaPanelToast) -> some View {
-        HStack(spacing: AppTheme.Spacing.sm) {
-            Image(systemName: toast.kind == .success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .font(.system(size: AppTheme.FontSize.smMd, weight: .semibold))
-                .foregroundStyle(toast.kind == .success ? AppTheme.Status.successColor : AppTheme.Accent.timecodeColor)
-            Text(toast.message)
-                .font(.system(size: AppTheme.FontSize.sm, weight: .medium))
-                .foregroundStyle(AppTheme.Text.primaryColor)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, AppTheme.Spacing.mdLg)
-        .padding(.vertical, AppTheme.Spacing.smMd)
-        .background(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.md)
-                .fill(AppTheme.Background.prominentColor)
-                .overlay(
-                    RoundedRectangle(cornerRadius: AppTheme.Radius.md)
-                        .strokeBorder(AppTheme.Border.primaryColor, lineWidth: AppTheme.BorderWidth.hairline)
-                )
-        )
-        .shadow(AppTheme.Shadow.lg)
-        .padding(.horizontal, AppTheme.Spacing.lgXl)
-        .padding(.bottom, AppTheme.Spacing.lgXl)
-        .onTapGesture { editor.dismissMediaPanelToast() }
-        .task(id: toast) {
-            try? await Task.sleep(for: .seconds(4))
-            guard !Task.isCancelled else { return }
-            editor.dismissMediaPanelToast()
         }
     }
 
@@ -753,6 +714,13 @@ struct MediaTab: View {
                 Text("Drop files here or import from disk")
                     .font(.system(size: AppTheme.FontSize.sm))
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
+            }
+
+            HStack(spacing: AppTheme.Spacing.md) {
+                Button("Import Media…") { importMedia() }
+                    .buttonStyle(.capsule(.prominent, size: .regular))
+                Button("Generate") { editor.showGenerationPanel = true }
+                    .buttonStyle(.capsule(.secondary, size: .regular))
             }
 
             Spacer()

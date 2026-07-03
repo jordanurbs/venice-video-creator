@@ -347,7 +347,11 @@ struct MusicTab: View {
                     projectURL: editor.projectURL,
                     editor: editor,
                     onPhase: { generatingLabel = $0.label },
-                    onPlaceholder: { generatingAssetId = $0 },
+                    onPlaceholder: {
+                        generatingAssetId = $0
+                        // The placeholder clip carries progress from here; stop blocking the tab.
+                        isGenerating = false
+                    },
                     onFinished: { finishGenerating() }
                 )
             } catch is CancellationError {

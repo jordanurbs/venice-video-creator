@@ -16,6 +16,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         AppNotifications.configure()
 
+        Transcription.onVeniceFallback = { _ in
+            AppState.shared.activeProject?.editorViewModel.mediaPanelToast =
+                MediaPanelToast(message: "Venice transcription unavailable — used on-device recognition instead.")
+        }
+        Transcription.onModelDownloadStart = { locale in
+            let language = Locale.current.localizedString(forIdentifier: locale.identifier) ?? locale.identifier
+            AppState.shared.activeProject?.editorViewModel.mediaPanelToast =
+                MediaPanelToast(message: "Downloading the \(language) speech model — the first transcription takes longer.")
+        }
+
         AppState.shared.startMCPService()
     }
 
@@ -79,7 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     @objc func showFeedback(_ sender: Any?) {
-        FeedbackWindowController.shared.show()
+        FeedbackReporter.openIssue()
     }
 
     @MainActor

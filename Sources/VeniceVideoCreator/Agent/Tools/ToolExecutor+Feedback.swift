@@ -59,30 +59,9 @@ extension ToolExecutor {
             lines.append("- Project: \(projectId.prefix(8))")
         }
 
-        do {
-            try await AccountService.shared.sendFeedback(
-                message: lines.joined(separator: "\n"),
-                email: nil,
-                mayContact: false,
-                screenshotPngBase64: nil,
-                appVersion: Self.appVersion,
-                osVersion: Self.osVersion
-            )
-        } catch {
-            return .error("Couldn't send feedback: \(error.localizedDescription)")
-        }
+        // No cloud inbox in this build; feedback goes through GitHub issues.
+        let url = await FeedbackReporter.issueURL(prefill: lines.joined(separator: "\n"))
         feedbackState.sentKeys.insert(dedupeKey)
-        return .ok("Flagged this to the maintainers. Thanks — this helps us improve the agent.")
-    }
-
-    private static var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
-        return "\(version) (\(build))"
-    }
-
-    private static var osVersion: String {
-        let v = ProcessInfo.processInfo.operatingSystemVersion
-        return "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
+        return .ok("There is no in-app feedback channel in this build. Share this prefilled GitHub issue link with the user so they can submit it: \(url.absoluteString)")
     }
 }

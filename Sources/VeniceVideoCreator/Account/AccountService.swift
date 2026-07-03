@@ -75,12 +75,20 @@ final class AccountService {
         isLoadingUsage = true
         defer { isLoadingUsage = false }
 
-        async let rateLimits = try? api.rateLimitInfo()
-        async let totals = try? api.usageAnalytics(lookbackDays: lookbackDays)
-        let (limits, usage) = await (rateLimits, totals)
+        let limits: VeniceRateLimitInfo?
+        do {
+            limits = try await api.rateLimitInfo()
+        } catch VeniceAPI.VeniceError.http(let status, _) where status == 401 || status == 403 {
+            usageError = "Venice rejected this key. Check it in Settings."
+            veniceUsage = nil
+            return
+        } catch {
+            limits = nil
+        }
+        let usage = try? await api.usageAnalytics(lookbackDays: lookbackDays)
 
         if limits == nil && usage == nil {
-            usageError = "Could not load balance for this key."
+            usageError = "Couldn't reach Venice to load the balance. Check your connection."
             return
         }
         usageError = nil
@@ -96,19 +104,6 @@ final class AccountService {
         )
     }
 
-    func sendFeedback(
-        message: String,
-        email: String?,
-        mayContact: Bool,
-        screenshotPngBase64: String?,
-        appVersion: String,
-        osVersion: String
-    ) async throws {
-        throw NSError(
-            domain: "Venice.Feedback", code: -1,
-            userInfo: [NSLocalizedDescriptionKey: "In-app feedback submission is disabled in this open-source build. Please open a GitHub issue."]
-        )
-    }
 }
 
 // MARK: - Display helpers

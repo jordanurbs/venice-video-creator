@@ -136,6 +136,7 @@ extension EditorViewModel {
     private func transcribe(_ targets: [CaptionTarget], request: CaptionRequest) async throws -> [String: TranscriptionResult] {
         var results: [String: TranscriptionResult] = [:]
         var firstError: Error?
+        var failedTranscriptions = 0
         for t in targets where results[t.clip.mediaRef] == nil {
             do {
                 guard let url = mediaResolver.resolveURL(for: t.clip.mediaRef) else { continue }
@@ -151,9 +152,15 @@ extension EditorViewModel {
                 }
             } catch {
                 firstError = firstError ?? error
+                failedTranscriptions += 1
             }
         }
         if results.isEmpty, let firstError { throw firstError }
+        if failedTranscriptions > 0, let firstError {
+            mediaPanelToast = MediaPanelToast(
+                message: "Captions skipped \(failedTranscriptions) clip\(failedTranscriptions == 1 ? "" : "s"): \(firstError.localizedDescription)"
+            )
+        }
         return results
     }
 

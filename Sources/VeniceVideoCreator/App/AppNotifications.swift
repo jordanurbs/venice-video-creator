@@ -68,6 +68,40 @@ enum AppNotifications {
         }
     }
 
+    static func generationFailed(
+        assetId: String,
+        projectURL: URL?,
+        assetName: String,
+        assetType: ClipType,
+        reason: String
+    ) {
+        guard canUseUserNotifications, isEnabled else { return }
+
+        let name = assetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedReason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        let subject = name.isEmpty ? "A \(assetType.rawValue) generation" : name
+        let content = UNMutableNotificationContent()
+        content.title = "Generation failed"
+        content.body = trimmedReason.isEmpty ? "\(subject) failed." : "\(subject): \(trimmedReason)"
+        content.sound = .default
+        var userInfo = ["assetId": assetId]
+        if let projectURL {
+            userInfo["projectPath"] = projectURL.path
+        }
+        content.userInfo = userInfo
+
+        let request = UNNotificationRequest(
+            identifier: "generation-failed-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                Log.app.warning("notification delivery failed error=\(error.localizedDescription)")
+            }
+        }
+    }
+
     /// Agent-triggered exports run in the background
     static func exportComplete(name: String, outputURL: URL, size: CGSize?, warningCount: Int) {
         guard canUseUserNotifications, isEnabled else { return }

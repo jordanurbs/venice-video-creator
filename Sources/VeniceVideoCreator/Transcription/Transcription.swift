@@ -64,6 +64,20 @@ enum TranscriptionError: LocalizedError {
 enum Transcription {
     private static let audioExtractionGate = AsyncSemaphore(value: 2)
 
+    /// Called on the main actor when Venice STT fails and transcription silently
+    /// falls back on-device — the user picked Venice and should know it wasn't used.
+    @MainActor static var onVeniceFallback: ((String) -> Void)?
+
+    /// Called on the main actor when the on-device speech model starts downloading;
+    /// first-run transcription can otherwise look like a hang.
+    @MainActor static var onModelDownloadStart: ((Locale) -> Void)?
+
+    private static func reportVeniceFallback(_ error: any Error) async {
+        Log.transcription.warning("venice STT failed, falling back to on-device: \(error.localizedDescription)")
+        let detail = error.localizedDescription
+        await MainActor.run { onVeniceFallback?(detail) }
+    }
+
     static func transcribeVideoAudio(videoURL: URL, censorProfanity: Bool = false, preferredLocale: Locale? = nil, sourceRange: ClosedRange<Double>? = nil) async throws -> TranscriptionResult {
         if let veniceModel = await veniceConfig() {
             do {
@@ -72,7 +86,7 @@ enum Transcription {
                     model: veniceModel, preferredLocale: preferredLocale
                 )
             } catch {
-                Log.transcription.warning("venice STT failed, falling back to on-device: \(error.localizedDescription)")
+                await reportVeniceFallback(error)
             }
         }
         let tempAudioURL = try await extractAudioTrack(from: videoURL, range: sourceRange)
@@ -160,7 +174,7 @@ enum Transcription {
                     model: veniceModel, preferredLocale: preferredLocale
                 )
             } catch {
-                Log.transcription.warning("venice STT failed, falling back to on-device: \(error.localizedDescription)")
+                await reportVeniceFallback(error)
             }
         }
         return try await transcribeOnDevice(
@@ -209,6 +223,7 @@ enum Transcription {
                 telemetry: "Transcription model install started",
                 data: ["locale": locale.identifier(.bcp47)]
             )
+            await MainActor.run { onModelDownloadStart?(locale) }
             do {
                 try await install.downloadAndInstall()
             } catch {

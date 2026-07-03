@@ -26,7 +26,17 @@ final class TimelineView: NSView {
         registerForDraggedTypes([.string, .fileURL])
         playheadOverlay = PlayheadOverlay(view: self, editor: editor)
         snapOverlay = SnapIndicatorOverlay(view: self)
+        addSubview(emptyHintLabel)
     }
+
+    private lazy var emptyHintLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "Drag media here to start your edit.")
+        label.font = .systemFont(ofSize: AppTheme.FontSize.md, weight: .light)
+        label.textColor = NSColor(AppTheme.Text.tertiaryColor)
+        label.alignment = .center
+        label.isHidden = true
+        return label
+    }()
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
@@ -126,6 +136,16 @@ final class TimelineView: NSView {
         let newSize = NSSize(width: max(visibleSize.width, contentWidth), height: contentHeight)
         if frame.size != newSize {
             setFrameSize(newSize)
+        }
+
+        emptyHintLabel.isHidden = !editor.timeline.tracks.isEmpty
+        if !emptyHintLabel.isHidden {
+            emptyHintLabel.sizeToFit()
+            let visible = visibleRect
+            emptyHintLabel.setFrameOrigin(NSPoint(
+                x: visible.midX - emptyHintLabel.frame.width / 2,
+                y: visible.midY - emptyHintLabel.frame.height / 2
+            ))
         }
 
         if let previousZoom = lastAppliedZoomScale, previousZoom != editor.zoomScale {

@@ -87,7 +87,7 @@ final class ExportService {
                 progress = 1.0
                 Log.export.notice("export ok format=\(name)", telemetry: "Export finished", data: ["format": name])
             } catch {
-                self.error = Log.detail(error)
+                self.error = error.localizedDescription
                 Log.export.error(
                     "export failed format=\(name): \(Log.detail(error))",
                     telemetry: "Export failed",
@@ -163,7 +163,7 @@ final class ExportService {
                         data: ["format": String(describing: format), "resolution": resolution.rawValue]
                     )
                 } else {
-                    self.error = Log.detail(error)
+                    self.error = error.localizedDescription
                     Log.export.error(
                         "export failed: \(Log.detail(error))",
                         telemetry: "Export failed",
@@ -174,7 +174,7 @@ final class ExportService {
 
             progressTask.cancel()
         } catch {
-            self.error = Log.detail(error)
+            self.error = error.localizedDescription
             Log.export.error(
                 "export setup failed: \(Log.detail(error))",
                 telemetry: "Export setup failed",
@@ -236,7 +236,7 @@ final class ExportService {
             Log.export.notice("venice export cancelled", telemetry: "Venice project export cancelled")
             return nil
         } catch {
-            self.error = Log.detail(error)
+            self.error = error.localizedDescription
             Log.export.error(
                 "venice export failed: \(Log.detail(error))",
                 telemetry: "Venice project export failed",

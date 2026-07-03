@@ -266,10 +266,11 @@ extension EditorViewModel {
         }
         undoManager?.enableUndoRegistration()
 
-        if let name = plan.rejectedUnsupportedNames.last {
-            mediaPanelToast = "Can't import \"\(name)\" — unsupported file type."
-        } else if let name = plan.rejectedLottieNames.last {
-            mediaPanelToast = "Can't import \"\(name)\" — not a Lottie animation."
+        let rejected = plan.rejectedUnsupportedNames + plan.rejectedLottieNames
+        if let first = rejected.first {
+            mediaPanelToast = rejected.count == 1
+                ? MediaPanelToast(message: "Can't import \"\(first)\" — unsupported file type.")
+                : MediaPanelToast(message: "Can't import \(rejected.count) files (\"\(first)\" and \(rejected.count - 1) more) — unsupported file types.")
         }
 
         let summary = MediaImportSummary(
@@ -312,6 +313,7 @@ extension EditorViewModel {
             }.value
         } catch {
             Log.project.error("importPastedImageData: write failed \(error.localizedDescription)")
+            mediaPanelToast = "Couldn't save the pasted image: \(error.localizedDescription)"
             return nil
         }
         return addMediaAsset(from: destURL)
@@ -525,9 +527,10 @@ extension EditorViewModel {
 
         let videoComposition = isTimelineTab ? currentItem.videoComposition : nil
 
-        Task.detached {
+        Task.detached { [weak self] in
             guard (try? await asset.loadTracks(withMediaType: .video).first) != nil else {
                 Log.project.error("captureCurrentFrameToMedia: no video track")
+                await MainActor.run { self?.mediaPanelToast = "Couldn't capture the frame — no video at the playhead." }
                 return
             }
             let generator = AVAssetImageGenerator(asset: asset)
@@ -544,15 +547,17 @@ extension EditorViewModel {
                 videoCG = try await generator.image(at: time).image
             } catch {
                 Log.project.error("captureCurrentFrameToMedia: generate failed \(error.localizedDescription)")
+                await MainActor.run { self?.mediaPanelToast = "Couldn't capture the frame: \(error.localizedDescription)" }
                 return
             }
 
-            await MainActor.run { [weak self] in
+            await MainActor.run {
                 guard let self else { return }
                 // The timeline videoComposition already composites text via CustomVideoCompositor.
                 let rep = NSBitmapImageRep(cgImage: videoCG)
                 guard let data = rep.representation(using: .png, properties: [:]) else {
                     Log.project.error("captureCurrentFrameToMedia: png encode failed")
+                    self.mediaPanelToast = "Couldn't capture the frame — image encoding failed."
                     return
                 }
                 Task { @MainActor [weak self] in

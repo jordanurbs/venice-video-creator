@@ -9,6 +9,8 @@ struct AccountPane: View {
     @State private var maskedKey: String = ""
     @State private var draft: String = ""
     @State private var confirmRemoval = false
+    @State private var isValidating = false
+    @State private var validationNote: String?
     @FocusState private var isFocused: Bool
 
     private let consoleURL = URL(string: "https://venice.ai/settings/api")!
@@ -167,7 +169,10 @@ struct AccountPane: View {
     @ViewBuilder
     private var trailingControl: some View {
         let trimmed = draft.trimmingCharacters(in: .whitespaces)
-        if !trimmed.isEmpty {
+        if isValidating {
+            ProgressView()
+                .controlSize(.small)
+        } else if !trimmed.isEmpty {
             Button("Save", action: save)
                 .buttonStyle(.capsule(.prominent, size: .regular))
                 .controlSize(.large)
@@ -193,14 +198,26 @@ struct AccountPane: View {
     }
 
     private var statusRow: some View {
-        HStack(spacing: AppTheme.Spacing.sm) {
-            Circle()
-                .fill(hasKey ? Color.green : AppTheme.Text.mutedColor)
-                .frame(width: 8, height: 8)
-            Text(hasKey ? "Key saved — AI features enabled." : "No key set — AI features are disabled.")
-                .font(.system(size: AppTheme.FontSize.sm))
-                .foregroundStyle(hasKey ? AppTheme.Text.secondaryColor : AppTheme.Text.tertiaryColor)
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+            HStack(spacing: AppTheme.Spacing.sm) {
+                Circle()
+                    .fill(hasKey ? Color.green : AppTheme.Text.mutedColor)
+                    .frame(width: 8, height: 8)
+                Text(statusText)
+                    .font(.system(size: AppTheme.FontSize.sm))
+                    .foregroundStyle(hasKey ? AppTheme.Text.secondaryColor : AppTheme.Text.tertiaryColor)
+            }
+            if let validationNote {
+                Text(validationNote)
+                    .font(.system(size: AppTheme.FontSize.xs))
+                    .foregroundStyle(AppTheme.Status.errorColor)
+            }
         }
+    }
+
+    private var statusText: String {
+        if isValidating { return "Checking key with Venice…" }
+        return hasKey ? "Key verified — AI features enabled." : "No key set — AI features are disabled."
     }
 
     private func refresh() {
@@ -211,13 +228,44 @@ struct AccountPane: View {
 
     private func save() {
         let key = draft.trimmingCharacters(in: .whitespaces)
-        guard !key.isEmpty else { return }
+        guard !key.isEmpty, !isValidating else { return }
+        isValidating = true
+        validationNote = nil
+        Task { @MainActor in
+            defer { isValidating = false }
+            switch await Self.validate(key: key) {
+            case .valid:
+                commitKey(key)
+            case .invalid:
+                validationNote = "Venice rejected this key. Check it and try again."
+            case .unreachable:
+                // Can't verify without a network; keep the key rather than block setup.
+                commitKey(key)
+                validationNote = "Saved, but couldn't verify the key — Venice was unreachable."
+            }
+        }
+    }
+
+    private func commitKey(_ key: String) {
         VeniceKeychain.save(key)
         draft = ""
         isFocused = false
         refresh()
         ModelCatalog.shared.reload()
         Task { await account.refreshUsage() }
+    }
+
+    private enum KeyValidation { case valid, invalid, unreachable }
+
+    private static func validate(key: String) async -> KeyValidation {
+        do {
+            _ = try await VeniceAPI(apiKey: key).rateLimitInfo()
+            return .valid
+        } catch VeniceAPI.VeniceError.http(let status, _) where status == 401 || status == 403 {
+            return .invalid
+        } catch {
+            return .unreachable
+        }
     }
 
     private func remove() {

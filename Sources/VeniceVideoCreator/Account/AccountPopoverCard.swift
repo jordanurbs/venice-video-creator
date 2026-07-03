@@ -60,7 +60,7 @@ struct AccountPopoverCard: View {
                 dismiss()
             }
             footerButton(label: "Feedback", systemImage: "bubble.left.and.bubble.right") {
-                FeedbackWindowController.shared.show()
+                FeedbackReporter.openIssue()
                 dismiss()
             }
         }

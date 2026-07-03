@@ -5,6 +5,7 @@ struct ChatHistoryList: View {
     let currentId: UUID?
     let onSelect: (UUID) -> Void
     let onDelete: (UUID) -> Void
+    @State private var pendingDeletion: ChatSession?
 
     private static let formatter: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
@@ -33,6 +34,19 @@ struct ChatHistoryList: View {
         }
         .frame(width: 280)
         .glassEffect(.clear, in: .rect(cornerRadius: AppTheme.Radius.md))
+        .alert(
+            "Delete this conversation?",
+            isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            ),
+            presenting: pendingDeletion
+        ) { session in
+            Button("Delete", role: .destructive) { onDelete(session.id) }
+            Button("Cancel", role: .cancel) { }
+        } message: { session in
+            Text("“\(session.title)” and its messages are permanently deleted.")
+        }
     }
 
     private func row(session: ChatSession) -> some View {
@@ -51,7 +65,7 @@ struct ChatHistoryList: View {
             }
             Spacer()
             if !isCurrent {
-                Button { onDelete(session.id) } label: {
+                Button { pendingDeletion = session } label: {
                     Image(systemName: "trash")
                         .font(.system(size: AppTheme.FontSize.xs))
                         .foregroundStyle(AppTheme.Text.mutedColor)

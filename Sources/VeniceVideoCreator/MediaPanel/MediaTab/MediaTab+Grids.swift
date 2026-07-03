@@ -286,7 +286,10 @@ extension MediaTab {
                             openFolder(id: folderId)
                         }
                         Divider()
-                        Button("Delete", role: .destructive) {
+                        Button(
+                            folderDeleteMenuTitle(assetCount: editor.deletionImpactCount(forFolderIds: [folderId])),
+                            role: .destructive
+                        ) {
                             editor.deleteFolders(ids: [folderId])
                         }
                     }
@@ -403,6 +406,7 @@ extension MediaTab {
                 isSelected: editor.selectedFolderIds.contains(folder.id),
                 isDropHover: dropTargetFolderId == folder.id,
                 childCount: editor.subfolders(of: folder.id).count + editor.assetsIn(folderId: folder.id).count,
+                deleteImpactCount: editor.deletionImpactCount(forFolderIds: [folder.id]),
                 isRenaming: Binding(
                     get: { renamingFolderId == folder.id },
                     set: { renamingFolderId = $0 ? folder.id : nil }

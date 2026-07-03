@@ -46,8 +46,13 @@ final class VideoProject: NSDocument {
     private nonisolated(unsafe) var snapshotChatSessionFiles: [(name: String, data: Data)] = []
     private nonisolated(unsafe) var snapshotSourceProjectURL: URL?
     private nonisolated(unsafe) var snapshotPreparedForWrite = false
+    /// False until this document has read or written its package. A new document
+    /// saved over an existing package must not inherit that package's media.
+    private nonisolated(unsafe) var ownsPackageOnDisk = false
     private var projectCheckpointAutosaveScheduled = false
     private var isClosed = false
+    // One alert per failure streak; resets when a checkpoint succeeds.
+    private var checkpointFailureAlerted = false
 
     // MARK: - Persistence
 
@@ -70,6 +75,7 @@ final class VideoProject: NSDocument {
     }
 
     private nonisolated func applyLoadedContents(_ contents: ProjectPackageContents) {
+        ownsPackageOnDisk = true
         loadedTimeline = contents.timeline
         loadedManifest = contents.manifest
         loadedGenerationLog = contents.generationLog
@@ -130,7 +136,7 @@ final class VideoProject: NSDocument {
         }
 
         captureSaveSnapshot()
-        snapshotSourceProjectURL = fileURL
+        snapshotSourceProjectURL = ownsPackageOnDisk ? fileURL : nil
         super.save(to: url, ofType: typeName, for: saveOperation, completionHandler: completionHandler)
     }
 
@@ -142,7 +148,7 @@ final class VideoProject: NSDocument {
             }
             MainActor.assumeIsolated {
                 captureSaveSnapshot()
-                snapshotSourceProjectURL = fileURL
+                snapshotSourceProjectURL = ownsPackageOnDisk ? fileURL : nil
             }
         }
         defer {
@@ -167,6 +173,7 @@ final class VideoProject: NSDocument {
         )
         // A real manifest was just written, so the unreadable original is gone; stop preserving it.
         if snapshotManifest != nil { manifestLoadFailed = false }
+        ownsPackageOnDisk = true
     }
 
     private func captureSaveSnapshot() {
@@ -288,8 +295,21 @@ final class VideoProject: NSDocument {
             self.projectCheckpointAutosaveScheduled = false
             guard self.fileURL != nil, !self.isClosed else { return }
             self.autosave(withImplicitCancellability: false) { error in
-                if let error {
-                    Log.project.error("project checkpoint autosave failed: \(error.localizedDescription)")
+                guard let error else {
+                    self.checkpointFailureAlerted = false
+                    return
+                }
+                Log.project.error("project checkpoint autosave failed: \(error.localizedDescription)")
+                guard !self.checkpointFailureAlerted, !self.isClosed else { return }
+                self.checkpointFailureAlerted = true
+                let alert = NSAlert()
+                alert.messageText = "Autosave failed."
+                alert.informativeText = "\(error.localizedDescription)\n\nChanges since the last successful save are at risk. Check disk space and permissions."
+                alert.addButton(withTitle: "OK")
+                if let window = self.windowControllers.first?.window, window.isVisible {
+                    alert.beginSheetModal(for: window)
+                } else {
+                    alert.runModal()
                 }
             }
         }

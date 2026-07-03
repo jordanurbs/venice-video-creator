@@ -4,7 +4,7 @@ extension ToolExecutor {
     func exportProject(_ editor: EditorViewModel, _ args: [String: Any]) async throws -> ToolResult {
         let input: ExportProjectArgs = try decodeToolArgs(args, path: "export_project")
         let mode = try ExportProjectMode(named: input.mode)
-        let overwrite = input.overwrite ?? true
+        let overwrite = input.overwrite ?? false
 
         if mode != .video {
             if input.codec != nil {
@@ -214,7 +214,7 @@ extension ToolExecutor {
 
         let url = try directExportURL(outputPath, mode: mode, format: format)
         if !overwrite, FileManager.default.fileExists(atPath: url.path) {
-            throw ToolError("export_project: output file already exists")
+            throw ToolError("export_project: \(url.path) already exists. Pass overwrite=true to replace it, or pick another outputPath.")
         }
         return url
     }

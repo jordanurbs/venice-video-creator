@@ -1,10 +1,18 @@
 import SwiftUI
 
+/// Names the blast radius so a folder delete never reads like a rename.
+func folderDeleteMenuTitle(assetCount: Int) -> String {
+    assetCount == 0
+        ? "Delete Folder"
+        : "Delete Folder and \(assetCount) Asset\(assetCount == 1 ? "" : "s")"
+}
+
 struct FolderTileView: View {
     let folder: MediaFolder
     let isSelected: Bool
     let isDropHover: Bool
     let childCount: Int
+    let deleteImpactCount: Int
     @Binding var isRenaming: Bool
     let onTap: () -> Void
     let onOpen: () -> Void
@@ -116,7 +124,7 @@ struct FolderTileView: View {
         Button("Open") { onOpen() }
         Button("Rename") { beginRename() }
         Divider()
-        Button("Delete", role: .destructive) { onDelete() }
+        Button(folderDeleteMenuTitle(assetCount: deleteImpactCount), role: .destructive) { onDelete() }
     }
 
     private func beginRename() {

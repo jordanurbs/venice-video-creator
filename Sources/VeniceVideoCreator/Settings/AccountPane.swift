@@ -8,6 +8,7 @@ struct AccountPane: View {
     @State private var hasKey: Bool = false
     @State private var maskedKey: String = ""
     @State private var draft: String = ""
+    @State private var confirmRemoval = false
     @FocusState private var isFocused: Bool
 
     private let consoleURL = URL(string: "https://venice.ai/settings/api")!
@@ -171,7 +172,9 @@ struct AccountPane: View {
                 .buttonStyle(.capsule(.prominent, size: .regular))
                 .controlSize(.large)
         } else if hasKey {
-            Button(action: remove) {
+            Button {
+                confirmRemoval = true
+            } label: {
                 Image(systemName: "trash")
                     .font(.system(size: AppTheme.FontSize.md))
                     .foregroundStyle(AppTheme.Text.secondaryColor)
@@ -180,6 +183,12 @@ struct AccountPane: View {
             .buttonStyle(.capsule(.secondary, size: .regular))
             .controlSize(.large)
             .help("Remove API key")
+            .alert("Remove your Venice API key?", isPresented: $confirmRemoval) {
+                Button("Remove", role: .destructive) { remove() }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("AI features are disabled until you add a key again.")
+            }
         }
     }
 

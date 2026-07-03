@@ -75,8 +75,17 @@ final class AppState {
             HomeWindowController.shared.showWindow(nil)
         }
         if project.isDocumentEdited {
-            project.autosave(withImplicitCancellability: false) { _ in
+            project.autosave(withImplicitCancellability: false) { error in
                 DispatchQueue.main.async {
+                    if let error {
+                        // Hold navigation — leaving now would silently drop the changes.
+                        let alert = NSAlert()
+                        alert.messageText = "Couldn't save \(project.displayName ?? "the project")."
+                        alert.informativeText = "\(error.localizedDescription)\n\nCheck disk space and permissions, then try again."
+                        alert.addButton(withTitle: "OK")
+                        alert.runModal()
+                        return
+                    }
                     presentHome()
                 }
             }
@@ -189,7 +198,13 @@ final class AppState {
         panel.begin { [self] response in
             guard response == .OK, let url = panel.url else { return }
             let doc = instantiateProject(at: url)
-            doc.save(to: url, ofType: VideoProject.typeIdentifier, for: .saveOperation) { _ in
+            doc.save(to: url, ofType: VideoProject.typeIdentifier, for: .saveOperation) { error in
+                if let error {
+                    doc.close()
+                    try? FileManager.default.removeItem(at: url)
+                    NSAlert(error: error).runModal()
+                    return
+                }
                 ProjectRegistry.shared.register(url)
             }
         }

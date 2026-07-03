@@ -64,6 +64,12 @@ extension EditorViewModel {
         undoManager?.setActionName("Rename Folder")
     }
 
+    /// Assets that deleting these folders would take with them (descendants included).
+    func deletionImpactCount(forFolderIds ids: Set<String>) -> Int {
+        let all = MediaFolderIndex(mediaManifest.folders).idsIncludingDescendants(ids)
+        return assetIds(inFolderIds: all).count
+    }
+
     func deleteFolders(ids: Set<String>) {
         guard !ids.isEmpty else { return }
         let allFolderIds = MediaFolderIndex(mediaManifest.folders).idsIncludingDescendants(ids)

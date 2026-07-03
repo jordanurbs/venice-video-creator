@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 struct ProjectEntry: Codable, Identifiable, Sendable {
@@ -58,7 +59,24 @@ final class ProjectRegistry {
 
     func delete(_ url: URL) {
         Task { [weak self] in
-            guard let self, await self.disk.trashIfPresent(url) else { return }
+            guard let self else { return }
+            // Close any open editor first — its autosave would resurrect a hollow
+            // package while the media sits in the Trash.
+            let resolved = url.standardizedFileURL
+            for project in AppState.shared.openProjects
+            where project.fileURL?.standardizedFileURL == resolved {
+                project.close()
+            }
+            do {
+                try await self.disk.trashIfPresent(url)
+            } catch {
+                let alert = NSAlert()
+                alert.messageText = "Couldn't move \u{201C}\(url.deletingPathExtension().lastPathComponent)\u{201D} to the Trash."
+                alert.informativeText = error.localizedDescription
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+                return
+            }
             self.remove(url)
         }
     }
@@ -129,13 +147,8 @@ private actor ProjectRegistryDisk {
         return ProjectRegistry.loadEntries(from: fileURL)
     }
 
-    func trashIfPresent(_ url: URL) -> Bool {
-        guard FileManager.default.fileExists(atPath: url.path) else { return true }
-        do {
-            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
-            return true
-        } catch {
-            return false
-        }
+    func trashIfPresent(_ url: URL) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try FileManager.default.trashItem(at: url, resultingItemURL: nil)
     }
 }

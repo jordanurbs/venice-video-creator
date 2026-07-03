@@ -46,10 +46,15 @@ enum MainMenuBuilder {
         menu.addItem(withTitle: "Save", action: #selector(NSDocument.save(_:)), keyEquivalent: "s")
         menu.addItem(withTitle: "Save As…", action: #selector(NSDocument.saveAs(_:)), keyEquivalent: "S")
         menu.addItem(.separator())
+        menu.addItem(withTitle: "Revert to Saved…", action: Selector(("revertDocumentToSaved:")), keyEquivalent: "")
+        menu.addItem(withTitle: "Browse All Versions…", action: Selector(("browseDocumentVersions:")), keyEquivalent: "")
+        menu.addItem(.separator())
 
         let importItem = NSMenuItem(title: "Import Media…", action: #selector(EditorActions.importMedia(_:)), keyEquivalent: "i")
         importItem.keyEquivalentModifierMask = [.command]
         menu.addItem(importItem)
+
+        menu.addItem(NSMenuItem(title: "Remove Unused Media…", action: #selector(EditorActions.removeUnusedMedia(_:)), keyEquivalent: ""))
 
         menu.addItem(.separator())
 
@@ -189,6 +194,7 @@ enum MainMenuBuilder {
     func deleteSelectedClips(_ sender: Any?)
     func rippleDeleteSelected(_ sender: Any?)
     func importMedia(_ sender: Any?)
+    func removeUnusedMedia(_ sender: Any?)
     func playPause(_ sender: Any?)
     func stepFrameForward(_ sender: Any?)
     func stepFrameBackward(_ sender: Any?)

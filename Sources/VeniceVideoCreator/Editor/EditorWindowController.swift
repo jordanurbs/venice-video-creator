@@ -73,24 +73,31 @@ final class EditorWindowController: NSWindowController {
             if shift { editorViewModel.skipForward() } else { editorViewModel.stepForward() }
             return true
 
-        case 51: // Delete/Backspace
-            if !editorViewModel.selectedFolderIds.isEmpty || !editorViewModel.selectedMediaAssetIds.isEmpty {
+        case 51: // Delete/Backspace — scoped to the focused panel; a stale
+            // selection in another panel must never be the thing that dies.
+            switch editorViewModel.focusedPanel {
+            case .media:
                 if !editorViewModel.selectedFolderIds.isEmpty {
                     editorViewModel.deleteFolders(ids: editorViewModel.selectedFolderIds)
                 }
                 if !editorViewModel.selectedMediaAssetIds.isEmpty {
                     editorViewModel.deleteSelectedMediaAssets()
                 }
-            } else if shift {
-                if editorViewModel.selectedGap != nil {
-                    editorViewModel.rippleDeleteSelectedGap()
+                return true
+            case .timeline:
+                if shift {
+                    if editorViewModel.selectedGap != nil {
+                        editorViewModel.rippleDeleteSelectedGap()
+                    } else {
+                        editorViewModel.rippleDeleteSelectedClips()
+                    }
                 } else {
-                    editorViewModel.rippleDeleteSelectedClips()
+                    editorViewModel.deleteSelectedClips()
                 }
-            } else {
-                editorViewModel.deleteSelectedClips()
+                return true
+            case .preview, .inspector, .agent, nil:
+                return false
             }
-            return true
 
         case 8: // C key
             if !cmd {
@@ -194,7 +201,10 @@ final class EditorWindowController: NSWindowController {
             if let panel = EditorViewModel.FocusedPanel(accessibilityID: v.accessibilityIdentifier()) {
                 editorViewModel.focusedPanel = panel
                 if panel == .media { editorViewModel.selectedClipIds.removeAll() }
-                if panel == .timeline { editorViewModel.selectedMediaAssetIds.removeAll() }
+                if panel == .timeline {
+                    editorViewModel.selectedMediaAssetIds.removeAll()
+                    editorViewModel.selectedFolderIds.removeAll()
+                }
                 return
             }
             view = v.superview
@@ -235,6 +245,10 @@ extension EditorWindowController: EditorActions {
 
     @objc func importMedia(_ sender: Any?) {
         // Handled by MediaTab directly
+    }
+
+    @objc func removeUnusedMedia(_ sender: Any?) {
+        editorViewModel.removeUnusedMedia()
     }
 
     @objc func showExport(_ sender: Any?) {

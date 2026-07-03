@@ -49,6 +49,14 @@ extension EditorViewModel {
                 changed = true
             }
         }
+        if changed {
+            undoManager?.registerUndo(withTarget: self) { vm in
+                vm.applyRelink(id: id, to: oldURL)
+                vm.onProjectContentChanged?()
+                vm.notifyTimelineChanged()
+            }
+            undoManager?.setActionName("Relink Media")
+        }
         let asset = mediaAssets[i]
         Task { await finalizeImportedAsset(asset) }
         return changed

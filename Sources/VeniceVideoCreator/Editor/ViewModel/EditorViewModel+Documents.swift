@@ -54,6 +54,7 @@ extension EditorViewModel {
         let removed = mediaManifest.documents.remove(at: idx)
         undoManager?.registerUndo(withTarget: self) { vm in
             vm.mediaManifest.documents.append(removed)
+            vm.writeDocumentMirror(removed)
             vm.onProjectContentChanged?()
         }
         undoManager?.setActionName("Delete Document")

@@ -60,7 +60,7 @@ struct ExportView: View {
     @State private var fcpxmlTarget: FCPXMLTarget = .default
     @State private var codec: VideoCodec = .h264
     @State private var resolution: ExportResolution = .matchTimeline
-    @State private var veniceResult: String?
+    @State private var resultNote: String?
     @State private var veniceSummary: (collect: Int, missing: Int, bytes: Int64) = (0, 0, 0)
 
     var body: some View {
@@ -139,8 +139,8 @@ struct ExportView: View {
                         .padding(.top, AppTheme.Spacing.sm)
                 }
 
-                if let veniceResult {
-                    Text(veniceResult)
+                if let resultNote {
+                    Text(resultNote)
                         .font(.system(size: AppTheme.FontSize.xs))
                         .foregroundStyle(AppTheme.Text.secondaryColor)
                         .padding(.top, AppTheme.Spacing.sm)
@@ -167,6 +167,15 @@ struct ExportView: View {
         }
         .padding(.vertical, AppTheme.Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func offlineMediaWarning(_ note: String) -> some View {
+        let count = editor.missingMediaRefs.count
+        return Text("\(count) media file\(count == 1 ? "" : "s") offline. \(note)")
+            .font(.system(size: AppTheme.FontSize.xs))
+            .foregroundStyle(AppTheme.Status.errorColor)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, AppTheme.Spacing.sm)
     }
 
     private var videoSettings: some View {
@@ -204,6 +213,10 @@ struct ExportView: View {
                 Text("\(editor.timeline.fps) fps")
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
             }
+
+            if !editor.missingMediaRefs.isEmpty {
+                offlineMediaWarning("Their clips render black.")
+            }
         }
     }
 
@@ -218,6 +231,10 @@ struct ExportView: View {
                 ForEach(TimelineExportFormat.allCases) { format in
                     timelineFormatButton(format)
                 }
+            }
+
+            if !editor.missingMediaRefs.isEmpty {
+                offlineMediaWarning("Their clips reference files that are missing.")
             }
         }
         .padding(.vertical, AppTheme.Spacing.xs)
@@ -470,8 +487,20 @@ struct ExportView: View {
         return (collect, missing, bytes)
     }
 
+    private func exportProblemsNote(offline: Int, unprocessable: Int) -> String {
+        var parts: [String] = []
+        if offline > 0 {
+            parts.append("\(offline) offline media file\(offline == 1 ? "" : "s") rendered black")
+        }
+        if unprocessable > 0 {
+            parts.append("\(unprocessable) file\(unprocessable == 1 ? "" : "s") couldn't be processed")
+        }
+        return "Exported, but " + parts.joined(separator: " and ") + "."
+    }
+
     private func startExport() {
         if destination == .veniceProject { startVeniceExport(); return }
+        resultNote = nil
         let format = exportFormat
         let panel = NSSavePanel()
         let contentType: UTType = switch format {
@@ -500,7 +529,13 @@ struct ExportView: View {
                     missingMediaRefs: editor.missingMediaRefs,
                     outputURL: url
                 )
-                if service.error == nil {
+                guard service.error == nil else { return }
+                let offline = service.lastReport?.offlineMediaRefs.count ?? 0
+                let unprocessable = service.lastReport?.unprocessableMediaRefs.count ?? 0
+                if offline + unprocessable > 0 {
+                    // Keep the dialog open so the user sees what shipped incomplete.
+                    resultNote = exportProblemsNote(offline: offline, unprocessable: unprocessable)
+                } else {
                     editor.showExportDialog = false
                 }
             }
@@ -508,7 +543,7 @@ struct ExportView: View {
     }
 
     private func startVeniceExport() {
-        veniceResult = nil
+        resultNote = nil
         let panel = NSSavePanel()
         panel.allowedContentTypes = [UTType(Project.typeIdentifier) ?? .package]
         let base = editor.projectURL?.deletingPathExtension().lastPathComponent ?? Project.defaultProjectName
@@ -530,7 +565,7 @@ struct ExportView: View {
                     editor.showExportDialog = false
                 } else {
                     // Keep the dialog open so the user sees what couldn't be included.
-                    veniceResult = "Exported, but \(report.missing.count) media file\(report.missing.count == 1 ? "" : "s") were missing and couldn't be included."
+                    resultNote = "Exported, but \(report.missing.count) media file\(report.missing.count == 1 ? "" : "s") were missing and couldn't be included."
                 }
             }
         }

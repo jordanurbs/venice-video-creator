@@ -136,7 +136,12 @@ struct MediaTab: View {
             mediaPanelHeight = newValue
         }
         .onExitCommand { if editor.pendingSwapClipId != nil { editor.cancelMediaSwap() } }
-        .background(KeyCommandSink(onNewFolder: createNewFolderInCurrent, onNavigateUp: navigateUp))
+        .onChange(of: editor.mediaPanelNewFolderRequestTick) { _, _ in
+            createNewFolderInCurrent()
+        }
+        .onChange(of: editor.mediaPanelNavigateUpRequestTick) { _, _ in
+            navigateUp()
+        }
         .onChange(of: editor.folders.map(\.id)) { _, _ in pruneStaleFolderState() }
         .onChange(of: editor.mediaPanelRevealAssetId) { _, target in
             guard let target else { return }
@@ -150,6 +155,9 @@ struct MediaTab: View {
         }
         .onChange(of: editor.mediaPanelPasteRequestTick) { _, _ in
             handleClipboardPaste()
+        }
+        .onChange(of: editor.mediaPanelImportRequestTick) { _, _ in
+            importMedia()
         }
         .onChange(of: currentFolderId, initial: true) { _, folderId in
             editor.mediaPanelCurrentFolderId = folderId
@@ -794,42 +802,3 @@ struct MarqueeSelection {
     }
 }
 
-// MARK: - Cmd+Shift+N / Cmd+Up keyboard shortcuts
-
-private struct KeyCommandSink: NSViewRepresentable {
-    let onNewFolder: () -> Void
-    let onNavigateUp: () -> Void
-
-    func makeNSView(context: Context) -> SinkView {
-        let v = SinkView()
-        v.onNewFolder = onNewFolder
-        v.onNavigateUp = onNavigateUp
-        return v
-    }
-
-    func updateNSView(_ nsView: SinkView, context: Context) {
-        nsView.onNewFolder = onNewFolder
-        nsView.onNavigateUp = onNavigateUp
-    }
-
-    final class SinkView: NSView {
-        var onNewFolder: (() -> Void)?
-        var onNavigateUp: (() -> Void)?
-
-        override var acceptsFirstResponder: Bool { true }
-
-        override func keyDown(with event: NSEvent) {
-            let cmd = event.modifierFlags.contains(.command)
-            let shift = event.modifierFlags.contains(.shift)
-            if cmd, shift, event.charactersIgnoringModifiers?.lowercased() == "n" {
-                onNewFolder?()
-                return
-            }
-            if cmd, event.keyCode == 126 {
-                onNavigateUp?()
-                return
-            }
-            super.keyDown(with: event)
-        }
-    }
-}

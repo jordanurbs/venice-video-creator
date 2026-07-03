@@ -173,6 +173,9 @@ final class EditorViewModel {
     var mediaPanelOpenFolderId: String?
     var mediaPanelCurrentFolderId: String?
     var mediaPanelPasteRequestTick: Int = 0
+    var mediaPanelImportRequestTick: Int = 0
+    var mediaPanelNewFolderRequestTick: Int = 0
+    var mediaPanelNavigateUpRequestTick: Int = 0
     var mediaPanelShowMediaTabTick: Int = 0
     var mediaPanelToast: MediaPanelToast?
     @ObservationIgnored var mediaImportTail: Task<MediaImportSummary, Never>?

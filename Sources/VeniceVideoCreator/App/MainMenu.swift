@@ -11,6 +11,8 @@ enum MainMenuBuilder {
         mainMenu.addItem(fileMenu())
         mainMenu.addItem(editMenu())
         mainMenu.addItem(viewMenu())
+        mainMenu.addItem(playbackMenu())
+        mainMenu.addItem(windowMenu())
         mainMenu.addItem(helpMenu())
         return mainMenu
     }
@@ -28,6 +30,18 @@ enum MainMenuBuilder {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Settings…", action: #selector(AppDelegate.showSettings(_:)), keyEquivalent: ",")
         menu.addItem(.separator())
+        let servicesItem = NSMenuItem(title: "Services", action: nil, keyEquivalent: "")
+        let servicesMenu = NSMenu(title: "Services")
+        servicesItem.submenu = servicesMenu
+        menu.addItem(servicesItem)
+        NSApp.servicesMenu = servicesMenu
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Hide Venice Video Editor", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthersItem = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthersItem.keyEquivalentModifierMask = [.command, .option]
+        menu.addItem(hideOthersItem)
+        menu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Venice Video Editor", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.submenu = menu
         return item
@@ -40,6 +54,8 @@ enum MainMenuBuilder {
         let menu = NSMenu(title: "File")
         let newItem = menu.addItem(withTitle: "New", action: #selector(AppDelegate.newProject(_:)), keyEquivalent: "n")
         newItem.target = NSApp.delegate
+        let newFolderItem = NSMenuItem(title: "New Folder", action: #selector(EditorActions.newMediaFolder(_:)), keyEquivalent: "N")
+        menu.addItem(newFolderItem)
         let openItem = menu.addItem(withTitle: "Open…", action: #selector(AppDelegate.openProject(_:)), keyEquivalent: "o")
         openItem.target = NSApp.delegate
         menu.addItem(.separator())
@@ -104,11 +120,12 @@ enum MainMenuBuilder {
 
         menu.addItem(.separator())
 
-        let deleteItem = NSMenuItem(title: "Delete", action: #selector(EditorActions.deleteSelectedClips(_:)), keyEquivalent: "\u{8}") // backspace
+        // U+007F is what the Delete key actually produces; U+0008 never matches.
+        let deleteItem = NSMenuItem(title: "Delete", action: #selector(EditorActions.deleteSelectedClips(_:)), keyEquivalent: "\u{7F}")
         deleteItem.keyEquivalentModifierMask = []
         menu.addItem(deleteItem)
 
-        let rippleDeleteItem = NSMenuItem(title: "Ripple Delete", action: #selector(EditorActions.rippleDeleteSelected(_:)), keyEquivalent: "\u{8}") // backspace
+        let rippleDeleteItem = NSMenuItem(title: "Ripple Delete", action: #selector(EditorActions.rippleDeleteSelected(_:)), keyEquivalent: "\u{7F}")
         rippleDeleteItem.keyEquivalentModifierMask = [.shift]
         menu.addItem(rippleDeleteItem)
 
@@ -143,7 +160,60 @@ enum MainMenuBuilder {
         menu.addItem(.separator())
         menu.addItem(layoutSubmenuItem())
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        // System-standard shortcut; Cmd+F stays reserved for find.
+        let fullScreenItem = NSMenuItem(title: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        fullScreenItem.keyEquivalentModifierMask = [.command, .control]
+        menu.addItem(fullScreenItem)
+        item.submenu = menu
+        return item
+    }
+
+    // MARK: - Playback menu
+
+    private static func playbackMenu() -> NSMenuItem {
+        let item = NSMenuItem()
+        let menu = NSMenu(title: "Playback")
+
+        let playItem = NSMenuItem(title: "Play/Pause", action: #selector(EditorActions.playPause(_:)), keyEquivalent: " ")
+        playItem.keyEquivalentModifierMask = []
+        menu.addItem(playItem)
+
+        menu.addItem(.separator())
+
+        let left = String(UnicodeScalar(UInt16(NSLeftArrowFunctionKey))!)
+        let right = String(UnicodeScalar(UInt16(NSRightArrowFunctionKey))!)
+
+        let stepBackItem = NSMenuItem(title: "Step Backward", action: #selector(EditorActions.stepFrameBackward(_:)), keyEquivalent: left)
+        stepBackItem.keyEquivalentModifierMask = []
+        menu.addItem(stepBackItem)
+
+        let stepForwardItem = NSMenuItem(title: "Step Forward", action: #selector(EditorActions.stepFrameForward(_:)), keyEquivalent: right)
+        stepForwardItem.keyEquivalentModifierMask = []
+        menu.addItem(stepForwardItem)
+
+        let skipBackItem = NSMenuItem(title: "Skip Backward", action: #selector(EditorActions.skipFramesBackward(_:)), keyEquivalent: left)
+        skipBackItem.keyEquivalentModifierMask = [.shift]
+        menu.addItem(skipBackItem)
+
+        let skipForwardItem = NSMenuItem(title: "Skip Forward", action: #selector(EditorActions.skipFramesForward(_:)), keyEquivalent: right)
+        skipForwardItem.keyEquivalentModifierMask = [.shift]
+        menu.addItem(skipForwardItem)
+
+        item.submenu = menu
+        return item
+    }
+
+    // MARK: - Window menu
+
+    private static func windowMenu() -> NSMenuItem {
+        let item = NSMenuItem()
+        let menu = NSMenu(title: "Window")
+        menu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        menu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        menu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        NSApp.windowsMenu = menu
         item.submenu = menu
         return item
     }
@@ -179,6 +249,7 @@ enum MainMenuBuilder {
         menu.addItem(withTitle: "MCP Instructions", action: #selector(AppDelegate.showMCPInstructions(_:)), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Send Feedback…", action: #selector(AppDelegate.showFeedback(_:)), keyEquivalent: "")
+        NSApp.helpMenu = menu
         item.submenu = menu
         return item
     }
@@ -195,6 +266,7 @@ enum MainMenuBuilder {
     func rippleDeleteSelected(_ sender: Any?)
     func importMedia(_ sender: Any?)
     func removeUnusedMedia(_ sender: Any?)
+    func newMediaFolder(_ sender: Any?)
     func playPause(_ sender: Any?)
     func stepFrameForward(_ sender: Any?)
     func stepFrameBackward(_ sender: Any?)

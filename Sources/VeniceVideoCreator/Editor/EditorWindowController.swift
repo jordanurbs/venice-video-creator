@@ -47,8 +47,14 @@ final class EditorWindowController: NSWindowController {
         let rangeMarkShortcut = mods.intersection([.command, .option, .control]).isEmpty
 
         if editorViewModel.focusedPanel == .media, !shift,
+           mods.intersection([.command, .option, .control]).isEmpty,
            let direction = mediaArrowDirection(for: event.keyCode) {
             editorViewModel.moveMediaSelection(direction: direction)
+            return true
+        }
+
+        if event.keyCode == 126, cmd, editorViewModel.focusedPanel == .media {
+            editorViewModel.mediaPanelNavigateUpRequestTick &+= 1
             return true
         }
 
@@ -62,42 +68,23 @@ final class EditorWindowController: NSWindowController {
             return false
 
         case 49: // Space
+            guard mods.intersection([.command, .option, .control]).isEmpty,
+                  editorViewModel.tour.currentStep == nil else { return false }
             editorViewModel.togglePlayback()
             return true
 
         case 123: // Left arrow
+            guard mods.intersection([.command, .option, .control]).isEmpty else { return false }
             if shift { editorViewModel.skipBackward() } else { editorViewModel.stepBackward() }
             return true
 
         case 124: // Right arrow
+            guard mods.intersection([.command, .option, .control]).isEmpty else { return false }
             if shift { editorViewModel.skipForward() } else { editorViewModel.stepForward() }
             return true
 
-        case 51: // Delete/Backspace — scoped to the focused panel; a stale
-            // selection in another panel must never be the thing that dies.
-            switch editorViewModel.focusedPanel {
-            case .media:
-                if !editorViewModel.selectedFolderIds.isEmpty {
-                    editorViewModel.deleteFolders(ids: editorViewModel.selectedFolderIds)
-                }
-                if !editorViewModel.selectedMediaAssetIds.isEmpty {
-                    editorViewModel.deleteSelectedMediaAssets()
-                }
-                return true
-            case .timeline:
-                if shift {
-                    if editorViewModel.selectedGap != nil {
-                        editorViewModel.rippleDeleteSelectedGap()
-                    } else {
-                        editorViewModel.rippleDeleteSelectedClips()
-                    }
-                } else {
-                    editorViewModel.deleteSelectedClips()
-                }
-                return true
-            case .preview, .inspector, .agent, nil:
-                return false
-            }
+        case 51: // Delete/Backspace
+            return performScopedDelete(ripple: shift)
 
         case 8: // C key
             if !cmd {
@@ -128,10 +115,12 @@ final class EditorWindowController: NSWindowController {
             return false
 
         case 33: // [ key
+            guard mods.intersection([.command, .option, .control, .shift]).isEmpty else { return false }
             editorViewModel.trimStartToPlayhead()
             return true
 
         case 30: // ] key
+            guard mods.intersection([.command, .option, .control, .shift]).isEmpty else { return false }
             editorViewModel.trimEndToPlayhead()
             return true
 
@@ -156,6 +145,10 @@ final class EditorWindowController: NSWindowController {
             return false
 
         case 53: // Escape
+            // The tour and sheets own Esc — let it through so .cancelAction
+            // and .onExitCommand can fire.
+            if editorViewModel.tour.currentStep != nil { return false }
+            if window?.attachedSheet != nil { return false }
             if editorViewModel.pendingSwapClipId != nil {
                 editorViewModel.cancelMediaSwap()
                 return true
@@ -168,12 +161,44 @@ final class EditorWindowController: NSWindowController {
                 editorViewModel.maximizedPanel = nil
                 return true
             }
+            guard !editorViewModel.selectedClipIds.isEmpty
+                || editorViewModel.selectedTimelineRange != nil
+                || editorViewModel.toolMode != .pointer else { return false }
             editorViewModel.selectedClipIds.removeAll()
             editorViewModel.clearTimelineRange()
             editorViewModel.toolMode = .pointer
             return true
 
         default:
+            return false
+        }
+    }
+
+    /// Single Delete implementation shared by the key monitor and menu items —
+    /// scoped to the focused panel so a stale selection elsewhere never dies.
+    @discardableResult
+    private func performScopedDelete(ripple: Bool) -> Bool {
+        switch editorViewModel.focusedPanel {
+        case .media:
+            if !editorViewModel.selectedFolderIds.isEmpty {
+                editorViewModel.deleteFolders(ids: editorViewModel.selectedFolderIds)
+            }
+            if !editorViewModel.selectedMediaAssetIds.isEmpty {
+                editorViewModel.deleteSelectedMediaAssets()
+            }
+            return true
+        case .timeline:
+            if ripple {
+                if editorViewModel.selectedGap != nil {
+                    editorViewModel.rippleDeleteSelectedGap()
+                } else {
+                    editorViewModel.rippleDeleteSelectedClips()
+                }
+            } else {
+                editorViewModel.deleteSelectedClips()
+            }
+            return true
+        case .preview, .inspector, .agent, nil:
             return false
         }
     }
@@ -229,14 +254,8 @@ extension EditorWindowController: EditorActions {
     @objc func trimEndToPlayhead(_ sender: Any?) { editorViewModel.trimEndToPlayhead() }
     @objc func selectForwardOnTrack(_ sender: Any?) { editorViewModel.selectForwardFromCurrentSelection(scope: .track) }
     @objc func selectForwardOnAllTracks(_ sender: Any?) { editorViewModel.selectForwardFromCurrentSelection(scope: .allTracks) }
-    @objc func deleteSelectedClips(_ sender: Any?) { editorViewModel.deleteSelectedClips() }
-    @objc func rippleDeleteSelected(_ sender: Any?) {
-        if editorViewModel.selectedGap != nil {
-            editorViewModel.rippleDeleteSelectedGap()
-        } else {
-            editorViewModel.rippleDeleteSelectedClips()
-        }
-    }
+    @objc func deleteSelectedClips(_ sender: Any?) { performScopedDelete(ripple: false) }
+    @objc func rippleDeleteSelected(_ sender: Any?) { performScopedDelete(ripple: true) }
     @objc func playPause(_ sender: Any?) { editorViewModel.togglePlayback() }
     @objc func stepFrameForward(_ sender: Any?) { editorViewModel.stepForward() }
     @objc func stepFrameBackward(_ sender: Any?) { editorViewModel.stepBackward() }
@@ -244,11 +263,19 @@ extension EditorWindowController: EditorActions {
     @objc func skipFramesBackward(_ sender: Any?) { editorViewModel.skipBackward() }
 
     @objc func importMedia(_ sender: Any?) {
-        // Handled by MediaTab directly
+        editorViewModel.mediaPanelVisible = true
+        editorViewModel.showMediaPanelMediaTab()
+        editorViewModel.mediaPanelImportRequestTick &+= 1
     }
 
     @objc func removeUnusedMedia(_ sender: Any?) {
         editorViewModel.removeUnusedMedia()
+    }
+
+    @objc func newMediaFolder(_ sender: Any?) {
+        editorViewModel.mediaPanelVisible = true
+        editorViewModel.showMediaPanelMediaTab()
+        editorViewModel.mediaPanelNewFolderRequestTick &+= 1
     }
 
     @objc func showExport(_ sender: Any?) {
@@ -325,6 +352,25 @@ extension EditorWindowController: EditorActions {
             return canHandleClipboardShortcut() && !editorViewModel.selectedClipIds.isEmpty
         case #selector(selectForwardOnTrack(_:)), #selector(selectForwardOnAllTracks(_:)):
             return editorViewModel.focusedPanel == .timeline && !editorViewModel.selectedClipIds.isEmpty
+        case #selector(deleteSelectedClips(_:)), #selector(rippleDeleteSelected(_:)):
+            guard !isTextInputFocused else { return false }
+            switch editorViewModel.focusedPanel {
+            case .media:
+                return !editorViewModel.selectedFolderIds.isEmpty || !editorViewModel.selectedMediaAssetIds.isEmpty
+            case .timeline:
+                return !editorViewModel.selectedClipIds.isEmpty || editorViewModel.selectedGap != nil
+            case .preview, .inspector, .agent, nil:
+                return false
+            }
+        case #selector(trimStartToPlayhead(_:)), #selector(trimEndToPlayhead(_:)):
+            return !isTextInputFocused
+                && editorViewModel.focusedPanel == .timeline
+                && !editorViewModel.selectedClipIds.isEmpty
+        case #selector(playPause(_:)):
+            return !isTextInputFocused && editorViewModel.tour.currentStep == nil
+        case #selector(stepFrameForward(_:)), #selector(stepFrameBackward(_:)),
+             #selector(skipFramesForward(_:)), #selector(skipFramesBackward(_:)):
+            return !isTextInputFocused
         case #selector(paste(_:)):
             if editorViewModel.focusedPanel == .media {
                 return MediaTab.clipboardHasImportableMedia()

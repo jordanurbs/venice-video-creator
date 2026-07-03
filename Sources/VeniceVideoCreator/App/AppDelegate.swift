@@ -87,4 +87,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let editor = AppState.shared.activeProject?.editorViewModel else { return }
         editor.tour.start(in: editor)
     }
+
+    @MainActor
+    @objc func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(showTutorial(_:)) {
+            return AppState.shared.activeProject != nil
+        }
+        return true
+    }
 }

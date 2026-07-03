@@ -418,7 +418,7 @@ struct SkillsPane: View {
             }
             if editing {
                 Button { store.save(skill, raw: draft); originalDraft = draft } label: {
-                    Text("Save")
+                    Text("Save Skill")
                         .font(.system(size: AppTheme.FontSize.sm, weight: .semibold))
                         .foregroundStyle(dirty ? AppTheme.Accent.primary : AppTheme.Text.mutedColor)
                 }

@@ -29,6 +29,8 @@ struct ProjectDocumentIOTests {
         defer { try? fm.removeItem(at: root) }
 
         let doc = configuredDocument(fileURL: source)
+        // Media only follows a document that owns its package; establish ownership first.
+        try doc.write(to: source, ofType: VideoProject.typeIdentifier)
         try doc.write(to: destination, ofType: VideoProject.typeIdentifier)
 
         #expect(try String(contentsOf: destination.appendingPathComponent("media/clip.mp4"), encoding: .utf8) == "MEDIA")

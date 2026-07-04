@@ -106,11 +106,11 @@ Per AGENTS.md: parent drop targets that span other drop targets must be AppKit. 
 
 ## Phase 6 — Concurrency correctness
 
-- [ ] **6.1 Save As rebinds the editor.** `projectURL` is assigned once at open; after Save As, generations write into the old .venice bundle. Update the editor's package binding when `fileURL` changes. Refs: `Project/VideoProject.swift:335`, `Generation/GenerationService.swift:229-234`.
-- [ ] **6.2 MCP targets the key window's project,** not most-recently-opened; ⚖️ decide whether external clients may switch the active project under the user. Refs: `App/AppState.swift:41-43,88-103`, `Agent/Tools/ToolExecutor+Projects.swift:48-56`.
-- [ ] **6.3 Agent undo attribution.** Replace undo-action-name string matching with a token/identity check so the agent can never revert the user's like-named edit. Refs: `Agent/Tools/ToolExecutor.swift:47-52,152-166`.
-- [ ] **6.4 Captions re-resolve clip geometry after transcription** instead of placing from a snapshot minutes stale. Refs: `Editor/ViewModel/EditorViewModel+Captions.swift:119-124,177-207`.
-- [ ] **6.5 Smaller races:** transcript cache in-flight dedup (`Transcription/TranscriptCache.swift:11-30`); agent edits shouldn't permanently kill playback (`Editor/ViewModel/EditorViewModel.swift:339-347`); settings-mismatch sheet Esc-dismissal must run/cancel the continuation, not leak the pending clips (`Editor/ViewModel/EditorViewModel+ProjectSettings.swift:146-147`, `Project/VideoProject.swift:360`); project close cancels its indexing/transcription work (`Search/SearchIndexCoordinator.swift:127-138`).
+- [x] **6.1 Save As rebinds the editor.** `projectURL` is assigned once at open; after Save As, generations write into the old .venice bundle. Update the editor's package binding when `fileURL` changes. Refs: `Project/VideoProject.swift:335`, `Generation/GenerationService.swift:229-234`.
+- [x] **6.2 MCP targets the key window's project,** not most-recently-opened; ⚖️ decide whether external clients may switch the active project under the user. Refs: `App/AppState.swift:41-43,88-103`, `Agent/Tools/ToolExecutor+Projects.swift:48-56`.
+- [x] **6.3 Agent undo attribution.** Replace undo-action-name string matching with a token/identity check so the agent can never revert the user's like-named edit. Refs: `Agent/Tools/ToolExecutor.swift:47-52,152-166`.
+- [x] **6.4 Captions re-resolve clip geometry after transcription** instead of placing from a snapshot minutes stale. Refs: `Editor/ViewModel/EditorViewModel+Captions.swift:119-124,177-207`.
+- [x] **6.5 Smaller races:** transcript cache in-flight dedup (`Transcription/TranscriptCache.swift:11-30`); agent edits shouldn't permanently kill playback (`Editor/ViewModel/EditorViewModel.swift:339-347`); settings-mismatch sheet Esc-dismissal must run/cancel the continuation, not leak the pending clips (`Editor/ViewModel/EditorViewModel+ProjectSettings.swift:146-147`, `Project/VideoProject.swift:360`); project close cancels its indexing/transcription work (`Search/SearchIndexCoordinator.swift:127-138`).
 
 **Done when:** two projects, an agent, and an external MCP client can coexist without any of them acting on the wrong target or stale state.
 

@@ -352,7 +352,9 @@ final class EditorViewModel {
         pendingRebuildTask?.cancel()
         pendingRebuildTask = nil
         if isPlaying {
-            videoEngine?.pause()
+            // Pause the transport but keep the isPlaying intent; the rebuild's
+            // completion reseeks and resumes, so agent edits don't kill playback.
+            videoEngine?.player.pause()
         }
         videoEngine?.refreshVisuals()
         videoEngine?.rebuild()

@@ -31,6 +31,15 @@ final class AppState {
         NSDocumentController.shared.documents.compactMap { $0 as? VideoProject }
     }
 
+    /// The project owning the key (or main) window — what the user is looking at.
+    var frontmostProject: VideoProject? {
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow,
+           let doc = NSDocumentController.shared.document(for: window) as? VideoProject {
+            return doc
+        }
+        return activeProject
+    }
+
     private(set) var mcpService: MCPService?
 
     func startMCPService() {
@@ -40,7 +49,7 @@ final class AppState {
             return
         }
         let service = MCPService(editorProvider: { [weak self] in
-            self?.activeProject?.editorViewModel
+            self?.frontmostProject?.editorViewModel
         })
         service.start()
         mcpService = service

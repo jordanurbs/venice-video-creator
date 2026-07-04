@@ -8,16 +8,27 @@ struct ToolError: Error { let message: String; init(_ m: String) { self.message 
 final class ToolExecutor {
     private let editorProvider: () -> EditorViewModel?
     var editor: EditorViewModel? { editorProvider() }
+    /// External MCP clients act on what the user is looking at; they may not
+    /// open or switch projects under the user.
+    let allowsProjectSwitching: Bool
 
     init(editor: EditorViewModel) {
         self.editorProvider = { [weak editor] in editor }
+        self.allowsProjectSwitching = true
     }
 
-    init(editorProvider: @escaping () -> EditorViewModel?) {
+    init(editorProvider: @escaping () -> EditorViewModel?, allowsProjectSwitching: Bool = true) {
         self.editorProvider = editorProvider
+        self.allowsProjectSwitching = allowsProjectSwitching
     }
 
-    private var agentUndoStack: [String] = []
+    /// Post-edit timeline snapshot is the identity check: action names collide
+    /// with user edits ("Add Clips" is "Add Clips" from either hand).
+    private struct AgentEdit {
+        let actionName: String
+        let timelineAfter: Timeline
+    }
+    private var agentUndoStack: [AgentEdit] = []
     var feedbackState = FeedbackState()
 
     func execute(name: String, args: [String: Any]) async -> ToolResult {
@@ -48,7 +59,7 @@ final class ToolExecutor {
             // Record any edit that actually changed the timeline so `undo` can revert it.
             if tool != .undo, !result.isError, editor.timeline != before,
                let actionName = editor.undoManager?.undoActionName {
-                agentUndoStack.append(actionName)
+                agentUndoStack.append(AgentEdit(actionName: actionName, timelineAfter: editor.timeline))
             }
         } catch let err as ToolError {
             result = .error(err.message)
@@ -157,12 +168,12 @@ final class ToolExecutor {
             agentUndoStack.removeAll()
             throw ToolError("Nothing to undo.")
         }
-        guard undoManager.undoActionName == expected else {
-            throw ToolError("The most recent change ('\(undoManager.undoActionName)') wasn't made by the assistant — not undoing it.")
+        guard editor.timeline == expected.timelineAfter else {
+            throw ToolError("The timeline changed since the assistant's last edit — not undoing the user's work.")
         }
         undoManager.undo()
         agentUndoStack.removeLast()
-        return .ok("Undid: \(expected). The timeline is restored to its state before that edit; re-read with get_timeline or get_transcript before editing again.")
+        return .ok("Undid: \(expected.actionName). The timeline is restored to its state before that edit; re-read with get_timeline or get_transcript before editing again.")
     }
 
     // Shared helpers used by tool extensions in other files.

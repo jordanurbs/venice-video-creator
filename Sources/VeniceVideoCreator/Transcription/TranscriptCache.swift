@@ -7,6 +7,8 @@ actor TranscriptCache {
 
     private var memory: [String: TranscriptionResult] = [:]
     private static let memoryMax = 4
+    /// Concurrent callers for the same file share one transcription run.
+    private var inFlight: [String: Task<TranscriptionResult, any Error>] = [:]
 
     func transcript(for url: URL, isVideo: Bool, range: ClosedRange<Double>?, preferredLocale: Locale? = nil) async throws -> TranscriptionResult {
         // When a locale is forced, bypass the cache — locale variants must not overwrite the auto-detected entry.
@@ -20,10 +22,17 @@ actor TranscriptCache {
         let full: TranscriptionResult
         if let key, let cached = cached(key) {
             full = cached
+        } else if let key, let running = inFlight[key] {
+            full = try await running.value
         } else {
-            full = isVideo
-                ? try await Transcription.transcribeVideoAudio(videoURL: url)
-                : try await Transcription.transcribe(fileURL: url)
+            let task = Task {
+                isVideo
+                    ? try await Transcription.transcribeVideoAudio(videoURL: url)
+                    : try await Transcription.transcribe(fileURL: url)
+            }
+            if let key { inFlight[key] = task }
+            defer { if let key { inFlight[key] = nil } }
+            full = try await task.value
             if let key { store(full, key: key) }
         }
         return range.map { Self.filter(full, to: $0) } ?? full

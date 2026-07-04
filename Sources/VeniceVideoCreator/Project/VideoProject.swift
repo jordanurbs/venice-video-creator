@@ -339,6 +339,9 @@ final class VideoProject: NSDocument {
                oldURL.standardizedFileURL != newURL.standardizedFileURL {
                 MainActor.assumeIsolated {
                     ProjectRegistry.shared.updateURL(from: oldURL, to: newURL)
+                    // Save As must rebind the editor or generations keep
+                    // writing into the old package.
+                    editorViewModel.projectURL = newURL
                 }
             }
         }
@@ -355,6 +358,8 @@ final class VideoProject: NSDocument {
         editorViewModel.onProjectCheckpointRequired = nil
         editorViewModel.onProjectContentChanged = nil
         editorViewModel.agentService.onSessionsChanged = nil
+        let searchIndex = editorViewModel.searchIndex
+        Task { await searchIndex.cancelIndexing() }
         DispatchQueue.main.async {
             if AppState.shared.activeProject === self {
                 AppState.shared.showHome()
@@ -395,7 +400,10 @@ final class VideoProject: NSDocument {
                 ExportView()
                     .environment(editorViewModel)
             }
-            .sheet(item: Bindable(editorViewModel).pendingSettingsMismatch) { [editorViewModel] mismatch in
+            .sheet(item: Bindable(editorViewModel).pendingSettingsMismatch, onDismiss: { [editorViewModel] in
+                // Esc-dismissal must drop the pending operation, not leak it.
+                editorViewModel.pendingSettingsContinuation = nil
+            }) { [editorViewModel] mismatch in
                 ProjectSettingsMismatchView(mismatch: mismatch)
                     .environment(editorViewModel)
             }

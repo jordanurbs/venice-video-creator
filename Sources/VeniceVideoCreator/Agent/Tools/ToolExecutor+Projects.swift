@@ -46,6 +46,9 @@ extension ToolExecutor {
     }
 
     private func openProject(_ args: [String: Any]) async throws -> ToolResult {
+        guard allowsProjectSwitching else {
+            throw ToolError("External clients can't switch projects. Ask the user to open the project in the app, then retry.")
+        }
         let url = try resolveProjectURL(args)
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw ToolError("No project at \(url.path).")
@@ -56,6 +59,9 @@ extension ToolExecutor {
     }
 
     private func newProject(_ args: [String: Any]) async throws -> ToolResult {
+        guard allowsProjectSwitching else {
+            throw ToolError("External clients can't create or switch projects. Ask the user to create the project in the app, then retry.")
+        }
         let name = args.string("name") ?? Project.defaultProjectName
         let doc = try await AppState.shared.createProject(named: name)
         notifyNowEditing(doc)

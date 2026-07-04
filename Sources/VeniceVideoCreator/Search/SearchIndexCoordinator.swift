@@ -103,7 +103,7 @@ final class SearchIndexCoordinator {
     }
 
     /// Stops the worker and waits for the in-flight asset to actually stop.
-    private func cancelIndexing() async {
+    func cancelIndexing() async {
         let current = worker
         workerGeneration += 1
         worker = nil

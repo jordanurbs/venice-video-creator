@@ -29,7 +29,7 @@ final class MCPService {
     private var httpServer: MCPHTTPServer?
 
     init(editorProvider: @escaping () -> EditorViewModel?) {
-        self.toolExecutor = ToolExecutor(editorProvider: editorProvider)
+        self.toolExecutor = ToolExecutor(editorProvider: editorProvider, allowsProjectSwitching: false)
     }
 
     func start() {

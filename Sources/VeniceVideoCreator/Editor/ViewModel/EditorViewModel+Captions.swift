@@ -123,6 +123,15 @@ extension EditorViewModel {
         }
         let results = try await transcribe(targets, request: request)
 
+        // Transcription can take minutes; re-resolve geometry so captions land
+        // on the clips' current positions, skipping any deleted meanwhile.
+        targets = targets.compactMap { t in
+            findClip(id: t.id).map {
+                CaptionTarget(id: t.id, trackId: timeline.tracks[$0.trackIndex].id, clip: timeline.tracks[$0.trackIndex].clips[$0.clipIndex])
+            }
+        }
+        guard !targets.isEmpty else { return [] }
+
         if request.autoDetect {
             guard let winner = dominantSpeechTrack(targets, results) else { return [] }
             targets = targets.filter { $0.trackId == winner }

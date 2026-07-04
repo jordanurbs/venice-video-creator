@@ -1,9 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// AppKit drop target for the agent input box (spans a TextEditor, so per the
-/// repo drop rule it must be AppKit). Accepts in-app `venice-asset://` drags and
-/// Finder files; plain text drags fall through to the text view.
+/// AppKit drop target for the agent input box; accepts asset + Finder-file drags, plain text falls through.
 struct AgentInputDropArea<Content: View>: NSViewRepresentable {
     @Binding var isTargeted: Bool
     let onAssetIds: ([String]) -> Void
@@ -45,13 +43,6 @@ final class AgentInputDropHostingView<Content: View>: NSHostingView<Content> {
         return payload.split(separator: "\n").compactMap { MediaTab.assetId(fromDragString: String($0)) }
     }
 
-    private func fileURLs(_ sender: any NSDraggingInfo) -> [URL] {
-        (sender.draggingPasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: [.urlReadingFileURLsOnly: true]
-        ) as? [URL]) ?? []
-    }
-
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
         let pb = sender.draggingPasteboard
         if pb.availableType(from: [.fileURL]) != nil {
@@ -86,7 +77,7 @@ final class AgentInputDropHostingView<Content: View>: NSHostingView<Content> {
             onAssetIds?(ids)
             return true
         }
-        let urls = fileURLs(sender)
+        let urls = sender.droppedFileURLs
         guard !urls.isEmpty else { return false }
         onFileURLs?(urls)
         return true

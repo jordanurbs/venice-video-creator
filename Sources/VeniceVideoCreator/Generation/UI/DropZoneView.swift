@@ -1,6 +1,16 @@
 import AppKit
 import SwiftUI
 
+extension NSDraggingInfo {
+    /// File URLs on the drag pasteboard (Finder drops); empty for non-file drags.
+    @MainActor var droppedFileURLs: [URL] {
+        (draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL]) ?? []
+    }
+}
+
 /// Transparent native AppKit drop target.
 struct DropTargetOverlay: NSViewRepresentable {
     @Binding var isTargeted: Bool
@@ -44,13 +54,6 @@ final class DropTargetNSView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    private func fileURLs(_ sender: any NSDraggingInfo) -> [URL] {
-        (sender.draggingPasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: [.urlReadingFileURLsOnly: true]
-        ) as? [URL]) ?? []
-    }
-
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
         // Accept on advertised type, not value: SwiftUI .draggable(String) fulfills the
         // string promise lazily, so it's nil at drag-enter. The payload is read at drop.
@@ -75,7 +78,7 @@ final class DropTargetNSView: NSView {
             onDrop?(payload)
             return true
         }
-        let urls = fileURLs(sender)
+        let urls = sender.droppedFileURLs
         if !urls.isEmpty, let onFileDrop {
             onFileDrop(urls)
             return true

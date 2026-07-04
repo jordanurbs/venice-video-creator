@@ -34,13 +34,6 @@ final class PreviewDropNSView: NSView {
     // Drag routing uses registered types, not hitTest; nil keeps clicks passing through.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    private func fileURLs(_ sender: any NSDraggingInfo) -> [URL] {
-        (sender.draggingPasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: [.urlReadingFileURLsOnly: true]
-        ) as? [URL]) ?? []
-    }
-
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
         // Accept on advertised type, not value: SwiftUI .draggable(String) fulfills the
         // string promise lazily, so it's nil at drag-enter. The payload is read at drop.
@@ -57,7 +50,7 @@ final class PreviewDropNSView: NSView {
             onAssetPayload?(payload)
             return true
         }
-        let urls = fileURLs(sender)
+        let urls = sender.droppedFileURLs
         guard !urls.isEmpty else { return false }
         onFileURLs?(urls)
         return true

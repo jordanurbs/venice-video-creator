@@ -37,13 +37,6 @@ final class DropHostingView<Content: View>: NSHostingView<Content> {
         fatalError("init(coder:) not supported")
     }
 
-    private func fileURLs(_ sender: any NSDraggingInfo) -> [URL] {
-        (sender.draggingPasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: [.urlReadingFileURLsOnly: true]
-        ) as? [URL]) ?? []
-    }
-
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
         // Accept on advertised type, not value: SwiftUI .draggable(String) fulfills the
         // string promise lazily, so it's nil at drag-enter. The payload is read at drop.
@@ -63,7 +56,7 @@ final class DropHostingView<Content: View>: NSHostingView<Content> {
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
         onTargetChanged?(false)
-        let urls = fileURLs(sender)
+        let urls = sender.droppedFileURLs
         if !urls.isEmpty {
             onDrop?(urls)
             return true

@@ -1192,9 +1192,7 @@ final class TimelineView: NSView {
         }
 
         // Finder files: import to the library first, then place at the drop point.
-        let fileURLs = (sender.draggingPasteboard.readObjects(
-            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
-        ) as? [URL]) ?? []
+        let fileURLs = sender.droppedFileURLs
         guard !fileURLs.isEmpty else { return false }
 
         let editor = self.editor

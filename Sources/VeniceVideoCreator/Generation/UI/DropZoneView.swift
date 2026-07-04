@@ -52,8 +52,11 @@ final class DropTargetNSView: NSView {
     }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        let accepts = sender.draggingPasteboard.string(forType: .string) != nil
-            || (onFileDrop != nil && !fileURLs(sender).isEmpty)
+        // Accept on advertised type, not value: SwiftUI .draggable(String) fulfills the
+        // string promise lazily, so it's nil at drag-enter. The payload is read at drop.
+        let pb = sender.draggingPasteboard
+        let accepts = pb.availableType(from: [.string]) != nil
+            || (onFileDrop != nil && pb.availableType(from: [.fileURL]) != nil)
         guard accepts else { return [] }
         onTargetChanged?(true)
         return .copy

@@ -77,6 +77,9 @@ extension EditorViewModel {
 
         let before = mediaLibraryUndoSnapshot()
         let assetIdsToDelete = assetIds(inFolderIds: allFolderIds)
+        // Stop in-flight generations for the assets going away, or their monitors keep
+        // downloading strays into the package and posting notifications for deleted assets.
+        generationService.cancelGenerations(assetIds: assetIdsToDelete, editor: self)
         let clipIdsToRemove = clipIdsReferencingAssets(assetIdsToDelete)
 
         if !clipIdsToRemove.isEmpty {

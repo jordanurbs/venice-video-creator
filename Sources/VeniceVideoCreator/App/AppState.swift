@@ -31,6 +31,19 @@ final class AppState {
         NSDocumentController.shared.documents.compactMap { $0 as? VideoProject }
     }
 
+    /// Generations still preparing/uploading across all open projects — pre-submit work
+    /// that has no queue id yet and can't be resumed after the app quits.
+    var preSubmitGenerationCount: Int {
+        openProjects.reduce(0) { $0 + $1.editorViewModel.generationService.preSubmitGenerationCount }
+    }
+
+    /// Any export or generation (submitted or pre-submit) still in flight.
+    var hasInFlightWork: Bool {
+        ExportCoordinator.isExportActive
+            || GenerationBackend.activeJobCount > 0
+            || preSubmitGenerationCount > 0
+    }
+
     /// The project owning the key (or main) window — what the user is looking at.
     var frontmostProject: VideoProject? {
         if let window = NSApp.keyWindow ?? NSApp.mainWindow,
@@ -207,11 +220,14 @@ final class AppState {
         panel.title = "New Project"
         panel.begin { [self] response in
             guard response == .OK, let url = panel.url else { return }
+            // Replacing an existing project: a failed safe-save leaves the original
+            // intact, so cleanup must not delete a package we didn't create.
+            let preexisted = FileManager.default.fileExists(atPath: url.path)
             let doc = instantiateProject(at: url)
             doc.save(to: url, ofType: VideoProject.typeIdentifier, for: .saveOperation) { error in
                 if let error {
                     doc.close()
-                    try? FileManager.default.removeItem(at: url)
+                    if !preexisted { try? FileManager.default.removeItem(at: url) }
                     NSAlert(error: error).runModal()
                     return
                 }

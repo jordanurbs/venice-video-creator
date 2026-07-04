@@ -37,15 +37,13 @@ final class ExportService {
     }
 
     /// Waits for the coordinator slot, surfacing the wait instead of a fake 0% bar.
-    /// Returns false when cancelled while waiting (no slot acquired).
+    /// Returns false when cancelled while waiting (no slot acquired). Cancellation is
+    /// driven by the enclosing export task, so the slot wait interrupts cleanly.
     private func waitForExportSlot() async -> Bool {
         if ExportCoordinator.isExportActive { isWaitingForSlot = true }
         defer { isWaitingForSlot = false }
-        let waitTask = Task { try await ExportCoordinator.acquireExport() }
-        cancelCurrent = { waitTask.cancel() }
-        defer { cancelCurrent = nil }
         do {
-            try await waitTask.value
+            try await ExportCoordinator.acquireExport()
             return true
         } catch {
             self.error = "Export cancelled"
@@ -63,6 +61,31 @@ final class ExportService {
         missingMediaRefs: Set<String> = [],
         outputURL: URL,
         acquireSlot: Bool = true
+    ) async {
+        // One task drives every phase — slot wait, composition build, render — so Cancel
+        // works throughout, not only during the render (build is the visibly slow part).
+        let task = Task {
+            await self.performExport(
+                timeline: timeline, resolver: resolver, format: format, resolution: resolution,
+                fcpxmlVersion: fcpxmlVersion, fcpxmlTarget: fcpxmlTarget,
+                missingMediaRefs: missingMediaRefs, outputURL: outputURL, acquireSlot: acquireSlot
+            )
+        }
+        cancelCurrent = { task.cancel() }
+        defer { cancelCurrent = nil }
+        await task.value
+    }
+
+    private func performExport(
+        timeline: Timeline,
+        resolver: MediaResolver,
+        format: ExportFormat,
+        resolution: ExportResolution,
+        fcpxmlVersion: FCPXMLVersion,
+        fcpxmlTarget: FCPXMLTarget,
+        missingMediaRefs: Set<String>,
+        outputURL: URL,
+        acquireSlot: Bool
     ) async {
         error = nil
         lastReport = nil
@@ -86,6 +109,9 @@ final class ExportService {
                 }
                 progress = 1.0
                 Log.export.notice("export ok format=\(name)", telemetry: "Export finished", data: ["format": name])
+            } catch is CancellationError {
+                self.error = "Export cancelled"
+                Log.export.notice("export cancelled format=\(name)", telemetry: "Export cancelled", data: ["format": name])
             } catch {
                 self.error = error.localizedDescription
                 Log.export.error(
@@ -133,13 +159,10 @@ final class ExportService {
                     if p != self.progress { self.progress = p }
                 }
             }
-
-            let renderTask = Task { try await unsafeSession.export(to: outputURL, as: fileType) }
-            cancelCurrent = { renderTask.cancel() }
-            defer { cancelCurrent = nil }
+            defer { progressTask.cancel() }
 
             do {
-                try await renderTask.value
+                try await unsafeSession.export(to: outputURL, as: fileType)
                 let outputSize = await Self.encodedVideoSize(of: outputURL) ?? prepared.renderSize
                 lastReport = ExportRunReport(
                     outputSize: outputSize,
@@ -171,8 +194,14 @@ final class ExportService {
                     )
                 }
             }
-
-            progressTask.cancel()
+        } catch is CancellationError {
+            try? FileManager.default.removeItem(at: outputURL)
+            self.error = "Export cancelled"
+            Log.export.notice(
+                "export cancelled during setup",
+                telemetry: "Export cancelled",
+                data: ["format": String(describing: format), "resolution": resolution.rawValue]
+            )
         } catch {
             self.error = error.localizedDescription
             Log.export.error(
@@ -193,6 +222,25 @@ final class ExportService {
         sourceProjectURL: URL?,
         outputURL: URL,
         acquireSlot: Bool = true
+    ) async -> VeniceProjectExporter.Report? {
+        let task = Task {
+            await self.performVeniceProjectExport(
+                timeline: timeline, manifest: manifest, generationLog: generationLog,
+                sourceProjectURL: sourceProjectURL, outputURL: outputURL, acquireSlot: acquireSlot
+            )
+        }
+        cancelCurrent = { task.cancel() }
+        defer { cancelCurrent = nil }
+        return await task.value
+    }
+
+    private func performVeniceProjectExport(
+        timeline: Timeline,
+        manifest: MediaManifest,
+        generationLog: GenerationLog,
+        sourceProjectURL: URL?,
+        outputURL: URL,
+        acquireSlot: Bool
     ) async -> VeniceProjectExporter.Report? {
         isExporting = true
         progress = 0
@@ -221,9 +269,12 @@ final class ExportService {
                     progress: { p in Task { @MainActor in self.progress = p } }
                 )
             }
-            cancelCurrent = { collectTask.cancel() }
-            defer { cancelCurrent = nil }
-            let report = try await collectTask.value
+            // Detached work won't inherit cancellation; forward it from the export task.
+            let report = try await withTaskCancellationHandler {
+                try await collectTask.value
+            } onCancel: {
+                collectTask.cancel()
+            }
             progress = 1.0
             Log.export.notice(
                 "venice export ok collected=\(report.collected.count) missing=\(report.missing.count)",

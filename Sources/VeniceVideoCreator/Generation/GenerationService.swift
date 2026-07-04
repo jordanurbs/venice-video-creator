@@ -20,6 +20,12 @@ final class GenerationService {
     private var resumedBackendJobIds: Set<String> = []
     /// Placeholder id -> the task driving its generation, for pre-submit cancellation.
     private var generationTasks: [String: Task<Void, Never>] = [:]
+    /// Primary placeholder ids of batches still in the prepare/upload phase (no backend
+    /// job yet). These are unresumable if the app quits, so the quit/relaunch guards count them.
+    private var preSubmitBatchIds: Set<String> = []
+
+    /// Generations still preparing/uploading — invisible to the backend job store.
+    var preSubmitGenerationCount: Int { preSubmitBatchIds.count }
 
     private struct PreparedReferences {
         let uploaded: [String]
@@ -72,10 +78,12 @@ final class GenerationService {
             placeholders.append(placeholder)
         }
         let primaryId = placeholders[0].id
+        preSubmitBatchIds.insert(primaryId)
 
         let task = Task { @MainActor in
             defer {
                 for placeholder in placeholders { self.generationTasks[placeholder.id] = nil }
+                self.preSubmitBatchIds.remove(primaryId)
             }
             do {
                 let prepared = try await self.prepareReferences(
@@ -114,16 +122,19 @@ final class GenerationService {
                     onComplete: onComplete,
                     onFailure: onFailure
                 )
-            } catch is CancellationError {
-                for placeholder in placeholders {
-                    updateGenerationMetadata(placeholder, editor: editor, status: .cancelled)
-                }
-                onFailure?()
             } catch {
-                let message = error.localizedDescription
-                Log.generation.error("upload failed model=\(genInput.model) error=\(message)")
-                for placeholder in placeholders {
-                    updateGenerationMetadata(placeholder, editor: editor, status: .failed("Upload failed: \(message)"))
+                // VeniceAPI wraps URLError, so a cancelled upload surfaces as .transport,
+                // not CancellationError; the task's cancellation flag is the reliable signal.
+                if Task.isCancelled || error is CancellationError {
+                    for placeholder in placeholders {
+                        updateGenerationMetadata(placeholder, editor: editor, status: .cancelled)
+                    }
+                } else {
+                    let message = error.localizedDescription
+                    Log.generation.error("upload failed model=\(genInput.model) error=\(message)")
+                    for placeholder in placeholders {
+                        updateGenerationMetadata(placeholder, editor: editor, status: .failed("Upload failed: \(message)"))
+                    }
                 }
                 onFailure?()
             }
@@ -143,12 +154,34 @@ final class GenerationService {
     /// Cancels the generation behind a placeholder: the Venice poll when the job is
     /// already submitted, otherwise the preparation/upload task.
     func cancelGeneration(assetId: String, editor: EditorViewModel) {
-        guard let asset = editor.mediaAssets.first(where: { $0.id == assetId }) else { return }
-        if let jobId = asset.generationInput?.backendJobId, !jobId.isEmpty,
-           GenerationBackend.cancel(jobId: jobId) {
-            return
+        cancelGenerations(assetIds: [assetId], editor: editor)
+    }
+
+    /// Cancels the generations behind the given placeholders. A backend job or prep
+    /// task shared with a live placeholder *outside* `assetIds` is left running, so a
+    /// multi-output batch survives having one of its tiles deleted.
+    func cancelGenerations(assetIds: Set<String>, editor: EditorViewModel) {
+        let targets = editor.mediaAssets.filter { assetIds.contains($0.id) && $0.isGenerating }
+        guard !targets.isEmpty else { return }
+
+        func hasLiveSibling(_ matches: (MediaAsset) -> Bool) -> Bool {
+            editor.mediaAssets.contains { !assetIds.contains($0.id) && $0.isGenerating && matches($0) }
         }
-        generationTasks[assetId]?.cancel()
+
+        var cancelledJobIds: Set<String> = []
+        for asset in targets {
+            if let jobId = asset.generationInput?.backendJobId, !jobId.isEmpty {
+                if cancelledJobIds.contains(jobId) { continue }
+                guard !hasLiveSibling({ $0.generationInput?.backendJobId == jobId }) else { continue }
+                cancelledJobIds.insert(jobId)
+                if !GenerationBackend.cancel(jobId: jobId) {
+                    generationTasks[asset.id]?.cancel()
+                }
+            } else if let task = generationTasks[asset.id] {
+                guard !hasLiveSibling({ generationTasks[$0.id] == task }) else { continue }
+                task.cancel()
+            }
+        }
     }
 
     private func prepareReferences(
@@ -516,6 +549,8 @@ final class GenerationService {
                 input.backendJobId = jobId
             }
         }
+        // Submitted: the backend store now tracks it and it can resume by queue id.
+        if let batchId = placeholders.first?.id { preSubmitBatchIds.remove(batchId) }
         editor.onProjectCheckpointRequired?()
 
         // Cancelled between placeholder creation and submit: stop the job we just started.

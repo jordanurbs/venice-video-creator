@@ -108,16 +108,18 @@ extension Updater: SPUUpdaterDelegate {
         clearUpdateAvailability()
     }
 
-    // Keeps "Install and Relaunch" from killing an in-progress export.
+    // Keeps "Install and Relaunch" from killing an in-progress export or generation.
     @objc func updater(
         _ updater: SPUUpdater,
         shouldPostponeRelaunchForUpdate item: SUAppcastItem,
         untilInvokingBlock installHandler: @escaping () -> Void
     ) -> Bool {
-        guard ExportCoordinator.isExportActive else { return false }
+        guard AppState.shared.hasInFlightWork else { return false }
         nonisolated(unsafe) let install = installHandler
         Task { @MainActor in
-            try? await ExportCoordinator.waitWhileExportActive()
+            while AppState.shared.hasInFlightWork {
+                try? await Task.sleep(for: .seconds(2))
+            }
             install()
         }
         return true

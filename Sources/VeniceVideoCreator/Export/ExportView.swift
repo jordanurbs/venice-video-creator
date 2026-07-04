@@ -76,6 +76,11 @@ struct ExportView: View {
         .task {
             veniceSummary = computeVeniceSummary()
         }
+        // Esc dismisses the sheet; an in-progress export keeps running. Only the explicit
+        // "Cancel Export" button aborts and discards the partial file.
+        .onExitCommand {
+            editor.showExportDialog = false
+        }
     }
 
     private func panelHeader(_ title: String) -> some View {
@@ -335,7 +340,6 @@ struct ExportView: View {
                     editor.showExportDialog = false
                 }
             }
-            .keyboardShortcut(.cancelAction)
             Button("Export") { startExport() }
                 .buttonStyle(.glassProminent)
                 .buttonBorderShape(.capsule)

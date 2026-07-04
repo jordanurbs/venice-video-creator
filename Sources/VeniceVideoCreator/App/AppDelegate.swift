@@ -35,7 +35,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let exporting = ExportCoordinator.isExportActive
-        let generating = GenerationBackend.activeJobCount
+        // activeJobCount misses the prepare/upload phase, which lives in GenerationService
+        // and is unresumable — Cmd+Q there would silently discard the work.
+        let generating = GenerationBackend.activeJobCount + AppState.shared.preSubmitGenerationCount
         guard exporting || generating > 0 else { return .terminateNow }
 
         let subject: String = switch (exporting, generating) {

@@ -682,9 +682,7 @@ extension EditorViewModel {
         guard !ids.isEmpty else { return }
         guard mediaAssets.contains(where: { ids.contains($0.id) }) else { return }
 
-        for asset in mediaAssets where ids.contains(asset.id) && asset.isGenerating {
-            generationService.cancelGeneration(assetId: asset.id, editor: self)
-        }
+        generationService.cancelGenerations(assetIds: ids, editor: self)
 
         let before = mediaLibraryUndoSnapshot()
         let clipIdsToRemove = Set(timeline.tracks

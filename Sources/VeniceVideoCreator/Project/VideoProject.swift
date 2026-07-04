@@ -50,6 +50,9 @@ final class VideoProject: NSDocument {
     /// saved over an existing package must not inherit that package's media.
     private nonisolated(unsafe) var ownsPackageOnDisk = false
     private var projectCheckpointAutosaveScheduled = false
+    // Old projects predate the persistent log; seed it only after async media restore
+    // has populated mediaAssets, and only when no real log was loaded.
+    private var needsGenerationLogSeed = false
     private var isClosed = false
     // One alert per failure streak; resets when a checkpoint succeeds.
     private var checkpointFailureAlerted = false
@@ -449,7 +452,7 @@ final class VideoProject: NSDocument {
             editorViewModel.generationLog = log
             loadedGenerationLog = nil
         } else {
-            editorViewModel.seedGenerationLogFromAssets()
+            needsGenerationLogSeed = true
         }
         editorViewModel.searchIndex.projectOpened()
         editorViewModel.updateTelemetryContext()
@@ -550,7 +553,7 @@ final class VideoProject: NSDocument {
                         ?? MediaResolver.expectedURL(for: entry, projectURL: projectURL))
                 }
             }.value
-            self?.applyManifestRestore(resolvedByEntryId: Dictionary(uniqueKeysWithValues: pairs))
+            self?.applyManifestRestore(resolvedByEntryId: Dictionary(pairs, uniquingKeysWith: { first, _ in first }))
         }
     }
 
@@ -584,6 +587,10 @@ final class VideoProject: NSDocument {
         if healed {
             Log.project.notice("restore: healed stale media paths; marking project for autosave")
             updateChangeCount(.changeDone)
+        }
+        if needsGenerationLogSeed {
+            needsGenerationLogSeed = false
+            editorViewModel.seedGenerationLogFromAssets()
         }
 
         let restoreCandidates = candidates

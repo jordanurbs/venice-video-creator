@@ -53,7 +53,22 @@ final class AgentInputDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        guard !assetIds(sender).isEmpty || !fileURLs(sender).isEmpty else { return [] }
+        let pb = sender.draggingPasteboard
+        if pb.availableType(from: [.fileURL]) != nil {
+            onTargetChanged?(true)
+            return .copy
+        }
+        // A resolved string here is external plain text — let it fall through to the text
+        // view. In-app asset drags use .draggable(String), whose value is nil until drop,
+        // so when the type is advertised but not yet fulfilled, assume an asset drag.
+        if let payload = pb.string(forType: .string) {
+            guard payload.split(separator: "\n").contains(where: { MediaTab.assetId(fromDragString: String($0)) != nil }) else {
+                return []
+            }
+            onTargetChanged?(true)
+            return .copy
+        }
+        guard pb.availableType(from: [.string]) != nil else { return [] }
         onTargetChanged?(true)
         return .copy
     }

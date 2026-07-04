@@ -150,15 +150,17 @@ final class TourController {
             TourStep(kind: .spotlight(.panel(.inspector)), title: "Inspector",
                      instruction: "This is your inspector panel. Select a clip from the timeline to edit it."),
             TourStep(kind: .spotlight(.panel(.timeline)), title: "Timeline",
-                     instruction: "Your timeline: the top half is video, the bottom half is audio. This is where you edit. Right-click a clip for some cool AI features such as upscale, edit, or generate music."),
+                     instruction: "The top half is video, the bottom half is audio. Right-click a clip for AI actions: upscale, edit, or generate music."),
+            TourStep(kind: .spotlight(.panel(.timeline)), title: "Edit clips",
+                     instruction: "Drag a clip's edge to trim, or press Q and W to trim to the playhead. Cmd+K splits at the playhead. Shift+Delete ripple deletes, closing the gap."),
             TourStep(kind: .spotlight(.element(.timelineRuler)), title: "Select a range",
-                     instruction: "This is the timeline ruler. Shift+drag on the ruler to select a range to render. You can pick any slot to AI edit or generate music that fits that range."),
-            TourStep(kind: .spotlight(.panel(.agent)), title: "AI agent",
-                     instruction: "Chat with your agent! It can generate content, edit clips, organize your assets, and much more. Add your Venice API key in Settings to get started."),
+                     instruction: "Shift+drag on the ruler to select a range. A range scopes AI edits and music generation to that part of the timeline."),
+            TourStep(kind: .spotlight(.panel(.agent)), title: "Agent",
+                     instruction: "Describe an edit and the agent performs it: generate content, edit clips, organize assets. Add your Venice API key in Settings to enable it."),
             TourStep(kind: .spotlight(.element(.skillsButton)), title: "Skills",
                      instruction: "Open Skills to browse community playbooks, create your own, or add them to other agents."),
             TourStep(kind: .outro, title: "You're all set",
-                     instruction: "Start creating, or explore these to get the most out of Venice Video Editor."),
+                     instruction: "Export from File > Export (Cmd+E) when the edit is ready — video, timeline XML, or a self-contained project. Until then, start creating."),
         ]
         return steps
     }

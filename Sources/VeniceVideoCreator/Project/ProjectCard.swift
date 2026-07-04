@@ -97,6 +97,9 @@ struct ProjectCard: View {
         .scaleEffect(isHovered ? 1.03 : 1.0)
         .padding(AppTheme.Spacing.xs)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
+        // The trash button exists only while hovered; VoiceOver needs a real path.
+        .accessibilityAction(named: "Delete Project") { showDeleteConfirmation = true }
+        .accessibilityAction(named: "Remove from Recents") { onRemove(entry.url) }
         .onHover { isHovered = $0 }
         .contextMenu {
             if entry.isAccessible {

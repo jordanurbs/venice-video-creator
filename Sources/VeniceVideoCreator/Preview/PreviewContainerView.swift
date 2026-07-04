@@ -113,17 +113,18 @@ struct PreviewContainerView: View {
             Spacer()
 
             HStack(spacing: AppTheme.Spacing.md) {
-                transportButton("backward.end.fill") { seekTo(0) }
-                transportButton("backward.frame.fill") { seekTo(playheadFrame - 1) }
-                transportButton(editor.isPlaying ? "pause.fill" : "play.fill") {
+                transportButton("backward.end.fill", label: "Go to Start") { seekTo(0) }
+                transportButton("backward.frame.fill", label: "Step Backward") { seekTo(playheadFrame - 1) }
+                transportButton(editor.isPlaying ? "pause.fill" : "play.fill",
+                                label: editor.isPlaying ? "Pause" : "Play") {
                     if isTimeline {
                         editor.togglePlayback()
                     } else {
                         editor.toggleSourcePlayback()
                     }
                 }
-                transportButton("forward.frame.fill") { seekTo(playheadFrame + 1) }
-                transportButton("forward.end.fill") { seekTo(duration) }
+                transportButton("forward.frame.fill", label: "Step Forward") { seekTo(playheadFrame + 1) }
+                transportButton("forward.end.fill", label: "Go to End") { seekTo(duration) }
             }
 
             Spacer()
@@ -714,7 +715,7 @@ struct PreviewContainerView: View {
         }
     }
 
-    private func transportButton(_ systemName: String, action: @escaping () -> Void) -> some View {
+    private func transportButton(_ systemName: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: AppTheme.FontSize.sm))
@@ -723,6 +724,8 @@ struct PreviewContainerView: View {
                 .hoverHighlight()
         }
         .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
     }
 }
 

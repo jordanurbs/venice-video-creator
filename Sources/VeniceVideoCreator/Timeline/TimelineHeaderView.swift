@@ -120,6 +120,92 @@ final class TimelineHeaderView: NSView {
             ctx.setFillColor(AppTheme.Border.divider.cgColor)
             ctx.fill(NSRect(x: 0, y: dividerY - 1, width: headerWidth, height: 2))
         }
+
+        rebuildToolTips()
+    }
+
+    // MARK: - Accessibility & tooltips
+    // The controls are CGContext drawings; VoiceOver needs explicit elements.
+
+    private final class HeaderButtonElement: NSAccessibilityElement {
+        var onPress: (() -> Void)?
+        override func accessibilityPerformPress() -> Bool {
+            onPress?()
+            return true
+        }
+    }
+
+    override func isAccessibilityElement() -> Bool { false }
+
+    override func accessibilityRole() -> NSAccessibility.Role? { .group }
+
+    override func accessibilityChildren() -> [Any]? {
+        let tracks = editor.timeline.tracks
+
+        func element(_ rect: NSRect, label: String, press: @escaping () -> Void) -> HeaderButtonElement {
+            let e = HeaderButtonElement()
+            e.setAccessibilityRole(.button)
+            e.setAccessibilityLabel(label)
+            e.setAccessibilityParent(self)
+            e.setAccessibilityFrameInParentSpace(rect)
+            e.onPress = press
+            return e
+        }
+
+        var children: [Any] = []
+        for (ti, rect) in muteButtonRects.sorted(by: { $0.key < $1.key }) where tracks.indices.contains(ti) {
+            let name = editor.timelineTrackDisplayLabel(at: ti)
+            let muted = tracks[ti].muted
+            children.append(element(rect, label: muted ? "Unmute \(name)" : "Mute \(name)") { [weak self] in
+                self?.editor.toggleTrackMute(trackIndex: ti)
+                self?.needsDisplay = true
+            })
+        }
+        for (ti, rect) in hideButtonRects.sorted(by: { $0.key < $1.key }) where tracks.indices.contains(ti) {
+            let name = editor.timelineTrackDisplayLabel(at: ti)
+            let hidden = tracks[ti].hidden
+            children.append(element(rect, label: hidden ? "Show \(name)" : "Hide \(name)") { [weak self] in
+                self?.editor.toggleTrackHidden(trackIndex: ti)
+                self?.needsDisplay = true
+            })
+        }
+        for (ti, rect) in syncLockButtonRects.sorted(by: { $0.key < $1.key }) where tracks.indices.contains(ti) {
+            let name = editor.timelineTrackDisplayLabel(at: ti)
+            let locked = tracks[ti].syncLocked
+            children.append(element(rect, label: locked ? "Unlock sync for \(name)" : "Lock sync for \(name)") { [weak self] in
+                self?.editor.toggleTrackSyncLock(trackIndex: ti)
+                self?.needsDisplay = true
+            })
+        }
+        return children
+    }
+
+    /// Tooltip owners are unretained by AppKit; keep the strings alive here.
+    private var toolTipStrings: [NSString] = []
+
+    private func rebuildToolTips() {
+        removeAllToolTips()
+        toolTipStrings.removeAll()
+        let tracks = editor.timeline.tracks
+
+        func add(_ rect: NSRect, _ text: String) {
+            let owner = text as NSString
+            toolTipStrings.append(owner)
+            addToolTip(rect, owner: owner, userData: nil)
+        }
+
+        for (ti, rect) in muteButtonRects where tracks.indices.contains(ti) {
+            add(rect, tracks[ti].muted ? "Unmute track" : "Mute track")
+        }
+        for (ti, rect) in hideButtonRects where tracks.indices.contains(ti) {
+            add(rect, tracks[ti].hidden ? "Show track" : "Hide track")
+        }
+        for (ti, rect) in syncLockButtonRects where tracks.indices.contains(ti) {
+            add(rect, tracks[ti].syncLocked ? "Unlock sync" : "Lock sync")
+        }
+        for (_, rect) in dragHandleRects {
+            add(rect, "Drag to reorder track")
+        }
     }
 
     /// Draw a toggleable SF Symbol button; returns the hit-test rect (padded).

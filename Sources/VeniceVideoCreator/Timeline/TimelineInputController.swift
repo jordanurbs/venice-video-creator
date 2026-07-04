@@ -139,7 +139,7 @@ final class TimelineInputController {
             } else if isCommand, clip.mediaType == .audio,
                       addVolumeKeyframeOnClick(at: point, clip: clip, clipRect: rect) {
                 dragState = .idle
-            } else if !isOption, localX <= Trim.handleWidth {
+            } else if !isOption, localX <= Trim.handleHitWidth {
                 dragState = .trimLeft(DragState.TrimDrag(
                     clipId: clip.id,
                     trackIndex: hit.trackIndex,
@@ -151,7 +151,7 @@ final class TimelineInputController {
                     propagateToLinked: linkedOn,
                     isRipple: rippleTrim
                 ))
-            } else if !isOption, localX >= rect.width - Trim.handleWidth {
+            } else if !isOption, localX >= rect.width - Trim.handleHitWidth {
                 dragState = .trimRight(DragState.TrimDrag(
                     clipId: clip.id,
                     trackIndex: hit.trackIndex,

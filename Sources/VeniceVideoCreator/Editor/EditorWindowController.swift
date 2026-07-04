@@ -309,6 +309,17 @@ extension EditorWindowController: EditorActions {
         editorViewModel.focusedPanel == .timeline
     }
 
+    @objc func focusMediaPanel(_ sender: Any?) {
+        editorViewModel.mediaPanelVisible = true
+        editorViewModel.focusedPanel = .media
+    }
+    @objc func focusPreviewPanel(_ sender: Any?) { editorViewModel.focusedPanel = .preview }
+    @objc func focusTimelinePanel(_ sender: Any?) { editorViewModel.focusedPanel = .timeline }
+    @objc func focusInspectorPanel(_ sender: Any?) {
+        editorViewModel.inspectorPanelVisible = true
+        editorViewModel.focusedPanel = .inspector
+    }
+
     @objc func toggleMediaPanel(_ sender: Any?) { editorViewModel.mediaPanelVisible.toggle() }
     @objc func toggleInspectorPanel(_ sender: Any?) { editorViewModel.inspectorPanelVisible.toggle() }
     @objc func toggleAgentPanel(_ sender: Any?) { editorViewModel.agentPanelVisible.toggle() }

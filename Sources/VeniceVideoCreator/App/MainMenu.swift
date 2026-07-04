@@ -153,6 +153,21 @@ enum MainMenuBuilder {
 
         menu.addItem(.separator())
 
+        // Keyboard path to panel focus; clicking was the only way in.
+        let focusPairs: [(String, Selector, String)] = [
+            ("Focus Media Panel", #selector(EditorActions.focusMediaPanel(_:)), "1"),
+            ("Focus Preview", #selector(EditorActions.focusPreviewPanel(_:)), "2"),
+            ("Focus Timeline", #selector(EditorActions.focusTimelinePanel(_:)), "3"),
+            ("Focus Inspector", #selector(EditorActions.focusInspectorPanel(_:)), "4"),
+        ]
+        for (title, selector, key) in focusPairs {
+            let item = NSMenuItem(title: title, action: selector, keyEquivalent: key)
+            item.keyEquivalentModifierMask = [.command, .control]
+            menu.addItem(item)
+        }
+
+        menu.addItem(.separator())
+
         let maximizeItem = NSMenuItem(title: "Maximize Focused Panel", action: #selector(EditorActions.toggleMaximizePanel(_:)), keyEquivalent: "`")
         maximizeItem.keyEquivalentModifierMask = []
         menu.addItem(maximizeItem)
@@ -276,6 +291,10 @@ enum MainMenuBuilder {
     func toggleMediaPanel(_ sender: Any?)
     func toggleInspectorPanel(_ sender: Any?)
     func toggleAgentPanel(_ sender: Any?)
+    func focusMediaPanel(_ sender: Any?)
+    func focusPreviewPanel(_ sender: Any?)
+    func focusTimelinePanel(_ sender: Any?)
+    func focusInspectorPanel(_ sender: Any?)
     func toggleMaximizePanel(_ sender: Any?)
     func setLayoutDefault(_ sender: Any?)
     func setLayoutMedia(_ sender: Any?)

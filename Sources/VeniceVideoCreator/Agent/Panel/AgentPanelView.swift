@@ -518,10 +518,13 @@ private struct ChatTabView: View {
                             Image(systemName: "xmark")
                                 .font(.system(size: AppTheme.FontSize.xxs, weight: .medium))
                                 .foregroundStyle(AppTheme.Text.mutedColor)
-                                .frame(width: AppTheme.Spacing.mdLg, height: AppTheme.Spacing.mdLg)
+                                .frame(width: AppTheme.IconSize.smMd, height: AppTheme.IconSize.smMd)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .focusable(false)
+                        .help("Close Session")
+                        .accessibilityLabel("Close Session")
                     }
                 }
                 Rectangle()
@@ -535,6 +538,8 @@ private struct ChatTabView: View {
         .buttonStyle(.plain)
         .focusable(false)
         .onHover { hovering = $0 }
+        // The close button exists only while hovered or active; keep a VoiceOver path.
+        .accessibilityAction(named: "Close Session") { onClose() }
     }
 
     private var displayTitle: String {

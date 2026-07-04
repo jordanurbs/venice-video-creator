@@ -147,7 +147,8 @@ enum AppTheme {
         static let primary = NSColor.white.withAlphaComponent(1.0)
         static let secondary = NSColor.white.withAlphaComponent(0.80)
         static let tertiary = NSColor.white.withAlphaComponent(0.62)
-        static let muted = NSColor.white.withAlphaComponent(0.34)
+        // 0.34 measured ~2.5:1 on the dark surface; 0.52 clears AA for large/secondary text.
+        static let muted = NSColor.white.withAlphaComponent(0.52)
 
         static var primaryColor: Color { Color(primary) }
         static var secondaryColor: Color { Color(secondary) }

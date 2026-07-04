@@ -106,6 +106,7 @@ struct AssetThumbnailView: View {
                 Divider()
             }
             Button("Rename") { beginRename() }
+            Button("Add to Chat") { editor.agentService.attachMention(for: asset) }
             AIEditMenu(asset: asset)
             Divider()
         }

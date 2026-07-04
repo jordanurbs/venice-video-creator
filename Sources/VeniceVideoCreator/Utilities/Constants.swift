@@ -99,6 +99,8 @@ enum TimelineAutoScroll {
 
 enum Trim {
     static let handleWidth: CGFloat = 4.0
+    /// Grab zone for trim drags — wider than the drawn handle so it's hittable.
+    static let handleHitWidth: CGFloat = 10.0
     static let clipCornerRadius: CGFloat = 3.0
 }
 

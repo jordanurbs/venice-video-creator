@@ -66,6 +66,20 @@ extension EditorViewModel {
             .filter { $0.captionGroupId == groupId && $0.mediaType == .text }.map(\.id)
     }
 
+    /// A fresh transcription reporter routing progress toasts to *this* editor
+    /// (not the frontmost project). A new latch per run announces each notice once.
+    var transcriptionReporter: Transcription.Reporter {
+        Transcription.Reporter(
+            veniceFallback: { [weak self] _ in
+                self?.mediaPanelToast = MediaPanelToast(message: "Venice transcription unavailable — used on-device recognition instead.")
+            },
+            modelDownloadStart: { [weak self] locale in
+                let language = Locale.current.localizedString(forIdentifier: locale.identifier) ?? locale.identifier
+                self?.mediaPanelToast = MediaPanelToast(message: "Downloading the \(language) speech model — the first transcription takes longer.")
+            }
+        )
+    }
+
     func captionCanTranscribe(_ clip: Clip) -> Bool {
         guard clip.mediaType == .video || clip.mediaType == .audio else { return false }
         guard let asset = mediaAssets.first(where: { $0.id == clip.mediaRef }) else { return true }
@@ -146,6 +160,8 @@ extension EditorViewModel {
         var results: [String: TranscriptionResult] = [:]
         var firstError: Error?
         var failedTranscriptions = 0
+        // One reporter for the whole run so progress notices route here and fire once.
+        let reporter = transcriptionReporter
         for t in targets where results[t.clip.mediaRef] == nil {
             do {
                 guard let url = mediaResolver.resolveURL(for: t.clip.mediaRef) else { continue }
@@ -154,10 +170,10 @@ extension EditorViewModel {
                 if request.censorProfanity || request.locale != nil {
                     // option variants produce different transcripts — bypass the cache
                     results[t.clip.mediaRef] = isVideo
-                        ? try await Transcription.transcribeVideoAudio(videoURL: url, censorProfanity: request.censorProfanity, preferredLocale: request.locale, sourceRange: range)
-                        : try await Transcription.transcribe(fileURL: url, censorProfanity: request.censorProfanity, preferredLocale: request.locale, sourceRange: range)
+                        ? try await Transcription.transcribeVideoAudio(videoURL: url, censorProfanity: request.censorProfanity, preferredLocale: request.locale, sourceRange: range, reporter: reporter)
+                        : try await Transcription.transcribe(fileURL: url, censorProfanity: request.censorProfanity, preferredLocale: request.locale, sourceRange: range, reporter: reporter)
                 } else {
-                    results[t.clip.mediaRef] = try await TranscriptCache.shared.transcript(for: url, isVideo: isVideo, range: range)
+                    results[t.clip.mediaRef] = try await TranscriptCache.shared.transcript(for: url, isVideo: isVideo, range: range, reporter: reporter)
                 }
             } catch {
                 firstError = firstError ?? error

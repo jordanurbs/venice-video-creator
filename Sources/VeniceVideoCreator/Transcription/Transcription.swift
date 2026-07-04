@@ -64,21 +64,32 @@ enum TranscriptionError: LocalizedError {
 enum Transcription {
     private static let audioExtractionGate = AsyncSemaphore(value: 2)
 
-    /// Called on the main actor when Venice STT fails and transcription silently
-    /// falls back on-device — the user picked Venice and should know it wasn't used.
-    @MainActor static var onVeniceFallback: ((String) -> Void)?
+    /// Routes progress notices (Venice fallback, model download) to the editor that
+    /// owns this run, not the frontmost one. Fires each notice at most once per run.
+    struct Reporter: Sendable {
+        var veniceFallback: (@MainActor @Sendable (String) -> Void)?
+        var modelDownloadStart: (@MainActor @Sendable (Locale) -> Void)?
 
-    /// Called on the main actor when the on-device speech model starts downloading;
-    /// first-run transcription can otherwise look like a hang.
-    @MainActor static var onModelDownloadStart: ((Locale) -> Void)?
+        /// Latches so multi-clip runs don't re-announce the same notice per clip.
+        let latch = Latch()
 
-    private static func reportVeniceFallback(_ error: any Error) async {
-        Log.transcription.warning("venice STT failed, falling back to on-device: \(error.localizedDescription)")
-        let detail = error.localizedDescription
-        await MainActor.run { onVeniceFallback?(detail) }
+        final class Latch: @unchecked Sendable {
+            private var announcedFallback = false
+            private var announcedDownload = false
+            private let lock = NSLock()
+            func shouldAnnounceFallback() -> Bool { lock.withLock { defer { announcedFallback = true }; return !announcedFallback } }
+            func shouldAnnounceDownload() -> Bool { lock.withLock { defer { announcedDownload = true }; return !announcedDownload } }
+        }
     }
 
-    static func transcribeVideoAudio(videoURL: URL, censorProfanity: Bool = false, preferredLocale: Locale? = nil, sourceRange: ClosedRange<Double>? = nil) async throws -> TranscriptionResult {
+    private static func reportVeniceFallback(_ error: any Error, reporter: Reporter?) async {
+        Log.transcription.warning("venice STT failed, falling back to on-device: \(error.localizedDescription)")
+        guard let reporter, let callback = reporter.veniceFallback, reporter.latch.shouldAnnounceFallback() else { return }
+        let detail = error.localizedDescription
+        await MainActor.run { callback(detail) }
+    }
+
+    static func transcribeVideoAudio(videoURL: URL, censorProfanity: Bool = false, preferredLocale: Locale? = nil, sourceRange: ClosedRange<Double>? = nil, reporter: Reporter? = nil) async throws -> TranscriptionResult {
         if let veniceModel = await veniceConfig() {
             do {
                 return try await transcribeViaVenice(
@@ -86,12 +97,12 @@ enum Transcription {
                     model: veniceModel, preferredLocale: preferredLocale
                 )
             } catch {
-                await reportVeniceFallback(error)
+                await reportVeniceFallback(error, reporter: reporter)
             }
         }
         let tempAudioURL = try await extractAudioTrack(from: videoURL, range: sourceRange)
         defer { try? FileManager.default.removeItem(at: tempAudioURL) }
-        let result = try await transcribeOnDevice(fileURL: tempAudioURL, censorProfanity: censorProfanity, preferredLocale: preferredLocale)
+        let result = try await transcribeOnDevice(fileURL: tempAudioURL, censorProfanity: censorProfanity, preferredLocale: preferredLocale, reporter: reporter)
         return result.offsetting(by: sourceRange?.lowerBound ?? 0)
     }
 
@@ -166,7 +177,7 @@ enum Transcription {
         return nil
     }
 
-    static func transcribe(fileURL: URL, censorProfanity: Bool = false, preferredLocale: Locale? = nil, sourceRange: ClosedRange<Double>? = nil) async throws -> TranscriptionResult {
+    static func transcribe(fileURL: URL, censorProfanity: Bool = false, preferredLocale: Locale? = nil, sourceRange: ClosedRange<Double>? = nil, reporter: Reporter? = nil) async throws -> TranscriptionResult {
         if let veniceModel = await veniceConfig() {
             do {
                 return try await transcribeViaVenice(
@@ -174,20 +185,20 @@ enum Transcription {
                     model: veniceModel, preferredLocale: preferredLocale
                 )
             } catch {
-                await reportVeniceFallback(error)
+                await reportVeniceFallback(error, reporter: reporter)
             }
         }
         return try await transcribeOnDevice(
             fileURL: fileURL, censorProfanity: censorProfanity,
-            preferredLocale: preferredLocale, sourceRange: sourceRange
+            preferredLocale: preferredLocale, sourceRange: sourceRange, reporter: reporter
         )
     }
 
-    private static func transcribeOnDevice(fileURL: URL, censorProfanity: Bool = false, preferredLocale: Locale? = nil, sourceRange: ClosedRange<Double>? = nil) async throws -> TranscriptionResult {
+    private static func transcribeOnDevice(fileURL: URL, censorProfanity: Bool = false, preferredLocale: Locale? = nil, sourceRange: ClosedRange<Double>? = nil, reporter: Reporter? = nil) async throws -> TranscriptionResult {
         if let sourceRange {
             let tempURL = try await extractAudioTrack(from: fileURL, range: sourceRange)
             defer { try? FileManager.default.removeItem(at: tempURL) }
-            let result = try await transcribeOnDevice(fileURL: tempURL, censorProfanity: censorProfanity, preferredLocale: preferredLocale)
+            let result = try await transcribeOnDevice(fileURL: tempURL, censorProfanity: censorProfanity, preferredLocale: preferredLocale, reporter: reporter)
             return result.offsetting(by: sourceRange.lowerBound)
         }
 
@@ -223,7 +234,9 @@ enum Transcription {
                 telemetry: "Transcription model install started",
                 data: ["locale": locale.identifier(.bcp47)]
             )
-            await MainActor.run { onModelDownloadStart?(locale) }
+            if let callback = reporter?.modelDownloadStart, reporter?.latch.shouldAnnounceDownload() == true {
+                await MainActor.run { callback(locale) }
+            }
             do {
                 try await install.downloadAndInstall()
             } catch {

@@ -394,9 +394,10 @@ extension ToolExecutor {
             url: url, name: asset.name, overview: wantsOverview,
             frameCount: frameCount, start: windowStart, end: windowEnd
         )
+        let transcriptReporter = editor.transcriptionReporter
         async let transcriptTask: Result<TranscriptionResult, Error>? = {
             guard hasAudio else { return nil }
-            do { return .success(try await TranscriptCache.shared.transcript(for: url, isVideo: true, range: range, preferredLocale: preferredLocale)) }
+            do { return .success(try await TranscriptCache.shared.transcript(for: url, isVideo: true, range: range, preferredLocale: preferredLocale, reporter: transcriptReporter)) }
             catch { return .failure(error) }
         }()
 
@@ -512,7 +513,7 @@ extension ToolExecutor {
         let range = try Self.sourceRange(args, duration: asset.duration)
         let transcript: TranscriptionResult
         do {
-            transcript = try await TranscriptCache.shared.transcript(for: asset.url, isVideo: false, range: range, preferredLocale: preferredLocale)
+            transcript = try await TranscriptCache.shared.transcript(for: asset.url, isVideo: false, range: range, preferredLocale: preferredLocale, reporter: editor.transcriptionReporter)
         } catch {
             throw ToolError("Transcription failed: \(error.localizedDescription)")
         }
@@ -651,8 +652,9 @@ extension ToolExecutor {
         // Transcribe each unique source once (cached); skip — don't fail — on per-asset errors.
         var transcripts: [URL: TranscriptionResult] = [:]
         var skipped: [[String: Any]] = []
+        let transcriptReporter = editor.transcriptionReporter
         for url in Set(frags.map(\.url)) {
-            do { transcripts[url] = try await TranscriptCache.shared.transcript(for: url, isVideo: isVideoByURL[url] ?? true, range: nil, preferredLocale: preferredLocale) }
+            do { transcripts[url] = try await TranscriptCache.shared.transcript(for: url, isVideo: isVideoByURL[url] ?? true, range: nil, preferredLocale: preferredLocale, reporter: transcriptReporter) }
             catch { skipped.append(["file": url.lastPathComponent, "reason": error.localizedDescription]) }
         }
 

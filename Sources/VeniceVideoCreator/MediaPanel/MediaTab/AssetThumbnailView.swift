@@ -170,7 +170,7 @@ struct AssetThumbnailView: View {
                             .clipped()
                         Color.black.opacity(AppTheme.Opacity.strong)
                     }
-                    GeneratingOverlay(label: asset.generatingLabel)
+                    GeneratingOverlay(label: asset.generatingLabel, startedAt: asset.generationInput?.createdAt)
                 }
                 .clipped()
             } else if case .failed(let error) = asset.generationStatus {

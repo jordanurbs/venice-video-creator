@@ -56,6 +56,12 @@ final class VideoEngine {
         player.pause()
     }
 
+    /// When a rebuild bails without resuming, the player is paused; reflect that in `isPlaying`.
+    private func syncPausedPlaybackState() {
+        guard let editor, editor.isPlaying, player.rate == 0 else { return }
+        editor.isPlaying = false
+    }
+
     func resumePlayback() {
         editor?.isPlaying = true
         player.play()
@@ -131,7 +137,12 @@ final class VideoEngine {
     // MARK: - Composition
 
     func rebuild() {
-        guard let editor, editor.activePreviewTab == .timeline else { return }
+        guard let editor, editor.activePreviewTab == .timeline else {
+            // notifyTimelineChanged paused the player expecting this rebuild to resume it;
+            // with no rebuild running, resync so the transport doesn't need two presses.
+            syncPausedPlaybackState()
+            return
+        }
         rebuildTask?.cancel()
 
         let mediaURLs = editor.mediaResolver.expectedURLMap()
@@ -156,6 +167,7 @@ final class VideoEngine {
             } catch {
                 if !Task.isCancelled {
                     Log.preview.error("rebuild failed: \(error.localizedDescription)")
+                    syncPausedPlaybackState()
                 }
                 rebuildTask = nil
                 return

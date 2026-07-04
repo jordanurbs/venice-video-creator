@@ -10,12 +10,12 @@ actor TranscriptCache {
     /// Concurrent callers for the same file share one transcription run.
     private var inFlight: [String: Task<TranscriptionResult, any Error>] = [:]
 
-    func transcript(for url: URL, isVideo: Bool, range: ClosedRange<Double>?, preferredLocale: Locale? = nil) async throws -> TranscriptionResult {
+    func transcript(for url: URL, isVideo: Bool, range: ClosedRange<Double>?, preferredLocale: Locale? = nil, reporter: Transcription.Reporter? = nil) async throws -> TranscriptionResult {
         // When a locale is forced, bypass the cache — locale variants must not overwrite the auto-detected entry.
         if let preferredLocale {
             return isVideo
-                ? try await Transcription.transcribeVideoAudio(videoURL: url, preferredLocale: preferredLocale, sourceRange: range)
-                : try await Transcription.transcribe(fileURL: url, preferredLocale: preferredLocale, sourceRange: range)
+                ? try await Transcription.transcribeVideoAudio(videoURL: url, preferredLocale: preferredLocale, sourceRange: range, reporter: reporter)
+                : try await Transcription.transcribe(fileURL: url, preferredLocale: preferredLocale, sourceRange: range, reporter: reporter)
         }
         // Cache full transcripts only; windowed calls filter the cached result for consistency.
         let key = Self.key(for: url)
@@ -27,8 +27,8 @@ actor TranscriptCache {
         } else {
             let task = Task {
                 isVideo
-                    ? try await Transcription.transcribeVideoAudio(videoURL: url)
-                    : try await Transcription.transcribe(fileURL: url)
+                    ? try await Transcription.transcribeVideoAudio(videoURL: url, reporter: reporter)
+                    : try await Transcription.transcribe(fileURL: url, reporter: reporter)
             }
             if let key { inFlight[key] = task }
             defer { if let key { inFlight[key] = nil } }

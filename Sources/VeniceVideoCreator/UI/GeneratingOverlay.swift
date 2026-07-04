@@ -13,8 +13,16 @@ struct GeneratingOverlay: View {
     var label: String = "Generating…"
     var size: Size = .thumbnail
 
-    @State private var startedAt = Date()
+    // Seed from the generation's persisted start so the elapsed clock survives
+    // LazyVGrid recycling; nil callers (single, non-recycled overlays) start now.
+    @State private var startedAt: Date
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(label: String = "Generating…", size: Size = .thumbnail, startedAt: Date? = nil) {
+        self.label = label
+        self.size = size
+        _startedAt = State(initialValue: startedAt ?? Date())
+    }
 
     var body: some View {
         content

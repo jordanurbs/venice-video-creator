@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, venice-integration]
   pull_request:
 
 concurrency:

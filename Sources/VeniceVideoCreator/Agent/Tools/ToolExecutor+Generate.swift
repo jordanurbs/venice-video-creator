@@ -422,6 +422,57 @@ extension ToolExecutor {
         return .ok("Multi-image edit started. Placeholder asset ID: \(placeholderId). Base: \(base.name), +\(refs.count - 1) reference(s).")
     }
 
+    /// Grabs a video clip's last visible frame as a still image asset, so the agent
+    /// can pass it back as startFrameMediaRef to chain the next shot continuously.
+    func extractLastFrame(_ editor: EditorViewModel, _ args: [String: Any]) async throws -> ToolResult {
+        let mediaRef = try args.requireString("mediaRef")
+        let source = try asset(mediaRef, editor: editor, label: "Source video")
+        guard source.type == .video else {
+            throw ToolError("extract_last_frame requires a video asset (got \(source.type.rawValue)).")
+        }
+        guard let url = editor.mediaResolver.resolveURL(for: source.id) else {
+            throw ToolError("Could not read the video file for '\(source.name)'.")
+        }
+        let seconds = try Self.lastFrameSeconds(args, editor: editor, source: source)
+
+        guard let data = await LastFrameExtractor.pngData(url: url, atSeconds: seconds) else {
+            throw ToolError("Couldn't decode a frame from '\(source.name)' at \(String(format: "%.2f", seconds))s.")
+        }
+        guard let frameAsset = await editor.importPastedImageData(data, fileExtension: "png") else {
+            throw ToolError("Extracted the frame but couldn't add it to the media library.")
+        }
+        let name = args.string("name") ?? "Last frame · \(source.name)"
+        frameAsset.name = name
+        if let idx = editor.mediaManifest.entries.firstIndex(where: { $0.id == frameAsset.id }) {
+            editor.mediaManifest.entries[idx].name = name
+        }
+        if let folderId = try resolveFolderId(args, editor: editor, fallbackReferences: [source]) {
+            editor.moveAssetsToFolder(assetIds: [frameAsset.id], folderId: folderId)
+        }
+        return .ok("Extracted the last frame of '\(source.name)' as image asset \(frameAsset.id) (at \(String(format: "%.2f", seconds))s). Pass it as startFrameMediaRef in generate_video to continue the shot from this frame.")
+    }
+
+    /// Source-time (seconds) of the frame to grab: an explicit atSeconds, else the
+    /// clip's trim/speed-aware last visible frame, else the asset's end.
+    private static func lastFrameSeconds(_ args: [String: Any], editor: EditorViewModel, source: MediaAsset) throws -> Double {
+        if let atSeconds = args.double("atSeconds") { return max(0, atSeconds) }
+        if let clipId = args.string("sourceClipId") {
+            guard let clip = editor.clipFor(id: clipId) else {
+                throw ToolError("sourceClipId not found: \(clipId)")
+            }
+            guard clip.mediaRef == source.id else {
+                throw ToolError("sourceClipId \(clipId) references a different asset than mediaRef.")
+            }
+            guard clip.mediaType == .video else {
+                throw ToolError("sourceClipId must reference a video clip.")
+            }
+            let fps = Double(max(1, editor.timeline.fps))
+            let sourceFrame = Double(clip.trimStartFrame) + Double(max(0, clip.durationFrames - 1)) * clip.speed
+            return sourceFrame / fps
+        }
+        return max(0, source.duration - 0.05)
+    }
+
     func removeBackground(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         guard AccountService.shared.hasVeniceKey else {
             throw ToolError("Background removal requires a Venice API key. Tell the user to add it in Settings.")

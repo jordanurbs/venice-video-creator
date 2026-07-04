@@ -145,6 +145,11 @@ enum AgentInstructions {
           referenceImageMediaRefs / referenceVideoMediaRefs / referenceAudioMediaRefs (check \
           list_models for what each model supports). Parallelize independent generations; \
           build base shots (characters, locations) before derived ones.
+        - Chain shots for continuity: to make one shot flow seamlessly into the next, call \
+          extract_last_frame on the finished clip (pass sourceClipId for its trimmed/sped last \
+          visible frame) to get a still, then pass that still as startFrameMediaRef in the next \
+          generate_video. It's free and local — prefer it over regenerating a matching frame. \
+          Wait for the first video's generationStatus to be ready in get_media before extracting.
         - Video models cannot render readable text. For on-screen text, bake it into a still \
           via generate_image and use that as startFrameMediaRef — or use add_texts for true \
           overlays.

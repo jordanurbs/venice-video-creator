@@ -25,6 +25,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case generateImage = "generate_image"
     case generateAudio = "generate_audio"
     case editImage = "edit_image"
+    case extractLastFrame = "extract_last_frame"
     case removeBackground = "remove_background"
     case upscaleMedia = "upscale_media"
     case webSearch = "web_search"
@@ -583,6 +584,20 @@ enum ToolDefinitions {
                     "folderId": ["type": "string", "description": "Optional. Folder id to place the result in. Omit for the project root."],
                 ],
                 required: ["mediaRef", "prompt"]
+            )
+        ),
+        AgentTool(
+            name: .extractLastFrame,
+            description: "Extracts a single still frame from a VIDEO asset and adds it to the media library as a new image asset, returning its ID. Free and local — no generation. The main use is shot continuity: grab a clip's final frame, then pass that image as startFrameMediaRef in generate_video so the next shot begins exactly where the last one ended. By default it grabs the asset's last frame; pass sourceClipId to instead grab the clip's last VISIBLE frame (honoring its trim and speed, matching what plays on the timeline), or atSeconds to grab a specific source time.",
+            inputSchema: objectSchema(
+                properties: [
+                    "mediaRef": ["type": "string", "description": "ID of the source video asset (from get_media)."],
+                    "sourceClipId": ["type": "string", "description": "Optional. A timeline clip (from get_timeline) referencing mediaRef; the frame is taken at that clip's last visible source frame (trim + speed applied). Omit to use the asset's own end."],
+                    "atSeconds": ["type": "number", "description": "Optional. Explicit source time in seconds to grab instead of the last frame. Overrides sourceClipId."],
+                    "name": ["type": "string", "description": "Display name for the still. Defaults to 'Last frame · <source>'."],
+                    "folderId": ["type": "string", "description": "Optional. Folder id to place the still in. Defaults to the source video's folder."],
+                ],
+                required: ["mediaRef"]
             )
         ),
         AgentTool(

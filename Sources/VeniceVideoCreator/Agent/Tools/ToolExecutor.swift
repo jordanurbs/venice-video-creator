@@ -123,6 +123,7 @@ final class ToolExecutor {
         case .generateImage: return try generate(editor, args, type: .image)
         case .generateAudio: return try await generateAudio(editor, args)
         case .editImage:     return try editImage(editor, args)
+        case .extractLastFrame: return try await extractLastFrame(editor, args)
         case .removeBackground: return try removeBackground(editor, args)
         case .upscaleMedia:  return try upscaleMedia(editor, args)
         case .webSearch:     return try await webSearch(args)

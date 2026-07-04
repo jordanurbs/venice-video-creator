@@ -69,16 +69,16 @@ struct AIEditTab: View {
                         actionRow(
                             action: .createVideo,
                             icon: "video.badge.plus",
-                            title: "Create Video",
+                            title: "Generate Video",
                             description: "Use as first frame or reference"
                         )
                     } else {
                         actionRow(
                             action: .lastFrameToVideo,
                             icon: "video.badge.plus",
-                            title: "Create Video from Last Frame",
+                            title: "Generate Video from Last Frame",
                             description: "Screenshot the final frame and use it as a starting frame",
-                            triggerTitle: "Create"
+                            triggerTitle: "Generate"
                         )
                     }
                 }

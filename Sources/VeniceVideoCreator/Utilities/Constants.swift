@@ -119,6 +119,8 @@ enum Project {
     static let mediaDirectoryName = "media"
 
     static var storageDirectory: URL {
+        // Historical folder name (app is now "Venice Video Creator");
+        // renaming would orphan existing projects.
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Documents/Venice Video Editor", isDirectory: true)
     }

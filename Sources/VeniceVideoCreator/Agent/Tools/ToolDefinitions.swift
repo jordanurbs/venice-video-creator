@@ -651,7 +651,7 @@ enum ToolDefinitions {
                         "description": "Exactly one of url, path, or bytes must be set. mimeType is required when bytes is set; for url it acts as a type-inference override.",
                         "properties": [
                             "url": ["type": "string", "description": "HTTPS URL. Pre-signed URLs are fine but must not expire mid-download."],
-                            "path": ["type": "string", "description": "Absolute local file or directory path, readable by the Venice Video Editor process. A directory is imported recursively — every openable file is pulled in and the folder structure is replicated as media folders."],
+                            "path": ["type": "string", "description": "Absolute local file or directory path, readable by the Venice Video Creator process. A directory is imported recursively — every openable file is pulled in and the folder structure is replicated as media folders."],
                             "bytes": ["type": "string", "description": "Base64-encoded media data. Prefer url or path for anything over ~10MB."],
                             "mimeType": ["type": "string", "description": "Required when bytes is set. Optional override for url when its path has no usable extension (e.g. signed URLs). Accepted: video/mp4, video/quicktime, audio/mpeg, audio/wav, audio/aac, audio/mp4, image/png, image/jpeg, image/tiff, image/heic."],
                         ],

@@ -81,7 +81,7 @@ struct MCPInstructionsPane: View {
     private var overviewSection: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             sectionHeading("Overview")
-            Text("Venice Video Editor exposes your open project as an MCP server. Connect any MCP clients to let it be your AI assistant.")
+            Text("Venice Video Creator exposes your open project as an MCP server. Connect any MCP clients to let it be your AI assistant.")
                 .font(.system(size: AppTheme.FontSize.smMd))
                 .foregroundStyle(AppTheme.Text.secondaryColor)
                 .fixedSize(horizontal: false, vertical: true)

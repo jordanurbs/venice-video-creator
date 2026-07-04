@@ -161,10 +161,20 @@ enum AppNotifications {
 
     private static func body(assetName: String, assetType: ClipType, count: Int) -> String {
         if count > 1 {
-            return "\(count) \(assetType.rawValue)s are ready in Venice Video Editor."
+            return "\(count) \(plural(assetType)) are ready in Venice Video Creator."
         }
         let name = assetName.trimmingCharacters(in: .whitespacesAndNewlines)
         return name.isEmpty ? "Your \(assetType.rawValue) is ready." : "\(name) is ready."
+    }
+
+    private static func plural(_ type: ClipType) -> String {
+        switch type {
+        case .video: "videos"
+        case .image: "images"
+        case .audio: "audio clips"
+        case .text: "text clips"
+        case .lottie: "animations"
+        }
     }
 }
 

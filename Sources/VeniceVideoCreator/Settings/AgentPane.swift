@@ -81,7 +81,7 @@ struct AgentPane: View {
         HStack(spacing: AppTheme.Spacing.sm) {
             HStack(spacing: AppTheme.Spacing.sm) {
                 Circle()
-                    .fill((appState.mcpService?.isRunning ?? false) ? Color.green : AppTheme.Text.mutedColor)
+                    .fill((appState.mcpService?.isRunning ?? false) ? AppTheme.Status.successColor : AppTheme.Text.mutedColor)
                     .frame(width: 8, height: 8)
 
                 if appState.mcpService?.isRunning ?? false {

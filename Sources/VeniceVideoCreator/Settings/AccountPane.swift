@@ -201,7 +201,7 @@ struct AccountPane: View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
             HStack(spacing: AppTheme.Spacing.sm) {
                 Circle()
-                    .fill(hasKey ? Color.green : AppTheme.Text.mutedColor)
+                    .fill(hasKey ? AppTheme.Status.successColor : AppTheme.Text.mutedColor)
                     .frame(width: 8, height: 8)
                 Text(statusText)
                     .font(.system(size: AppTheme.FontSize.sm))

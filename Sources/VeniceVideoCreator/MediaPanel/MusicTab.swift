@@ -9,7 +9,7 @@ struct MusicTab: View {
     @State private var prompt: String = ""
     @State private var textDuration: Double = 90
     @State private var isGenerating = false
-    @State private var generatingLabel = "Generating..."
+    @State private var generatingLabel = "Generating…"
     @State private var generatingAssetId: String?
     @State private var runTask: Task<Void, Never>?
     @State private var note: String?

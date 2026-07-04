@@ -11,6 +11,8 @@ ModelTraitsCatalog.shared.configure()
 UserDefaults.standard.set(10, forKey: "NSInitialToolTipDelay")
 
 let app = NSApplication.shared
+// One global appearance; per-window call sites can't cover panels and alerts.
+app.appearance = NSAppearance(named: .darkAqua)
 let delegate = AppDelegate()
 app.delegate = delegate
 app.mainMenu = MainMenuBuilder.buildMenu()

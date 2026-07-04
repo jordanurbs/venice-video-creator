@@ -312,7 +312,7 @@ struct AgentPanelView: View {
             HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.sm) {
                 Text(err.localizedDescription)
                     .font(.system(size: AppTheme.FontSize.xs))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(AppTheme.Status.errorColor)
                     .multilineTextAlignment(.leading)
                 if let cta = errorCTA(for: err) {
                     Button(action: cta.action) {

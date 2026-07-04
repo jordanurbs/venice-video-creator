@@ -76,7 +76,7 @@ struct ProjectCard: View {
                 Button { showDeleteConfirmation = true } label: {
                     Image(systemName: "trash.fill")
                         .font(.system(size: AppTheme.FontSize.smMd, weight: .semibold))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(AppTheme.Status.errorColor)
                         .frame(width: AppTheme.IconSize.lgXl, height: AppTheme.IconSize.lgXl)
                         .glassEffect(.regular, in: .circle)
                 }

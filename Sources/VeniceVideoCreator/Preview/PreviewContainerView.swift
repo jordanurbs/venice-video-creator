@@ -342,7 +342,7 @@ struct PreviewContainerView: View {
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             let result = editor.relinkOfflineAssets(fromFolder: url)
-            editor.mediaPanelToast = "Relinked \(result.relinked) of \(result.total) offline clips."
+            editor.mediaPanelToast = "Relinked \(result.relinked) of \(result.total) offline media files."
         }
     }
 
@@ -395,8 +395,8 @@ struct PreviewContainerView: View {
                     .font(.system(size: AppTheme.FontSize.lg, weight: .semibold))
                     .foregroundStyle(AppTheme.Text.primaryColor)
                 Text(isUnprocessable
-                    ? "Venice Video Editor loaded this clip's source file but couldn't prepare it for playback. The file may be corrupt or in an unsupported format."
-                    : "Venice Video Editor couldn't load this clip's source file. It may be missing, on an ejected drive, or unreadable.")
+                    ? "Venice Video Creator loaded this clip's source file but couldn't prepare it for playback. The file may be corrupt or in an unsupported format."
+                    : "Venice Video Creator couldn't load this clip's source file. It may be missing, on an ejected drive, or unreadable.")
                     .font(.system(size: AppTheme.FontSize.sm))
                     .foregroundStyle(AppTheme.Text.secondaryColor)
                     .multilineTextAlignment(.center)

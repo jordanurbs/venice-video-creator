@@ -11,6 +11,9 @@ enum PreviewSeekMode: String {
 final class VideoEngine {
     private(set) var player = AVPlayer()
 
+    /// Asset id currently loaded into the source preview (`nil` for the timeline composition).
+    private(set) var previewedAssetId: String?
+
     weak var previewView: PreviewNSView?
 
     weak var editor: EditorViewModel?
@@ -90,7 +93,15 @@ final class VideoEngine {
 
     // MARK: - Preview Items
 
+    /// True only when the source preview is loaded with a *playable* item for `id`.
+    /// A freshly generated asset can hold a `.failed` item (built against the file
+    /// before download finished), so tab identity alone isn't enough to skip re-loading.
+    func isPreviewingPlayableAsset(_ id: String) -> Bool {
+        previewedAssetId == id && player.currentItem != nil && player.currentItem?.status != .failed
+    }
+
     func previewAsset(_ asset: MediaAsset) {
+        previewedAssetId = asset.id
         if asset.type == .lottie {
             // AVPlayer can't read Lottie JSON — bake (cached) to a playable mov first.
             let url = asset.url, ref = asset.id
@@ -120,6 +131,7 @@ final class VideoEngine {
         case .mediaAsset(let id, _, let type):
             guard let asset = editor.mediaAssets.first(where: { $0.id == id }) else { return }
             if type == .image {
+                previewedAssetId = id
                 replacePlayerItem(nil, reason: "imagePreview")
             } else {
                 previewAsset(asset)
@@ -143,6 +155,7 @@ final class VideoEngine {
             syncPausedPlaybackState()
             return
         }
+        previewedAssetId = nil
         rebuildTask?.cancel()
 
         let mediaURLs = editor.mediaResolver.expectedURLMap()

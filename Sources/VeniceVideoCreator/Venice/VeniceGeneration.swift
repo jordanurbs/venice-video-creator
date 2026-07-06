@@ -202,7 +202,10 @@ enum VeniceGenerationRunner {
     private static func pollVideo(
         queueId: String, model: String, downloadURL: String?, api: VeniceAPI
     ) async throws -> String {
-        let deadline = Date().addingTimeInterval(15 * 60)
+        // 30-min ceiling matches the probe-verified harness poll window; slow
+        // lip-sync models (DaVinci MagiHuman, esp. at longer durations) routinely
+        // outrun a 15-min window. The job runs server-side and resumes by queue_id.
+        let deadline = Date().addingTimeInterval(30 * 60)
         while Date() < deadline {
             let request = api.makeRequest(
                 path: "video/retrieve",
@@ -219,10 +222,17 @@ enum VeniceGenerationRunner {
                 return try writeTemp(data: data, ext: "mp4").absoluteString
             }
             // Otherwise it's a JSON status payload.
-            let status = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["status"] as? String
-            if status?.uppercased() == "COMPLETED" {
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let status = (json?["status"] as? String)?.uppercased() ?? ""
+            if status == "COMPLETED" {
                 if let downloadURL { return downloadURL }
                 return try writeTemp(data: data, ext: "mp4").absoluteString
+            }
+            // Surface a terminal server-side failure immediately instead of waiting
+            // out the whole poll window and reporting a misleading "timed out".
+            if status.contains("FAIL") {
+                let detail = (json?["error"] as? String) ?? (json?["message"] as? String)
+                throw VeniceAPI.VeniceError.transport(detail ?? "Video generation failed.")
             }
             try await Task.sleep(nanoseconds: 4_000_000_000)
         }

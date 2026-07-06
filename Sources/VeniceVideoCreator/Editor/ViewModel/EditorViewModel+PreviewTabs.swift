@@ -114,7 +114,9 @@ extension EditorViewModel {
         if libraryScrubPreview?.assetId != asset.id {
             let restoreTabId = libraryScrubPreview?.restoreTabId ?? activePreviewTabId
             let restoreSourceFrame = libraryScrubPreview?.restoreSourceFrame ?? sourcePlayheadFrame
-            let wasAlreadyShowingAsset = libraryScrubPreview == nil && activePreviewTabId == tab.id
+            let wasAlreadyShowingAsset = libraryScrubPreview == nil
+                && activePreviewTabId == tab.id
+                && videoEngine?.isPreviewingPlayableAsset(asset.id) == true
 
             libraryScrubPreview = LibraryScrubPreview(
                 tab: tab,

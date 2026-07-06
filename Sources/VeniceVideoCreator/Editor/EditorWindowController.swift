@@ -174,6 +174,19 @@ final class EditorWindowController: NSWindowController {
         }
     }
 
+    /// Whether the focused panel holds something Delete would remove — the single
+    /// source of truth for menu-item enablement and delete gating.
+    private var hasDeletableSelection: Bool {
+        switch editorViewModel.focusedPanel {
+        case .media:
+            return !editorViewModel.selectedFolderIds.isEmpty || !editorViewModel.selectedMediaAssetIds.isEmpty
+        case .timeline:
+            return !editorViewModel.selectedClipIds.isEmpty || editorViewModel.selectedGap != nil
+        case .preview, .inspector, .agent, nil:
+            return false
+        }
+    }
+
     /// Single Delete implementation shared by the key monitor and menu items —
     /// scoped to the focused panel so a stale selection elsewhere never dies.
     @discardableResult
@@ -364,15 +377,7 @@ extension EditorWindowController: EditorActions {
         case #selector(selectForwardOnTrack(_:)), #selector(selectForwardOnAllTracks(_:)):
             return editorViewModel.focusedPanel == .timeline && !editorViewModel.selectedClipIds.isEmpty
         case #selector(deleteSelectedClips(_:)), #selector(rippleDeleteSelected(_:)):
-            guard !isTextInputFocused else { return false }
-            switch editorViewModel.focusedPanel {
-            case .media:
-                return !editorViewModel.selectedFolderIds.isEmpty || !editorViewModel.selectedMediaAssetIds.isEmpty
-            case .timeline:
-                return !editorViewModel.selectedClipIds.isEmpty || editorViewModel.selectedGap != nil
-            case .preview, .inspector, .agent, nil:
-                return false
-            }
+            return !isTextInputFocused && hasDeletableSelection
         case #selector(trimStartToPlayhead(_:)), #selector(trimEndToPlayhead(_:)):
             return !isTextInputFocused
                 && editorViewModel.focusedPanel == .timeline

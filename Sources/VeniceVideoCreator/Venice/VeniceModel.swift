@@ -131,12 +131,16 @@ enum VeniceModelMapper {
             : isImageToVideo ? "Image→Video"
             : "Text→Video"
         let displayName = "\(name) (\(variant))"
+        // Venice doesn't expose end-frame support in constraints; enable it only
+        // where usable — i2v models (end frame shares the first-frame slot) whose
+        // family the harness registry marks end-image-capable.
+        let supportsLastFrame = isImageToVideo && VideoModelCapabilities.supportsEndImage(id: id)
         let caps = VideoCaps(
             durations: durations.isEmpty ? [5] : durations,
             resolutions: resolutions,
             aspectRatios: aspectRatios,
             supportsFirstFrame: isImageToVideo,
-            supportsLastFrame: false,
+            supportsLastFrame: supportsLastFrame,
             maxReferenceImages: isReferenceToVideo ? 4 : 0,
             maxReferenceVideos: 0,
             maxReferenceAudios: 0,

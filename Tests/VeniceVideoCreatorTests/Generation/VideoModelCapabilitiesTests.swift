@@ -18,9 +18,11 @@ struct VideoModelCapabilitiesTests {
         }
     }
 
-    @Test func wan27SupportsEndImage() {
-        #expect(VideoModelCapabilities.supportsEndImage(id: "wan-2-7-image-to-video"))
-        #expect(VideoModelCapabilities.supportsEndImage(id: "wan-2-7-spicy-image-to-video"))
+    @Test func wan27DoesNotSupportEndImage() {
+        // Live 2026-07-06: Wan 2.7 i2v (Uncensored/Spicy) rejects end_image_url
+        // despite the harness marking the family capable. Whole family stays off.
+        #expect(!VideoModelCapabilities.supportsEndImage(id: "wan-2-7-image-to-video"))
+        #expect(!VideoModelCapabilities.supportsEndImage(id: "wan-2-7-spicy-image-to-video"))
     }
 
     @Test func pixverseTransitionSupportsEndImage() {

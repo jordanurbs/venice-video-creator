@@ -31,8 +31,13 @@ final class ExportService {
     var lastReport: ExportRunReport?
 
     private var cancelCurrent: (() -> Void)?
+    private var activeExportSession: AVAssetExportSession?
 
     func cancel() {
+        // Task cancellation alone doesn't interrupt AVAssetExportSession's async
+        // render, so abort the session explicitly too; both paths trip the
+        // cancellation cleanup that discards the partial output file.
+        activeExportSession?.cancelExport()
         cancelCurrent?()
     }
 
@@ -151,6 +156,9 @@ final class ExportService {
             // AVAssetExportSession fails if the file already exists
             try? FileManager.default.removeItem(at: outputURL)
 
+            activeExportSession = session
+            defer { activeExportSession = nil }
+
             nonisolated(unsafe) let unsafeSession = session
             let progressTask = Task { @MainActor in
                 while !Task.isCancelled {
@@ -176,7 +184,7 @@ final class ExportService {
                     data: ["format": String(describing: format), "resolution": resolution.rawValue]
                 )
             } catch {
-                if error is CancellationError
+                if Task.isCancelled || error is CancellationError
                     || ((error as NSError).domain == NSCocoaErrorDomain && (error as NSError).code == NSUserCancelledError) {
                     try? FileManager.default.removeItem(at: outputURL)
                     self.error = "Export cancelled"

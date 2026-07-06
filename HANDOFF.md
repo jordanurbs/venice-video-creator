@@ -1,6 +1,6 @@
 # Session Handoff — Venice Video Creator
 
-> Written 2026-07-06. Branch `venice-integration`, HEAD `578319b`, CI green, full suite **886 tests**.
+> Updated 2026-07-06. Branch `venice-integration`, CI green, full suite **886 tests**.
 > Read `PLAN.md` for the full open-work plan and `AGENTS.md` for the non-negotiable rules
 > (one-line comments, `AppTheme` for all UI values, AppKit-parent/SwiftUI-leaf drop architecture,
 > terse Apple-HIG voice). The harness at `~/Projects/video-proj/venice-video-harness/` is the
@@ -52,14 +52,18 @@ curl -s -D - -o /dev/null "https://api.venice.ai/api/v1/models?type=all" -H "Aut
 > **no model filter** — the list is 100% live from `models?type=all` — so that was Venice pulling the
 > model, not a code change. Re-run #1 to confirm it's back before retesting MagiHuman.
 
-### Phase 4 remainder (behavior-sensitive — do WITH a runtime pass)
+### Phase 4 remainder
 Preserve the drop architecture exactly (AppKit parent + SwiftUI leaf `.onDrop`).
+
+Done this session (no runtime pass, 886 green): extracted `importFinderItemsForPlacement`
+(overlapping metadata loads), `activeCount` → `tasks.count`, retired the `mediaPanelToast`
+alias, lazy `deletionImpactCount`, concurrent `refreshUsage`, alphabetical Models dropdowns.
+
+Still open (behavior-sensitive — do WITH a runtime pass):
 - Collapse the four near-identical drop NSViews onto one configurable host.
-- Extract `EditorViewModel.importFinderItemsForPlacement(_:)` (dup in `TimelineView` + `PreviewContainerView`); make the per-asset `loadMetadata` loop a task group.
 - Share drop-commit choreography between `TimelineView.place()` and `EditorViewModel.insertAtPlayhead`.
-- `VeniceJobStore.activeCount` → `tasks.count`; retire the `mediaPanelToast` alias (→ `editorToast`).
 - Hoist the key-monitor modifier guard; share delete-enablement between `validateUserInterfaceItem` and `performScopedDelete`.
-- Perf: lazy `deletionImpactCount`; stop `rebuildToolTips()` in `draw()`; concurrent `async let` in `AccountService.refreshUsage`; replace `waitWhileExportActive`'s poll with continuations.
+- Perf (deferred): stop `rebuildToolTips()` in `TimelineHeaderView.draw()` (rects are built in `draw()` → verify tooltips aren't stale during resize/reorder drags); replace `waitWhileExportActive`'s 2s poll with continuations resumed in `endExport()` (a missed resume hangs indexing until relaunch — verify against a live export).
 
 ## Manual checklist — what YOU still need to test
 

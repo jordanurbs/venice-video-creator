@@ -20,4 +20,28 @@ enum VideoModelCapabilities {
         if lower.contains("pixverse") && lower.contains("transition") { return true }
         return false
     }
+
+    /// Whether the model accepts a single `audio_url` lip-sync/scoring track.
+    /// Registry `audioInput: true` families: DaVinci MagiHuman and the Wan 2.5/2.6/2.7
+    /// lines — except Wan 2.7 R2V, which takes per-reference `elements[].audio_url`
+    /// rather than a top-level `audio_url` and so must stay off this path.
+    static func audioInputCapable(id: String) -> Bool {
+        let lower = id.lowercased()
+        if lower.contains("magihuman") { return true }
+        if lower.contains("wan-2-7-reference-to-video") { return false }
+        if lower.contains("wan-2-7") { return true }
+        if lower.contains("wan-2.6") { return true }
+        if lower.contains("wan-2.5-preview") { return true }
+        return false
+    }
+
+    /// Minimum `audio_url` duration (seconds) a model enforces; nil when it has no
+    /// floor. Wan 2.7 and MagiHuman reject audio shorter than 3s (HTTP 400 at queue
+    /// time), so shorter clips must be padded with trailing silence first.
+    static func minAudioInputSeconds(id: String) -> Double? {
+        let lower = id.lowercased()
+        if lower.contains("wan-2-7") { return 3 }
+        if lower.contains("magihuman") { return 3 }
+        return nil
+    }
 }

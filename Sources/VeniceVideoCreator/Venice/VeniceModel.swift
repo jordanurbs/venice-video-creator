@@ -135,6 +135,10 @@ enum VeniceModelMapper {
         // where usable — i2v models (end frame shares the first-frame slot) whose
         // family the harness registry marks end-image-capable.
         let supportsLastFrame = isImageToVideo && VideoModelCapabilities.supportsEndImage(id: id)
+        // Venice's constraints don't flag audio_url support; enable a single audio
+        // input for the families the harness registry marks audio-capable. Short
+        // clips are padded to the model's floor before upload (see VideoGenerationSubmission).
+        let maxReferenceAudios = VideoModelCapabilities.audioInputCapable(id: id) ? 1 : 0
         let caps = VideoCaps(
             durations: durations.isEmpty ? [5] : durations,
             resolutions: resolutions,
@@ -143,7 +147,7 @@ enum VeniceModelMapper {
             supportsLastFrame: supportsLastFrame,
             maxReferenceImages: isReferenceToVideo ? 4 : 0,
             maxReferenceVideos: 0,
-            maxReferenceAudios: 0,
+            maxReferenceAudios: maxReferenceAudios,
             maxTotalReferences: nil,
             maxCombinedVideoRefSeconds: nil,
             maxCombinedAudioRefSeconds: nil,

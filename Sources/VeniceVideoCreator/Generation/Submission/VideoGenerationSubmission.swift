@@ -97,13 +97,23 @@ struct VideoGenerationSubmission {
             videoRefCount: videoRefCount,
             audioRefCount: audioRefCount
         )
+        // Video refs get compressed; short audio refs get padded to the model's
+        // audio_url floor (e.g. Wan 2.7's 3s). Both return a temp file or nil (use original).
+        let minAudioSeconds = VideoModelCapabilities.minAudioInputSeconds(id: model.id)
         let preprocessRef: (@Sendable (Int, MediaAsset) async throws -> URL?)?
-        if inputAssets.videoRefs.isEmpty {
+        if inputAssets.videoRefs.isEmpty && (minAudioSeconds == nil || inputAssets.audioRefs.isEmpty) {
             preprocessRef = nil
         } else {
             preprocessRef = { _, asset in
-                guard asset.type == .video else { return nil }
-                return try await VideoCompressor.compressIfNeeded(url: asset.url)
+                switch asset.type {
+                case .video:
+                    return try await VideoCompressor.compressIfNeeded(url: asset.url)
+                case .audio:
+                    guard let minAudioSeconds else { return nil }
+                    return await AudioSilencePadder.padIfShorter(url: asset.url, minSeconds: minAudioSeconds)
+                default:
+                    return nil
+                }
             }
         }
 

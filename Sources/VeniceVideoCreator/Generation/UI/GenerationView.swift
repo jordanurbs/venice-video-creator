@@ -1304,7 +1304,12 @@ struct GenerationView: View {
                     if let thumb = asset.thumbnail {
                         Image(nsImage: thumb).resizable().aspectRatio(contentMode: .fill)
                     } else {
-                        Rectangle().fill(.quaternary)
+                        ZStack {
+                            Rectangle().fill(.quaternary)
+                            Image(systemName: asset.type.sfSymbolName)
+                                .font(.system(size: AppTheme.FontSize.xl))
+                                .foregroundStyle(AppTheme.Text.tertiaryColor)
+                        }
                     }
                 }
                 .frame(width: AppTheme.GenerationPanel.referenceTileWidth, height: AppTheme.GenerationPanel.referenceTileHeight)

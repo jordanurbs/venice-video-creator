@@ -47,6 +47,7 @@ struct GenerationView: View {
     @State private var refVideos: [MediaAsset] = []
     @State private var refAudios: [MediaAsset] = []
     @State private var refsTargeted = false
+    @State private var audioRefTargeted = false
 
     /// See frames/references mode for `framesAndReferencesExclusive` models.
     @State private var framesRefsMode: FramesRefsMode = .firstLast
@@ -228,9 +229,26 @@ struct GenerationView: View {
         return imgFull && vidFull && audFull
     }
 
+    /// Models whose only reference input is a single audio track (Wan 2.7 i2v/t2v,
+    /// DaVinci MagiHuman). They get a dedicated labeled Audio slot instead of the
+    /// generic references grid, which otherwise reads as an image-reference zone.
+    private var isAudioOnlyReferenceModel: Bool {
+        videoModel.maxReferenceAudios > 0
+            && videoModel.maxReferenceImages == 0
+            && videoModel.maxReferenceVideos == 0
+    }
+
+    private var showsAudioSlot: Bool {
+        guard selectedType == .video, !videoModel.requiresSourceVideo else { return false }
+        guard isAudioOnlyReferenceModel else { return false }
+        if videoModel.framesAndReferencesExclusive { return framesRefsMode == .reference }
+        return true
+    }
+
     private var showsRefSections: Bool {
         guard selectedType == .video, videoModel.supportsReferences else { return false }
         if videoModel.requiresSourceVideo { return false }
+        if isAudioOnlyReferenceModel { return false }
         if videoModel.framesAndReferencesExclusive {
             return framesRefsMode == .reference
         }
@@ -626,6 +644,7 @@ struct GenerationView: View {
         } else if selectedType == .video {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
                 if showsFrameStrip { videoFrameStrip }
+                if showsAudioSlot { audioReferenceSlot }
                 if showsRefSections { videoReferenceSections }
             }
         } else if selectedType == .image && imageModel.supportsImageReference {
@@ -1014,6 +1033,25 @@ struct GenerationView: View {
         }
     }
 
+    // MARK: - Audio reference (lip-sync / scoring)
+
+    private var audioReferenceSlot: some View {
+        frameSlot(
+            label: "Audio",
+            asset: refAudios.first,
+            isTargeted: $audioRefTargeted,
+            accepting: [.audio],
+            iconName: "waveform.badge.plus",
+            onDrop: { addAudioRef($0) },
+            onClear: { refAudios.removeAll() }
+        )
+    }
+
+    private func addAudioRef(_ asset: MediaAsset) {
+        guard asset.type == .audio else { return }
+        refAudios = [asset]
+    }
+
     // MARK: - First/Last / Reference mode picker (Seedance, Grok)
 
     private var framesRefsModePicker: some View {
@@ -1212,7 +1250,11 @@ struct GenerationView: View {
         imageReferences.removeAll()
         if !videoModel.supportsFirstFrame { firstFrame = nil }
         if !videoModel.supportsLastFrame { lastFrame = nil }
-        if !showsRefSections { resetRefPools() }
+        if !showsRefSections {
+            refImages.removeAll()
+            refVideos.removeAll()
+            if !showsAudioSlot { refAudios.removeAll() }
+        }
     }
 
     private var refCounterLabel: String {
@@ -1726,7 +1768,7 @@ struct GenerationView: View {
             frames: frames,
             imageRefs: showsRefSections ? refImages : [],
             videoRefs: showsRefSections ? refVideos : [],
-            audioRefs: showsRefSections ? refAudios : []
+            audioRefs: (showsRefSections || showsAudioSlot) ? refAudios : []
         )
     }
 

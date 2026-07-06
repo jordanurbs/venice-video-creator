@@ -54,6 +54,10 @@ final class DropTargetNSView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    // Drag routing uses registered types, not hitTest; nil lets clicks reach the
+    // SwiftUI drop zone underneath (so tapping it can open the import panel).
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
         // Accept on advertised type, not value: SwiftUI .draggable(String) fulfills the
         // string promise lazily, so it's nil at drag-enter. The payload is read at drop.

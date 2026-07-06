@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct GenerationView: View {
     let maxPanelHeight: Double
@@ -1202,16 +1204,10 @@ struct GenerationView: View {
     ) -> some View {
         dropZone(
             isTargeted: isTargeted,
-            accepting: Set(ClipType.allCases),
-            iconName: iconName
-        ) { asset in
-            if expects.contains(asset.type) {
-                onDrop(asset)
-            } else {
-                let kinds = expects.map(\.rawValue).sorted().joined(separator: " or ")
-                flashDropError("Drop \(kinds) here.")
-            }
-        }
+            accepting: expects,
+            iconName: iconName,
+            onDrop: onDrop
+        )
     }
 
     private func flashDropError(_ message: String) {
@@ -1481,22 +1477,60 @@ struct GenerationView: View {
                             flashDropError("Drop \(kinds) here.")
                         }
                     },
-                    onFileDrop: { urls in
-                        for url in urls {
-                            guard let asset = editor.addMediaAsset(from: url) else {
-                                flashDropError("Can't use \"\(url.lastPathComponent)\" — unsupported file type.")
-                                continue
-                            }
-                            if acceptedTypes.contains(asset.type) {
-                                onDrop(asset)
-                            } else {
-                                let kinds = acceptedTypes.map(\.rawValue).sorted().joined(separator: " or ")
-                                flashDropError("Drop \(kinds) here.")
-                            }
-                        }
-                    }
+                    onFileDrop: { urls in importReferenceURLs(urls, accepting: acceptedTypes, onImport: onDrop) }
                 )
             }
+            .onTapGesture { openReferenceImportPanel(accepting: acceptedTypes, onImport: onDrop) }
+            .pointerStyle(.link)
+            .help("Click to import a file, or drop one here")
+    }
+
+    private func importReferenceURLs(
+        _ urls: [URL],
+        accepting acceptedTypes: Set<ClipType>,
+        onImport: (MediaAsset) -> Void
+    ) {
+        for url in urls {
+            guard let asset = editor.addMediaAsset(from: url) else {
+                flashDropError("Can't use \"\(url.lastPathComponent)\" — unsupported file type.")
+                continue
+            }
+            if acceptedTypes.contains(asset.type) {
+                onImport(asset)
+            } else {
+                let kinds = acceptedTypes.map(\.rawValue).sorted().joined(separator: " or ")
+                flashDropError("Drop \(kinds) here.")
+            }
+        }
+    }
+
+    /// Reference slots double as an import affordance: clicking one opens a Finder
+    /// panel and copies the chosen file into the project via the same path as a drop.
+    private func openReferenceImportPanel(
+        accepting acceptedTypes: Set<ClipType>,
+        onImport: @escaping (MediaAsset) -> Void
+    ) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.message = "Import a reference into this project"
+        let types = referenceContentTypes(for: acceptedTypes)
+        if !types.isEmpty { panel.allowedContentTypes = types }
+        guard panel.runModal() == .OK else { return }
+        importReferenceURLs(panel.urls, accepting: acceptedTypes, onImport: onImport)
+    }
+
+    private func referenceContentTypes(for types: Set<ClipType>) -> [UTType] {
+        var result: [UTType] = []
+        if types.contains(.image) { result.append(.image) }
+        if types.contains(.video) { result.append(.movie) }
+        if types.contains(.audio) { result.append(.audio) }
+        if types.contains(.lottie) {
+            result.append(.json)
+            if let lottie = UTType(filenameExtension: "lottie") { result.append(lottie) }
+        }
+        return result
     }
 
     // MARK: - Submit button

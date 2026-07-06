@@ -223,6 +223,21 @@ extension EditorViewModel {
         return summary
     }
 
+    /// Import Finder files into the library and return only the newly-added assets
+    /// with their metadata loaded, ready to drop onto the timeline or preview.
+    func importFinderItemsForPlacement(_ urls: [URL]) async -> [MediaAsset] {
+        let existing = Set(mediaAssets.map(\.id))
+        _ = await importFinderItems(urls, into: nil)
+        let imported = mediaAssets.filter { !existing.contains($0.id) }
+        guard !imported.isEmpty else { return [] }
+        // Durations must be known before a drop plan can size clips; overlap the loads.
+        let loads = imported
+            .filter { $0.duration <= 0 }
+            .map { asset in Task { @MainActor in await asset.loadMetadata() } }
+        for load in loads { await load.value }
+        return imported
+    }
+
     @discardableResult
     private func performFinderImport(_ urls: [URL], into folderId: String?) async -> MediaImportSummary {
         let before = mediaLibraryUndoSnapshot()

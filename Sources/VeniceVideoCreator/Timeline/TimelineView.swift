@@ -1197,14 +1197,8 @@ final class TimelineView: NSView {
 
         let editor = self.editor
         Task { @MainActor [weak self] in
-            let existing = Set(editor.mediaAssets.map(\.id))
-            _ = await editor.importFinderItems(fileURLs, into: nil)
-            let imported = editor.mediaAssets.filter { !existing.contains($0.id) }
+            let imported = await editor.importFinderItemsForPlacement(fileURLs)
             guard !imported.isEmpty else { return }
-            // Durations must be known before the drop plan sizes clips.
-            for asset in imported where asset.duration <= 0 {
-                await asset.loadMetadata()
-            }
             self?.place(assets: imported, segments: [:], cursor: cursorTarget, atFrame: targetFrame, ripple: ripple)
         }
         return true

@@ -52,13 +52,8 @@ struct PreviewContainerView: View {
                             },
                             onFileURLs: { urls in
                                 Task { @MainActor in
-                                    let existing = Set(editor.mediaAssets.map(\.id))
-                                    _ = await editor.importFinderItems(urls, into: nil)
-                                    let imported = editor.mediaAssets.filter { !existing.contains($0.id) }
+                                    let imported = await editor.importFinderItemsForPlacement(urls)
                                     guard !imported.isEmpty else { return }
-                                    for asset in imported where asset.duration <= 0 {
-                                        await asset.loadMetadata()
-                                    }
                                     editor.insertAtPlayhead(assets: imported)
                                 }
                             }

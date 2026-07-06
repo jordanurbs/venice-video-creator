@@ -218,7 +218,7 @@ struct ModelsPane: View {
             Menu {
                 Button("Auto (first available)") { onSelect(nil) }
                 Divider()
-                ForEach(options, id: \.0) { id, name in
+                ForEach(sortedOptions(options), id: \.0) { id, name in
                     Button(name) { onSelect(id) }
                 }
             } label: {
@@ -238,6 +238,10 @@ struct ModelsPane: View {
             .disabled(options.isEmpty)
         }
         .padding(.vertical, AppTheme.Spacing.xs)
+    }
+
+    private func sortedOptions(_ options: [(String, String)]) -> [(String, String)] {
+        options.sorted { $0.1.localizedCaseInsensitiveCompare($1.1) == .orderedAscending }
     }
 
     private func currentLabel(selectionId: String?, options: [(String, String)]) -> String {
@@ -260,6 +264,7 @@ struct ModelsPane: View {
         func filtered(_ rows: [(String, String)]) -> [(id: String, name: String)] {
             rows.filter { q.isEmpty || $0.1.lowercased().contains(q) }
                 .map { (id: $0.0, name: $0.1) }
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         }
         return [
             ToggleSection(id: "image", title: "Image", rows: filtered(catalog.image.map { ($0.id, $0.displayName) })),

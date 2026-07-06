@@ -296,7 +296,7 @@ struct AssetThumbnailView: View {
         do {
             _ = try EditSubmitter.rerun(asset: asset, editor: editor)
         } catch {
-            editor.mediaPanelToast = MediaPanelToast(message: error.localizedDescription)
+            editor.editorToast = MediaPanelToast(message: error.localizedDescription)
         }
     }
 

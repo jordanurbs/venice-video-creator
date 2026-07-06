@@ -8,7 +8,7 @@ extension TimelineView {
         Task { @MainActor [weak self] in
             guard let self else { return }
             let report = await editor.syncAudio(referenceClipId: referenceClipId, targetClipIds: targetClipIds)
-            editor.mediaPanelToast = MediaPanelToast(
+            editor.editorToast = MediaPanelToast(
                 message: Self.synchronizeSummary(report),
                 kind: report.synced.isEmpty ? .warning : .success
             )

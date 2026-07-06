@@ -41,11 +41,11 @@ struct EditorToastOverlay: View {
         .shadow(AppTheme.Shadow.lg)
         .padding(.horizontal, AppTheme.Spacing.lgXl)
         .padding(.bottom, AppTheme.Spacing.lgXl)
-        .onTapGesture { editor.dismissMediaPanelToast() }
+        .onTapGesture { editor.dismissEditorToast() }
         .task(id: toast) {
             try? await Task.sleep(for: .seconds(4))
             guard !Task.isCancelled else { return }
-            editor.dismissMediaPanelToast()
+            editor.dismissEditorToast()
         }
     }
 }

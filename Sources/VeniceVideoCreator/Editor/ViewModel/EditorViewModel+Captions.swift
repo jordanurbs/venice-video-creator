@@ -71,11 +71,11 @@ extension EditorViewModel {
     var transcriptionReporter: Transcription.Reporter {
         Transcription.Reporter(
             veniceFallback: { [weak self] _ in
-                self?.mediaPanelToast = MediaPanelToast(message: "Venice transcription unavailable — used on-device recognition instead.")
+                self?.editorToast = MediaPanelToast(message: "Venice transcription unavailable — used on-device recognition instead.")
             },
             modelDownloadStart: { [weak self] locale in
                 let language = Locale.current.localizedString(forIdentifier: locale.identifier) ?? locale.identifier
-                self?.mediaPanelToast = MediaPanelToast(message: "Downloading the \(language) speech model — the first transcription takes longer.")
+                self?.editorToast = MediaPanelToast(message: "Downloading the \(language) speech model — the first transcription takes longer.")
             }
         )
     }
@@ -182,7 +182,7 @@ extension EditorViewModel {
         }
         if results.isEmpty, let firstError { throw firstError }
         if failedTranscriptions > 0, let firstError {
-            mediaPanelToast = MediaPanelToast(
+            editorToast = MediaPanelToast(
                 message: "Captions skipped \(failedTranscriptions) clip\(failedTranscriptions == 1 ? "" : "s"): \(firstError.localizedDescription)"
             )
         }

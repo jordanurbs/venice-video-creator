@@ -10,7 +10,7 @@ extension EditorViewModel {
         guard clip.mediaType == .video || clip.mediaType == .audio else { return }
         guard let sourceURL = mediaResolver.resolveURL(for: clip.mediaRef) else {
             Log.project.error("saveClipAsMedia: source missing for clip=\(clipId)")
-            mediaPanelToast = "Can't save this clip as media — its source file is offline."
+            editorToast = "Can't save this clip as media — its source file is offline."
             return
         }
         let sourceName = mediaResolver.displayName(for: clip.mediaRef)

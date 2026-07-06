@@ -337,7 +337,7 @@ struct PreviewContainerView: View {
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             let result = editor.relinkOfflineAssets(fromFolder: url)
-            editor.mediaPanelToast = "Relinked \(result.relinked) of \(result.total) offline media files."
+            editor.editorToast = "Relinked \(result.relinked) of \(result.total) offline media files."
         }
     }
 

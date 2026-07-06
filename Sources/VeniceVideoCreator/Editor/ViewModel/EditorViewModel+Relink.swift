@@ -7,7 +7,7 @@ extension EditorViewModel {
     func relinkAsset(id: String, to newURL: URL) {
         guard let asset = mediaAssets.first(where: { $0.id == id }) else { return }
         if let newType = ClipType(fileExtension: newURL.pathExtension.lowercased()), newType != asset.type {
-            mediaPanelToast = "Can't relink — \"\(newURL.lastPathComponent)\" is \(newType.trackLabel.lowercased()), not \(asset.type.trackLabel.lowercased())."
+            editorToast = "Can't relink — \"\(newURL.lastPathComponent)\" is \(newType.trackLabel.lowercased()), not \(asset.type.trackLabel.lowercased())."
             return
         }
         if applyRelink(id: id, to: newURL) {

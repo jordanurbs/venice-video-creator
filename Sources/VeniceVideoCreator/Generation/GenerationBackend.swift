@@ -150,14 +150,8 @@ final class VeniceJobStore {
     private var subjects: [String: CurrentValueSubject<BackendGenerationJob?, Never>] = [:]
     private var tasks: [String: Task<Void, Never>] = [:]
 
-    var activeCount: Int {
-        subjects.values.filter {
-            switch $0.value?.status {
-            case .queued, .running: true
-            default: false
-            }
-        }.count
-    }
+    /// In-flight jobs; a task is removed the moment its job settles.
+    var activeCount: Int { tasks.count }
 
     func publisher(for jobId: String) -> AnyPublisher<BackendGenerationJob?, Never>? {
         subjects[jobId]?.eraseToAnyPublisher()

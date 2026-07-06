@@ -172,18 +172,18 @@ extension EditorViewModel {
         return segments
     }
 
-    func dismissMediaPanelToast() {
-        mediaPanelToast = nil
+    func dismissEditorToast() {
+        editorToast = nil
     }
 
     @discardableResult
     func addMediaAsset(from url: URL, folderId: String? = nil) -> MediaAsset? {
         guard let type = ClipType(fileExtension: url.pathExtension.lowercased()) else {
-            mediaPanelToast = "Can't import \"\(url.lastPathComponent)\" — unsupported file type."
+            editorToast = "Can't import \"\(url.lastPathComponent)\" — unsupported file type."
             return nil
         }
         if type == .lottie, !LottieVideoGenerator.isLottie(at: url) {
-            mediaPanelToast = "Can't import \"\(url.lastPathComponent)\" — not a Lottie animation."
+            editorToast = "Can't import \"\(url.lastPathComponent)\" — not a Lottie animation."
             return nil
         }
         return addMediaAsset(from: url, type: type, folderId: folderId)
@@ -283,7 +283,7 @@ extension EditorViewModel {
 
         let rejected = plan.rejectedUnsupportedNames + plan.rejectedLottieNames
         if let first = rejected.first {
-            mediaPanelToast = rejected.count == 1
+            editorToast = rejected.count == 1
                 ? MediaPanelToast(message: "Can't import \"\(first)\" — unsupported file type.")
                 : MediaPanelToast(message: "Can't import \(rejected.count) files (\"\(first)\" and \(rejected.count - 1) more) — unsupported file types.")
         }
@@ -328,7 +328,7 @@ extension EditorViewModel {
             }.value
         } catch {
             Log.project.error("importPastedImageData: write failed \(error.localizedDescription)")
-            mediaPanelToast = "Couldn't save the pasted image: \(error.localizedDescription)"
+            editorToast = "Couldn't save the pasted image: \(error.localizedDescription)"
             return nil
         }
         return addMediaAsset(from: destURL)
@@ -545,7 +545,7 @@ extension EditorViewModel {
         Task.detached { [weak self] in
             guard (try? await asset.loadTracks(withMediaType: .video).first) != nil else {
                 Log.project.error("captureCurrentFrameToMedia: no video track")
-                await MainActor.run { self?.mediaPanelToast = "Couldn't capture the frame — no video at the playhead." }
+                await MainActor.run { self?.editorToast = "Couldn't capture the frame — no video at the playhead." }
                 return
             }
             let generator = AVAssetImageGenerator(asset: asset)
@@ -562,7 +562,7 @@ extension EditorViewModel {
                 videoCG = try await generator.image(at: time).image
             } catch {
                 Log.project.error("captureCurrentFrameToMedia: generate failed \(error.localizedDescription)")
-                await MainActor.run { self?.mediaPanelToast = "Couldn't capture the frame: \(error.localizedDescription)" }
+                await MainActor.run { self?.editorToast = "Couldn't capture the frame: \(error.localizedDescription)" }
                 return
             }
 
@@ -572,7 +572,7 @@ extension EditorViewModel {
                 let rep = NSBitmapImageRep(cgImage: videoCG)
                 guard let data = rep.representation(using: .png, properties: [:]) else {
                     Log.project.error("captureCurrentFrameToMedia: png encode failed")
-                    self.mediaPanelToast = "Couldn't capture the frame — image encoding failed."
+                    self.editorToast = "Couldn't capture the frame — image encoding failed."
                     return
                 }
                 Task { @MainActor [weak self] in

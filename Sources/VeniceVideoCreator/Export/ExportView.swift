@@ -85,6 +85,12 @@ struct ExportView: View {
                 editor.showExportDialog = false
             }
         }
+        // macOS dismisses the sheet on Esc without reliably routing through onExitCommand,
+        // which would leave the detached export rendering with an orphaned partial file.
+        // Cancelling on disappear guarantees a mid-export dismissal aborts and cleans up.
+        .onDisappear {
+            if service.isExporting { service.cancel() }
+        }
     }
 
     private func panelHeader(_ title: String) -> some View {

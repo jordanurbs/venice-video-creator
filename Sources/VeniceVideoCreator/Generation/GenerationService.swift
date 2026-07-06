@@ -20,8 +20,7 @@ final class GenerationService {
     private var resumedBackendJobIds: Set<String> = []
     /// Placeholder id -> the task driving its generation, for pre-submit cancellation.
     private var generationTasks: [String: Task<Void, Never>] = [:]
-    /// Primary placeholder ids of batches still in the prepare/upload phase (no backend
-    /// job yet). These are unresumable if the app quits, so the quit/relaunch guards count them.
+    /// Primary placeholder ids of batches still preparing/uploading (no backend job yet); unresumable on quit, so the quit/relaunch guards count them.
     private var preSubmitBatchIds: Set<String> = []
 
     /// Generations still preparing/uploading — invisible to the backend job store.
@@ -123,8 +122,7 @@ final class GenerationService {
                     onFailure: onFailure
                 )
             } catch {
-                // VeniceAPI wraps URLError, so a cancelled upload surfaces as .transport,
-                // not CancellationError; the task's cancellation flag is the reliable signal.
+                // VeniceAPI wraps URLError, so a cancelled upload surfaces as .transport, not CancellationError — trust the task's cancellation flag.
                 if Task.isCancelled || error is CancellationError {
                     for placeholder in placeholders {
                         updateGenerationMetadata(placeholder, editor: editor, status: .cancelled)

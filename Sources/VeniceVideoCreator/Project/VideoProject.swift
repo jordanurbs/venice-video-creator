@@ -342,8 +342,7 @@ final class VideoProject: NSDocument {
                oldURL.standardizedFileURL != newURL.standardizedFileURL {
                 MainActor.assumeIsolated {
                     ProjectRegistry.shared.updateURL(from: oldURL, to: newURL)
-                    // Save As must rebind the editor or generations keep
-                    // writing into the old package.
+                    // Save As must rebind the editor or generations keep writing into the old package.
                     editorViewModel.projectURL = newURL
                 }
             }
@@ -354,8 +353,7 @@ final class VideoProject: NSDocument {
 
     override func close() {
         super.close()
-        // A generation finishing after close must not autosave this zombie document
-        // over a reopened copy. Jobs keep running server-side; reopen resumes them.
+        // A generation finishing after close must not autosave this zombie over a reopened copy; jobs resume on reopen.
         isClosed = true
         editorViewModel.generationService.detachAll()
         editorViewModel.onProjectCheckpointRequired = nil

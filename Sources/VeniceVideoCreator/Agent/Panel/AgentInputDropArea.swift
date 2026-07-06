@@ -49,9 +49,7 @@ final class AgentInputDropHostingView<Content: View>: NSHostingView<Content> {
             onTargetChanged?(true)
             return .copy
         }
-        // A resolved string here is external plain text — let it fall through to the text
-        // view. In-app asset drags use .draggable(String), whose value is nil until drop,
-        // so when the type is advertised but not yet fulfilled, assume an asset drag.
+        // A resolved string is external plain text (falls through); in-app .draggable asset drags resolve only at drop, so an advertised-but-empty type is an asset drag.
         if let payload = pb.string(forType: .string) {
             guard payload.split(separator: "\n").contains(where: { MediaTab.assetId(fromDragString: String($0)) != nil }) else {
                 return []

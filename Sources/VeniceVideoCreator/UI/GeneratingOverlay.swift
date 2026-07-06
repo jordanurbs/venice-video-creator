@@ -13,8 +13,7 @@ struct GeneratingOverlay: View {
     var label: String = "Generating…"
     var size: Size = .thumbnail
 
-    // Seed from the generation's persisted start so the elapsed clock survives
-    // LazyVGrid recycling; nil callers (single, non-recycled overlays) start now.
+    // Seeded from the generation's persisted start so the elapsed clock survives LazyVGrid recycling.
     @State private var startedAt: Date
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -29,8 +28,7 @@ struct GeneratingOverlay: View {
             .shimmering(active: !reduceMotion)
     }
 
-    // Phase label + honest elapsed time; a fake progress bar makes bounded
-    // waits (video jobs run to 15 min) read as hangs.
+    // Phase label + honest elapsed time — a fake bar makes bounded waits (video jobs run to 15 min) read as hangs.
     private var content: some View {
         VStack(spacing: size.spacing) {
             Text(label)

@@ -62,7 +62,7 @@ alias, lazy `deletionImpactCount`, concurrent `refreshUsage`, alphabetical Model
 Still open (behavior-sensitive — do WITH a runtime pass):
 - Collapse the four near-identical drop NSViews onto one configurable host.
 - Share drop-commit choreography between `TimelineView.place()` and `EditorViewModel.insertAtPlayhead`.
-- Hoist the key-monitor modifier guard; share delete-enablement between `validateUserInterfaceItem` and `performScopedDelete`.
+- Hoist the key-monitor modifier guard (NOT a simple top-of-switch check — cases have heterogeneous modifier needs; preserve exactly which combos are intercepted). Delete-enablement sharing is DONE (`hasDeletableSelection`).
 - Perf (deferred): stop `rebuildToolTips()` in `TimelineHeaderView.draw()` (rects are built in `draw()` → verify tooltips aren't stale during resize/reorder drags); replace `waitWhileExportActive`'s 2s poll with continuations resumed in `endExport()` (a missed resume hangs indexing until relaunch — verify against a live export).
 
 ## Manual checklist — what YOU still need to test

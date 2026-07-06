@@ -203,8 +203,8 @@ enum VeniceGenerationRunner {
         queueId: String, model: String, downloadURL: String?, api: VeniceAPI
     ) async throws -> String {
         // 30-min ceiling matches the probe-verified harness poll window; slow
-        // lip-sync models (DaVinci MagiHuman, esp. at longer durations) routinely
-        // outrun a 15-min window. The job runs server-side and resumes by queue_id.
+        // models at longer durations routinely outrun a 15-min window. The job
+        // runs server-side and resumes by queue_id.
         let deadline = Date().addingTimeInterval(30 * 60)
         while Date() < deadline {
             let request = api.makeRequest(

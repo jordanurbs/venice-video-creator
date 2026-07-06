@@ -231,9 +231,9 @@ struct GenerationView: View {
         return imgFull && vidFull && audFull
     }
 
-    /// Models whose only reference input is a single audio track (Wan 2.7 i2v/t2v,
-    /// DaVinci MagiHuman). They get a dedicated labeled Audio slot instead of the
-    /// generic references grid, which otherwise reads as an image-reference zone.
+    /// Models whose only reference input is a single audio track (Wan 2.7 i2v/t2v).
+    /// They get a dedicated labeled Audio slot instead of the generic references
+    /// grid, which otherwise reads as an image-reference zone.
     private var isAudioOnlyReferenceModel: Bool {
         videoModel.maxReferenceAudios > 0
             && videoModel.maxReferenceImages == 0

@@ -39,18 +39,18 @@
 - **5.6 deprecation headers** — only if a live Venice response actually carries `Deprecation`/`Sunset`
   headers. Drop unless proven.
 
-### Data to hand the next session (unblocks the above + confirms MagiHuman)
+### Data to hand the next session (unblocks the above)
 Run these with your Venice key (base `https://api.venice.ai/api/v1`):
 ```bash
-# 1. Current video slugs + constraints (confirms MagiHuman is back; feeds 5.5)
+# 1. Current video slugs + constraints (feeds 5.5)
 curl -s "https://api.venice.ai/api/v1/models?type=all" -H "Authorization: Bearer $VENICE_API_KEY" \
   | jq '.data[] | select(.type=="video") | {id, constraints: .model_spec.constraints}'
 # 2. Response headers (feeds 5.6)
 curl -s -D - -o /dev/null "https://api.venice.ai/api/v1/models?type=all" -H "Authorization: Bearer $VENICE_API_KEY"
 ```
-> NOTE: `davinci-magihuman-image-to-video` transiently vanished from your live catalog. The app has
-> **no model filter** — the list is 100% live from `models?type=all` — so that was Venice pulling the
-> model, not a code change. Re-run #1 to confirm it's back before retesting MagiHuman.
+> NOTE: `davinci-magihuman-image-to-video` was **removed from Venice's live catalog** (confirmed gone
+> 2026-07-06). Its entry was dropped from the harness registry and the matching `magihuman` branches
+> from the app's `VideoModelCapabilities` in the same change. Restore both if Venice re-adds it.
 
 ### Phase 4 remainder
 Preserve the drop architecture exactly (AppKit parent + SwiftUI leaf `.onDrop`).
@@ -83,9 +83,6 @@ transport/playback, bare-key menu guard, elapsed timer.
 4. **Preview drop** — drag a media tile onto the preview canvas → highlights + accepts. Repeat over
    the timeline, media panel, and agent-input drop zones.
 5. **Batch-sibling cancel** — generate a 4-image batch, delete ONE tile → the other three keep going.
-6. **MagiHuman lip-sync** (once Venice serves it again) — retest the 30-min poll fix; try **5–10s**
-   (its native range) first, then 15s. If 15s still times out at ~30 min, the Venice path is genuinely
-   too slow → cap MagiHuman's duration in the registry (per the sync rule).
 
 **Optional (new this session):** click-to-import on reference slots; the Audio slot waveform icon.
 

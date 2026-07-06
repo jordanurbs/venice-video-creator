@@ -53,13 +53,12 @@ struct VideoModelCapabilitiesTests {
 @Suite("VideoModelCapabilities.audioInput")
 struct VideoModelAudioCapabilityTests {
 
-    @Test func wanAndMagihumanAcceptAudioUrl() {
+    @Test func wanAcceptsAudioUrl() {
         for id in [
             "wan-2-7-image-to-video", "wan-2-7-text-to-video", "wan-2-7-video-to-video",
             "wan-2-7-spicy-image-to-video",
             "wan-2.6-image-to-video", "wan-2.6-flash-image-to-video", "wan-2.6-reference-to-video",
             "wan-2.5-preview-image-to-video",
-            "davinci-magihuman-image-to-video",
         ] {
             #expect(VideoModelCapabilities.audioInputCapable(id: id), "expected audio_url for \(id)")
         }
@@ -76,9 +75,8 @@ struct VideoModelAudioCapabilityTests {
         }
     }
 
-    @Test func wan27AndMagihumanEnforceThreeSecondFloor() {
+    @Test func wan27EnforcesThreeSecondFloor() {
         #expect(VideoModelCapabilities.minAudioInputSeconds(id: "wan-2-7-image-to-video") == 3)
-        #expect(VideoModelCapabilities.minAudioInputSeconds(id: "davinci-magihuman-image-to-video") == 3)
         // Wan 2.6 / 2.5 accept audio but declare no minimum.
         #expect(VideoModelCapabilities.minAudioInputSeconds(id: "wan-2.6-image-to-video") == nil)
     }

@@ -1,0 +1,39 @@
+---
+description: Keep the Venice harness registry and the Creator app's model capabilities in sync
+alwaysApply: true
+---
+
+# Harness ↔ Creator app: capability parity
+
+The Creator app builds its catalog live from `VeniceAPI.fetchCatalog()`, but Venice's
+`/models` payload does NOT expose several capabilities. Those live as family-substring
+allowlists in `Sources/VeniceVideoCreator/Generation/Catalog/VideoModelCapabilities.swift`
+(`supportsEndImage`, `audioInputCapable`, `minAudioInputSeconds`), ported from the
+probe-verified harness registry at
+`~/Projects/video-proj/venice-video-harness/src/venice/models.ts` (`VIDEO_MODELS`).
+
+**These two MUST stay in sync.** Whenever you add or change a video-model capability in
+either place, update the other in the same change:
+
+- Harness `supportsEndImage` / `supportsElements` / `supportsSceneImages` / `audioInput` /
+  `minAudioInputSec` ↔ the matching `VideoModelCapabilities` allowlist.
+- Keep the app keyed off Venice slugs via family substrings, never hardcoded full ids, so
+  live-catalog drift is tolerated.
+
+## Authority + safety rules
+
+- **Live API truth beats the harness.** If a real Venice response contradicts the registry
+  (e.g. a queue 400), fix BOTH the harness entry and the app allowlist, and record the probe
+  date + exact error in a comment. The harness is a mirror, not the source — it can be wrong.
+- **Never enable a capability a model might not have.** Unknown / unlisted ids fall through to
+  the conservative default (capability off). Prefer disabling a whole uncertain family over
+  risking a wasted paid generation.
+- Any capability that changes a paid request body is opt-in behind a flag defaulting to
+  current behavior (non-regression is a hard constraint).
+
+## Worked example (2026-07-06)
+
+Harness marked the Wan 2.7 i2v family `supportsEndImage: true`, but the live queue rejected
+`end_image_url` ("This model does not support end_image_url"). Fix: set `supportsEndImage: false`
+on the Wan 2.7 entries in `models.ts` AND drop the `wan-2-7` branch from
+`VideoModelCapabilities.supportsEndImage`, with a comment citing the live probe in both files.

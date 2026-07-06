@@ -12,7 +12,8 @@ struct FolderTileView: View {
     let isSelected: Bool
     let isDropHover: Bool
     let childCount: Int
-    let deleteImpactCount: Int
+    /// Computed only when the context menu opens — the blast radius is an O(folders×assets) walk.
+    let deleteImpactCount: () -> Int
     @Binding var isRenaming: Bool
     let onTap: () -> Void
     let onOpen: () -> Void
@@ -124,7 +125,7 @@ struct FolderTileView: View {
         Button("Open") { onOpen() }
         Button("Rename") { beginRename() }
         Divider()
-        Button(folderDeleteMenuTitle(assetCount: deleteImpactCount), role: .destructive) { onDelete() }
+        Button(folderDeleteMenuTitle(assetCount: deleteImpactCount()), role: .destructive) { onDelete() }
     }
 
     private func beginRename() {

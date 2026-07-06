@@ -406,7 +406,7 @@ extension MediaTab {
                 isSelected: editor.selectedFolderIds.contains(folder.id),
                 isDropHover: dropTargetFolderId == folder.id,
                 childCount: editor.subfolders(of: folder.id).count + editor.assetsIn(folderId: folder.id).count,
-                deleteImpactCount: editor.deletionImpactCount(forFolderIds: [folder.id]),
+                deleteImpactCount: { editor.deletionImpactCount(forFolderIds: [folder.id]) },
                 isRenaming: Binding(
                     get: { renamingFolderId == folder.id },
                     set: { renamingFolderId = $0 ? folder.id : nil }

@@ -75,17 +75,24 @@ final class AccountService {
         isLoadingUsage = true
         defer { isLoadingUsage = false }
 
+        async let limitsResult: Result<VeniceRateLimitInfo, Error> = {
+            do { return .success(try await api.rateLimitInfo()) }
+            catch { return .failure(error) }
+        }()
+        async let usageResult = try? await api.usageAnalytics(lookbackDays: lookbackDays)
+
         let limits: VeniceRateLimitInfo?
-        do {
-            limits = try await api.rateLimitInfo()
-        } catch VeniceAPI.VeniceError.http(let status, _) where status == 401 || status == 403 {
+        switch await limitsResult {
+        case .success(let info):
+            limits = info
+        case .failure(VeniceAPI.VeniceError.http(let status, _)) where status == 401 || status == 403:
             usageError = "Venice rejected this key. Check it in Settings."
             veniceUsage = nil
             return
-        } catch {
+        case .failure:
             limits = nil
         }
-        let usage = try? await api.usageAnalytics(lookbackDays: lookbackDays)
+        let usage = await usageResult
 
         if limits == nil && usage == nil {
             usageError = "Couldn't reach Venice to load the balance. Check your connection."

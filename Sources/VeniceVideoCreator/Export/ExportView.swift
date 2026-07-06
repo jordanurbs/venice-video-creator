@@ -76,10 +76,14 @@ struct ExportView: View {
         .task {
             veniceSummary = computeVeniceSummary()
         }
-        // Esc dismisses the sheet; an in-progress export keeps running. Only the explicit
-        // "Cancel Export" button aborts and discards the partial file.
+        // Esc mirrors the Cancel button: cancel an in-progress export (stop, discard the
+        // partial file, show "Export cancelled"); otherwise dismiss the sheet.
         .onExitCommand {
-            editor.showExportDialog = false
+            if service.isExporting {
+                service.cancel()
+            } else {
+                editor.showExportDialog = false
+            }
         }
     }
 

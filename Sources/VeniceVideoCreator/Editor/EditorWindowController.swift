@@ -47,6 +47,8 @@ final class EditorWindowController: NSWindowController {
         // No command/option/control held (shift allowed) — the guard shared by
         // transport, selection, range-mark, and media-navigation shortcuts.
         let noCommandModifiers = mods.intersection([.command, .option, .control]).isEmpty
+        // Command held with no option/control (shift allowed) — timeline zoom + jump.
+        let commandOnly = cmd && mods.intersection([.option, .control]).isEmpty
 
         if editorViewModel.focusedPanel == .media, !shift,
            noCommandModifiers,
@@ -75,14 +77,24 @@ final class EditorWindowController: NSWindowController {
             return true
 
         case 123: // Left arrow
+            if commandOnly { editorViewModel.seekToStart(); return true }
             guard noCommandModifiers else { return false }
             if shift { editorViewModel.skipBackward() } else { editorViewModel.stepBackward() }
             return true
 
         case 124: // Right arrow
+            if commandOnly { editorViewModel.seekToEnd(); return true }
             guard noCommandModifiers else { return false }
             if shift { editorViewModel.skipForward() } else { editorViewModel.stepForward() }
             return true
+
+        case 24: // = / + — zoom the timeline in (⌘=)
+            if commandOnly { editorViewModel.zoomTimelineIn(); return true }
+            return false
+
+        case 27: // - — zoom the timeline out (⌘-)
+            if commandOnly { editorViewModel.zoomTimelineOut(); return true }
+            return false
 
         case 51: // Delete/Backspace
             return performScopedDelete(ripple: shift)

@@ -328,6 +328,12 @@ final class EditorViewModel {
     func stepBackward() { seekToFrame(currentFrame - 1) }
     func skipForward(frames: Int = 5) { seekToFrame(currentFrame + frames) }
     func skipBackward(frames: Int = 5) { seekToFrame(currentFrame - frames) }
+    func seekToStart() { seekToFrame(0) }
+    func seekToEnd() { seekToFrame(timeline.totalFrames) }
+
+    func zoomTimelineIn() { setTimelineZoom(zoomScale * Zoom.toolbarStepFactor) }
+    func zoomTimelineOut() { setTimelineZoom(zoomScale / Zoom.toolbarStepFactor) }
+    func setTimelineZoom(_ scale: Double) { zoomScale = min(Zoom.max, max(minZoomScale, scale)) }
 
     // MARK: - Shared infrastructure
 

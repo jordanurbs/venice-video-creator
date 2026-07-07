@@ -101,15 +101,11 @@ struct ToolbarView: View {
     }
 
     private func zoomOut() {
-        setZoomScale(editor.zoomScale / Zoom.toolbarStepFactor)
+        editor.zoomTimelineOut()
     }
 
     private func zoomIn() {
-        setZoomScale(editor.zoomScale * Zoom.toolbarStepFactor)
-    }
-
-    private func setZoomScale(_ zoomScale: Double) {
-        editor.zoomScale = min(Zoom.max, max(editor.minZoomScale, zoomScale))
+        editor.zoomTimelineIn()
     }
 
     private func undo() {

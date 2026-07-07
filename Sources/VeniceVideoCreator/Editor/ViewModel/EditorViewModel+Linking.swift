@@ -301,25 +301,45 @@ extension EditorViewModel {
 
     /// Drop on the preview canvas: place at the playhead as a timeline drop would.
     func insertAtPlayhead(assets: [MediaAsset], segments: [String: ClosedRange<Double>] = [:]) {
-        guard !assets.isEmpty else { return }
-        let targetFrame = currentFrame
         let cursor: TrackDropTarget = timeline.tracks.isEmpty ? .newTrackAt(0) : .existingTrack(0)
+        commitDrop(assets: assets, segments: segments, cursor: cursor, atFrame: currentFrame, ripple: false)
+    }
 
+    /// Shared drop-commit choreography for the timeline drop and the playhead
+    /// insert: one undo group that resolves the plan, materializes tracks, and
+    /// inserts visual then audio-only clips, behind the project-settings check.
+    func commitDrop(
+        assets: [MediaAsset],
+        segments: [String: ClosedRange<Double>],
+        cursor: TrackDropTarget,
+        atFrame targetFrame: Int,
+        ripple: Bool
+    ) {
+        guard !assets.isEmpty else { return }
         let operation: @MainActor () -> Void = { [weak self] in
             guard let self else { return }
             self.undoManager?.beginUndoGrouping()
             let plan = self.resolveDropPlan(cursor: cursor, assets: assets, atFrame: targetFrame, segments: segments)
             let (visualIdx, audioIdx) = self.materialize(plan: plan)
+
+            let insert: ([MediaAsset], Int, Int?) -> Void = { assets, trackIdx, linkedAudio in
+                if ripple {
+                    self.rippleInsertClips(assets: assets, trackIndex: trackIdx, atFrame: targetFrame, segments: segments)
+                } else {
+                    self.addClips(assets: assets, trackIndex: trackIdx, startFrame: targetFrame,
+                                  linkedAudioTrackIndex: linkedAudio, segments: segments)
+                }
+            }
+
             let visualAssets = plan.visualAssets
             if !visualAssets.isEmpty, let vIdx = visualIdx {
-                self.addClips(assets: visualAssets, trackIndex: vIdx, startFrame: targetFrame,
-                              linkedAudioTrackIndex: audioIdx, segments: segments)
+                insert(visualAssets, vIdx, audioIdx)
             }
             let audioOnlyAssets = plan.audioOnlyAssets
             if !audioOnlyAssets.isEmpty, let aIdx = audioIdx {
-                self.addClips(assets: audioOnlyAssets, trackIndex: aIdx, startFrame: targetFrame,
-                              linkedAudioTrackIndex: nil, segments: segments)
+                insert(audioOnlyAssets, aIdx, nil)
             }
+
             self.undoManager?.endUndoGrouping()
             self.undoManager?.setActionName("Add Clips")
         }

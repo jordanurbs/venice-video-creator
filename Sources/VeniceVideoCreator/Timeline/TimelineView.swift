@@ -1211,36 +1211,7 @@ final class TimelineView: NSView {
         atFrame targetFrame: Int,
         ripple: Bool
     ) {
-        let editor = self.editor
-
-        let operation: @MainActor () -> Void = {
-            editor.undoManager?.beginUndoGrouping()
-
-            let plan = editor.resolveDropPlan(cursor: cursor, assets: assets, atFrame: targetFrame, segments: segments)
-            let (visualIdx, audioIdx) = editor.materialize(plan: plan)
-
-            let insert: ([MediaAsset], Int, Int?) -> Void = { assets, trackIdx, linkedAudio in
-                if ripple {
-                    editor.rippleInsertClips(assets: assets, trackIndex: trackIdx, atFrame: targetFrame, segments: segments)
-                } else {
-                    editor.addClips(assets: assets, trackIndex: trackIdx, startFrame: targetFrame, linkedAudioTrackIndex: linkedAudio, segments: segments)
-                }
-            }
-
-            let visualAssets = plan.visualAssets
-            if !visualAssets.isEmpty, let vIdx = visualIdx {
-                insert(visualAssets, vIdx, audioIdx)
-            }
-            let audioOnlyAssets = plan.audioOnlyAssets
-            if !audioOnlyAssets.isEmpty, let aIdx = audioIdx {
-                insert(audioOnlyAssets, aIdx, nil)
-            }
-
-            editor.undoManager?.endUndoGrouping()
-            editor.undoManager?.setActionName("Add Clips")
-        }
-
-        editor.addClipsWithSettingsCheck(assets: assets, operation: operation)
+        editor.commitDrop(assets: assets, segments: segments, cursor: cursor, atFrame: targetFrame, ripple: ripple)
         needsDisplay = true
     }
 }

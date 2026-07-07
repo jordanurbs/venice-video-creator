@@ -121,7 +121,33 @@ final class TimelineHeaderView: NSView {
             ctx.fill(NSRect(x: 0, y: dividerY - 1, width: headerWidth, height: 2))
         }
 
-        rebuildToolTips()
+        // Tooltip rects come from the layout computed just above, but the layout
+        // is unchanged across most redraws (highlight-only repaints, reorder ghost
+        // frames). Rebuild only when the geometry or the tooltip text can differ,
+        // so drags don't churn removeAllToolTips/addToolTip every frame.
+        let signature = toolTipSignature()
+        if signature != lastToolTipSignature {
+            lastToolTipSignature = signature
+            rebuildToolTips()
+        }
+    }
+
+    private var lastToolTipSignature: Int = 0
+
+    private func toolTipSignature() -> Int {
+        var hasher = Hasher()
+        hasher.combine(bounds.origin.y)
+        hasher.combine(bounds.width)
+        hasher.combine(bounds.height)
+        for track in editor.timeline.tracks {
+            hasher.combine(track.id)
+            hasher.combine(track.type)
+            hasher.combine(track.displayHeight)
+            hasher.combine(track.muted)
+            hasher.combine(track.hidden)
+            hasher.combine(track.syncLocked)
+        }
+        return hasher.finalize()
     }
 
     // MARK: - Accessibility & tooltips

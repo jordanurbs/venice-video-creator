@@ -7,64 +7,39 @@ struct MediaPanelDropArea<Content: View>: NSViewRepresentable {
     var onTextDrop: ((String) -> Void)?
     @ViewBuilder let content: () -> Content
 
-    func makeNSView(context: Context) -> DropHostingView<Content> {
-        let view = DropHostingView(rootView: content())
-        view.onTargetChanged = { isTargeted = $0 }
-        view.onDrop = onDrop
-        view.onTextDrop = onTextDrop
+    func makeNSView(context: Context) -> NativeDropHostingView<Content> {
+        let view = NativeDropHostingView(rootView: content())
+        configure(view)
         return view
     }
 
-    func updateNSView(_ nsView: DropHostingView<Content>, context: Context) {
+    func updateNSView(_ nsView: NativeDropHostingView<Content>, context: Context) {
         nsView.rootView = content()
-        nsView.onTargetChanged = { isTargeted = $0 }
-        nsView.onDrop = onDrop
-        nsView.onTextDrop = onTextDrop
-    }
-}
-
-final class DropHostingView<Content: View>: NSHostingView<Content> {
-    var onTargetChanged: ((Bool) -> Void)?
-    var onDrop: (([URL]) -> Void)?
-    var onTextDrop: ((String) -> Void)?
-
-    required init(rootView: Content) {
-        super.init(rootView: rootView)
-        registerForDraggedTypes([.fileURL, .string])
+        configure(nsView)
     }
 
-    @MainActor required dynamic init?(coder aDecoder: NSCoder) {
-        fatalError("init(coder:) not supported")
-    }
-
-    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        // Accept on advertised type, not value: SwiftUI .draggable(String) fulfills the
-        // string promise lazily, so it's nil at drag-enter. The payload is read at drop.
-        let pb = sender.draggingPasteboard
-        let accepts = pb.availableType(from: [.fileURL]) != nil
-            || (onTextDrop != nil && pb.availableType(from: [.string]) != nil)
-        guard accepts else { return [] }
-        onTargetChanged?(true)
-        return .copy
-    }
-
-    override func draggingExited(_ sender: (any NSDraggingInfo)?) {
-        onTargetChanged?(false)
-    }
-
-    override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool { true }
-
-    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        onTargetChanged?(false)
-        let urls = sender.droppedFileURLs
-        if !urls.isEmpty {
-            onDrop?(urls)
-            return true
+    private func configure(_ view: NativeDropHostingView<Content>) {
+        view.onTargetChanged = { isTargeted = $0 }
+        let onDrop = onDrop
+        let onTextDrop = onTextDrop
+        view.accepts = { sender in
+            // Accept on advertised type, not value: SwiftUI .draggable(String) fulfills the
+            // string promise lazily, so it's nil at drag-enter. The payload is read at drop.
+            let pb = sender.draggingPasteboard
+            return pb.availableType(from: [.fileURL]) != nil
+                || (onTextDrop != nil && pb.availableType(from: [.string]) != nil)
         }
-        if let onTextDrop, let text = sender.draggingPasteboard.string(forType: .string) {
-            onTextDrop(text)
-            return true
+        view.perform = { sender in
+            let urls = sender.droppedFileURLs
+            if !urls.isEmpty {
+                onDrop(urls)
+                return true
+            }
+            if let onTextDrop, let text = sender.draggingPasteboard.string(forType: .string) {
+                onTextDrop(text)
+                return true
+            }
+            return false
         }
-        return false
     }
 }

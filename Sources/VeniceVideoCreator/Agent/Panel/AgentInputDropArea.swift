@@ -8,76 +8,45 @@ struct AgentInputDropArea<Content: View>: NSViewRepresentable {
     let onFileURLs: ([URL]) -> Void
     @ViewBuilder let content: () -> Content
 
-    func makeNSView(context: Context) -> AgentInputDropHostingView<Content> {
-        let view = AgentInputDropHostingView(rootView: content())
-        view.onTargetChanged = { isTargeted = $0 }
-        view.onAssetIds = onAssetIds
-        view.onFileURLs = onFileURLs
+    func makeNSView(context: Context) -> NativeDropHostingView<Content> {
+        let view = NativeDropHostingView(rootView: content())
+        configure(view)
         return view
     }
 
-    func updateNSView(_ nsView: AgentInputDropHostingView<Content>, context: Context) {
+    func updateNSView(_ nsView: NativeDropHostingView<Content>, context: Context) {
         nsView.rootView = content()
-        nsView.onTargetChanged = { isTargeted = $0 }
-        nsView.onAssetIds = onAssetIds
-        nsView.onFileURLs = onFileURLs
-    }
-}
-
-final class AgentInputDropHostingView<Content: View>: NSHostingView<Content> {
-    var onTargetChanged: ((Bool) -> Void)?
-    var onAssetIds: (([String]) -> Void)?
-    var onFileURLs: (([URL]) -> Void)?
-
-    required init(rootView: Content) {
-        super.init(rootView: rootView)
-        registerForDraggedTypes([.fileURL, .string])
+        configure(nsView)
     }
 
-    @MainActor required dynamic init?(coder aDecoder: NSCoder) {
-        fatalError("init(coder:) not supported")
-    }
-
-    private func assetIds(_ sender: any NSDraggingInfo) -> [String] {
+    private static func assetIds(_ sender: any NSDraggingInfo) -> [String] {
         guard let payload = sender.draggingPasteboard.string(forType: .string) else { return [] }
         return payload.split(separator: "\n").compactMap { MediaTab.assetId(fromDragString: String($0)) }
     }
 
-    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        let pb = sender.draggingPasteboard
-        if pb.availableType(from: [.fileURL]) != nil {
-            onTargetChanged?(true)
-            return .copy
-        }
-        // A resolved string is external plain text (falls through); in-app .draggable asset drags resolve only at drop, so an advertised-but-empty type is an asset drag.
-        if let payload = pb.string(forType: .string) {
-            guard payload.split(separator: "\n").contains(where: { MediaTab.assetId(fromDragString: String($0)) != nil }) else {
-                return []
+    private func configure(_ view: NativeDropHostingView<Content>) {
+        view.onTargetChanged = { isTargeted = $0 }
+        let onAssetIds = onAssetIds
+        let onFileURLs = onFileURLs
+        view.accepts = { sender in
+            let pb = sender.draggingPasteboard
+            if pb.availableType(from: [.fileURL]) != nil { return true }
+            // A resolved string is external plain text (falls through); in-app .draggable asset drags resolve only at drop, so an advertised-but-empty type is an asset drag.
+            if let payload = pb.string(forType: .string) {
+                return payload.split(separator: "\n").contains { MediaTab.assetId(fromDragString: String($0)) != nil }
             }
-            onTargetChanged?(true)
-            return .copy
+            return pb.availableType(from: [.string]) != nil
         }
-        guard pb.availableType(from: [.string]) != nil else { return [] }
-        onTargetChanged?(true)
-        return .copy
-    }
-
-    override func draggingExited(_ sender: (any NSDraggingInfo)?) {
-        onTargetChanged?(false)
-    }
-
-    override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool { true }
-
-    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        onTargetChanged?(false)
-        let ids = assetIds(sender)
-        if !ids.isEmpty {
-            onAssetIds?(ids)
+        view.perform = { sender in
+            let ids = Self.assetIds(sender)
+            if !ids.isEmpty {
+                onAssetIds(ids)
+                return true
+            }
+            let urls = sender.droppedFileURLs
+            guard !urls.isEmpty else { return false }
+            onFileURLs(urls)
             return true
         }
-        let urls = sender.droppedFileURLs
-        guard !urls.isEmpty else { return false }
-        onFileURLs?(urls)
-        return true
     }
 }

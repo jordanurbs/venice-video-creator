@@ -44,10 +44,12 @@ final class EditorWindowController: NSWindowController {
         let mods = event.modifierFlags
         let shift = mods.contains(.shift)
         let cmd = mods.contains(.command)
-        let rangeMarkShortcut = mods.intersection([.command, .option, .control]).isEmpty
+        // No command/option/control held (shift allowed) — the guard shared by
+        // transport, selection, range-mark, and media-navigation shortcuts.
+        let noCommandModifiers = mods.intersection([.command, .option, .control]).isEmpty
 
         if editorViewModel.focusedPanel == .media, !shift,
-           mods.intersection([.command, .option, .control]).isEmpty,
+           noCommandModifiers,
            let direction = mediaArrowDirection(for: event.keyCode) {
             editorViewModel.moveMediaSelection(direction: direction)
             return true
@@ -60,26 +62,25 @@ final class EditorWindowController: NSWindowController {
 
         switch event.keyCode {
         case 0: // A key
-            if editorViewModel.focusedPanel == .timeline,
-               mods.intersection([.command, .option, .control]).isEmpty {
+            if editorViewModel.focusedPanel == .timeline, noCommandModifiers {
                 editorViewModel.selectForwardFromCurrentSelection(scope: shift ? .allTracks : .track)
                 return true
             }
             return false
 
         case 49: // Space
-            guard mods.intersection([.command, .option, .control]).isEmpty,
+            guard noCommandModifiers,
                   editorViewModel.tour.currentStep == nil else { return false }
             editorViewModel.togglePlayback()
             return true
 
         case 123: // Left arrow
-            guard mods.intersection([.command, .option, .control]).isEmpty else { return false }
+            guard noCommandModifiers else { return false }
             if shift { editorViewModel.skipBackward() } else { editorViewModel.stepBackward() }
             return true
 
         case 124: // Right arrow
-            guard mods.intersection([.command, .option, .control]).isEmpty else { return false }
+            guard noCommandModifiers else { return false }
             if shift { editorViewModel.skipForward() } else { editorViewModel.stepForward() }
             return true
 
@@ -101,14 +102,14 @@ final class EditorWindowController: NSWindowController {
             return false
 
         case 34: // I key
-            if rangeMarkShortcut {
+            if noCommandModifiers {
                 editorViewModel.markTimelineRangeStart()
                 return true
             }
             return false
 
         case 31: // O key
-            if rangeMarkShortcut {
+            if noCommandModifiers {
                 editorViewModel.markTimelineRangeEnd()
                 return true
             }

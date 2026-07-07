@@ -46,7 +46,7 @@ Agent-driven `cua-driver` already verified: transport/playback + isPlaying sync,
 - **End-frame (5.2):** on a Kling i2v or Wan 2.7 i2v model, confirm the last-frame slot appears; set start + end image, generate → clip morphs start→end. ❌ if the slot is missing or the gen errors about the end frame.
 - **Wan lip-sync (5.3):** on Wan 2.7 i2v, confirm the audio-reference slot appears. Test A: attach a **<3s** clip → no "too short" error, renders with lip-sync (auto-padded to 3s). Test B: attach a **≥3s** clip → lip-sync works, audio not altered oddly.
 
-### Phase 4 — remainder (behavior-sensitive; do WITH a runtime pass)
+### Phase 4 — remainder ✅ COMPLETE (2026-07-07, code done + 886 green; awaiting the runtime pass below)
 
 The drop architecture's behavior must be preserved exactly (AppKit parent + SwiftUI leaf `.onDrop`).
 
@@ -56,11 +56,12 @@ The drop architecture's behavior must be preserved exactly (AppKit parent + Swif
 - ✅ Perf: `deletionImpactCount` is now a lazy `() -> Int` computed only when the folder context menu opens (was O(F×(F+A)) per grid render); `AccountService.refreshUsage` fetches rate limits + usage analytics concurrently again (preserving the 401/403 early exit).
 - ✅ Extracted `EditorWindowController.hasDeletableSelection` so menu-item validation and delete gating share one per-panel selection check (pure refactor).
 
-**Still open (behavior-sensitive — do WITH a runtime pass):**
-- Collapse the four near-identical drop NSViews onto one configurable host (`MediaPanelDropArea`/`DropTargetOverlay` pattern) — they have subtly different accept ordering / fall-through.
-- Share the drop-commit choreography between `TimelineView.place()` and `EditorViewModel.insertAtPlayhead` (undo grouping + plan/materialize/addClips).
-- Hoist the repeated modifier guard in `EditorWindowController`'s key monitor — NOT a simple top-of-switch check: the cases have heterogeneous modifier requirements (C/V want `!cmd`, I/O/`[`/`]`/backtick disallow shift, arrows/space allow shift), so any consolidation must preserve exactly which combos are intercepted. Verify at runtime.
-- Perf (deferred — need eyes on timing/concurrency): stop calling `rebuildToolTips()` from `TimelineHeaderView.draw()` (rebuild on track mutation — but tooltip rects are computed in `draw()`, so tooltip staleness during resize/reorder drags must be verified); replace `ExportCoordinator.waitWhileExportActive`'s 2s poll with continuations resumed in `endExport()` (a missed resume hangs search indexing until relaunch — verify with a live export running concurrently with indexing).
+**Done (2026-07-07, behavior-sensitive — verify via the runtime checklist below):**
+- ✅ Collapsed the four native drop NSViews (media panel / preview / agent input / generation) onto one closure-driven `NativeDropHostingView`; each representable supplies its exact accept/perform logic + `passthroughHitTest`, so behavior is preserved verbatim. Call sites unchanged.
+- ✅ Shared the drop-commit choreography via `EditorViewModel.commitDrop(...)`; `TimelineView.place()` delegates (still redraws) and `insertAtPlayhead` calls in with `ripple: false`.
+- ✅ Hoisted the repeated `mods.intersection([.command,.option,.control]).isEmpty` guard into one `noCommandModifiers` local (identical semantics — shift still allowed; the `!cmd` and shift-excluding cases untouched).
+- ✅ `TimelineHeaderView` rebuilds tooltips only when a bounds+per-track-state signature changes, instead of every `draw()` (rects still come from the current draw pass).
+- ✅ `ExportCoordinator.waitWhileExportActive()` now suspends on a checked continuation resumed in `endExport()` (no 2s poll latency); cancellation removes the waiter and throws; recheck-or-store runs on the MainActor before any suspension so it can't race `endExport()`.
 
 ### Phase 5.5 — structured `elements` / `scene_image_urls` (highest risk; needs live verify)
 
@@ -100,6 +101,7 @@ _One line per session: date, items completed, surprises._
 - 2026-07-06 — Phase 5.2 (`supportsLastFrame`, i2v-gated allowlist) + 5.3 (Wan/MagiHuman `audio_url` + native `AudioSilencePadder`). Export-based padder test dropped (destabilized the parallel suite; passed in isolation). Needs live Wan lip-sync + end-frame confirmation. 886 green.
 - 2026-07-06 — Phase 4 conventions sweep (multi-line comment trims + `AppTheme.IconSize.xsSm` for nav-button width). Re-verified `VideoModelCapabilities` against the freshly-synced harness registry — still correct; new models fall through to safe defaults. Trimmed this plan (shipped detail is in git history). 886 green, CI validated.
 - 2026-07-06 (late) — **Export cancel confirmed fixed** (Esc + button both discard the partial): `cancel()` now calls `AVAssetExportSession.cancelExport()` explicitly (Task cancel alone doesn't stop the async render), and cancel-on-`onDisappear` covers macOS dismissing the `.sheet` on Esc without routing through `onExitCommand`. Wrote `HANDOFF.md` (open plan + manual checklist). 886 green.
+- 2026-07-07 — **Phase 4 remainder complete** (behavior-sensitive, done with Jordan present to runtime-test): collapsed the four native drop NSViews onto one `NativeDropHostingView`; shared drop-commit via `commitDrop`; hoisted the key-monitor guard to `noCommandModifiers`; tooltip rebuild now signature-gated; `waitWhileExportActive` uses continuations resumed in `endExport()`. 886 green. Runtime checklist handed off (drops on all zones, undo of a drop, keyboard shortcuts incl. shift variants, timeline track tooltips during resize/reorder, and search indexing resuming right after an export).
 - 2026-07-06 — Extracted `EditorWindowController.hasDeletableSelection` (Delete-enablement single source of truth; pure refactor, 886 green). Modifier-guard hoist left open — cases have heterogeneous modifier needs, so it needs a runtime pass.
 - 2026-07-06 — **Removed DaVinci MagiHuman** (Venice pulled it from the live catalog): dropped the `magihuman` branches from `VideoModelCapabilities` (+ tests/comments/agent tool desc) and the model entry from the harness registry, its `MODELS_SUPPORTING_AUDIO_INPUT` set, coverage test, and README (per the capability-sync rule). Kept the 30-min video poll window (still matches the harness; benefits any slow model). 886 green; harness coverage test green.
 - 2026-07-06 — Phase 4 safe subset (no runtime pass): sorted Models-settings dropdowns alphabetically; extracted `importFinderItemsForPlacement` (overlapping metadata loads); `activeCount` → `tasks.count`; retired the `mediaPanelToast` alias; lazy `deletionImpactCount`; concurrent `refreshUsage`. Deferred `rebuildToolTips`-out-of-`draw()` and `waitWhileExportActive` continuations to a runtime pass (tooltip-staleness / indexing-hang risk). 886 green.

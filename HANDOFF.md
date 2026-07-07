@@ -52,18 +52,19 @@ curl -s -D - -o /dev/null "https://api.venice.ai/api/v1/models?type=all" -H "Aut
 > 2026-07-06). Its entry was dropped from the harness registry and the matching `magihuman` branches
 > from the app's `VideoModelCapabilities` in the same change. Restore both if Venice re-adds it.
 
-### Phase 4 remainder
+### Phase 4 remainder — ✅ COMPLETE (code done + 886 green; run the checklist below to confirm behavior)
 Preserve the drop architecture exactly (AppKit parent + SwiftUI leaf `.onDrop`).
 
-Done this session (no runtime pass, 886 green): extracted `importFinderItemsForPlacement`
-(overlapping metadata loads), `activeCount` → `tasks.count`, retired the `mediaPanelToast`
-alias, lazy `deletionImpactCount`, concurrent `refreshUsage`, alphabetical Models dropdowns.
+Earlier (no runtime pass): extracted `importFinderItemsForPlacement`, `activeCount` → `tasks.count`,
+retired the `mediaPanelToast` alias, lazy `deletionImpactCount`, concurrent `refreshUsage`,
+alphabetical Models dropdowns, `hasDeletableSelection`.
 
-Still open (behavior-sensitive — do WITH a runtime pass):
-- Collapse the four near-identical drop NSViews onto one configurable host.
-- Share drop-commit choreography between `TimelineView.place()` and `EditorViewModel.insertAtPlayhead`.
-- Hoist the key-monitor modifier guard (NOT a simple top-of-switch check — cases have heterogeneous modifier needs; preserve exactly which combos are intercepted). Delete-enablement sharing is DONE (`hasDeletableSelection`).
-- Perf (deferred): stop `rebuildToolTips()` in `TimelineHeaderView.draw()` (rects are built in `draw()` → verify tooltips aren't stale during resize/reorder drags); replace `waitWhileExportActive`'s 2s poll with continuations resumed in `endExport()` (a missed resume hangs indexing until relaunch — verify against a live export).
+2026-07-07 (behavior-sensitive — verify at runtime):
+- Four native drop NSViews collapsed onto one closure-driven `NativeDropHostingView` (accept/perform per site; `passthroughHitTest` for overlays). Call sites unchanged.
+- Drop-commit choreography shared via `EditorViewModel.commitDrop(...)`.
+- Key-monitor guard hoisted to `noCommandModifiers` (identical semantics).
+- `TimelineHeaderView` tooltips rebuild only when a bounds+per-track signature changes.
+- `ExportCoordinator.waitWhileExportActive()` uses continuations resumed in `endExport()` (no 2s poll).
 
 ## Manual checklist — what YOU still need to test
 

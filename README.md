@@ -64,6 +64,23 @@ In the app, go to `Help → MCP Instructions → Install in Cursor`, or add this
 
 The app bundles an [mcpb](https://github.com/modelcontextprotocol/mcpb) Desktop Extension for one-click install. Go to `Help → MCP Instructions → Install in Claude Desktop`.
 
+## Privacy
+
+Audited by Claude Fable 5 (automated agent) on 2026-07-09 at commit `8a73936`; the findings below were fixed in the commits that followed. Full repo scope: sources, scripts, dependency graph, entitlements, and the bundled MCP extension.
+
+**No telemetry. No analytics. No tracking identifiers. No crash reporting.** There is no analytics SDK in the dependency graph, no device or install ID anywhere, and crash logs stay on your Mac (`~/Library/Logs/VeniceVideoCreator/`). The only place user content is ever uploaded is `api.venice.ai`, for the AI features you invoke, with your own key — stored in the macOS Keychain, sent only as a bearer header.
+
+Everything else that touches the network is **off until you opt in**, at first-run setup or later in Settings:
+
+| Behavior | What it does | Settings |
+|---|---|---|
+| Background update checks | Fetches the Sparkle appcast from GitHub (check-only; installs are always your call) | General |
+| Community skill catalog | Fetches the public skill list from GitHub | General |
+| Local MCP server | Serves editor tools on `127.0.0.1:19789`, loopback only | Agent |
+| Seedance consent | Attaches the consent Seedance requires for face-bearing media | Models |
+
+Also: exported `.venice` packages **exclude AI history by default** (chat conversations, prompts, generation log, per-asset provenance) — enable "Include AI history" in the export dialog to keep it. Unified-log output never contains your media filenames, paths, or full remote URLs.
+
 ## FAQ
 
 **Is it free?**

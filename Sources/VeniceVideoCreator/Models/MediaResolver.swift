@@ -37,10 +37,10 @@ final class MediaResolver: @unchecked Sendable {
     static func expectedURL(for entry: MediaManifestEntry, projectURL: URL?) -> URL? {
         switch entry.source {
         case .external(let absolutePath):
-            return URL(fileURLWithPath: absolutePath)
+            return URL(fileURLWithPath: absolutePath, isDirectory: false)
         case .project(let relativePath):
             guard let base = projectURL else { return nil }
-            return base.appendingPathComponent(relativePath)
+            return base.appendingPathComponent(relativePath, isDirectory: false)
         }
     }
 

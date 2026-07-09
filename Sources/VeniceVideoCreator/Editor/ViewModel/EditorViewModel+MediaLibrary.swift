@@ -386,7 +386,7 @@ extension EditorViewModel {
                 .replacingOccurrences(of: "\n", with: " ")
                 .replacingOccurrences(of: "\r", with: " ")
         }
-        if let asset = mediaAssets.first(where: { $0.id == clip.mediaRef }), asset.isGenerating {
+        if let asset = mediaAssetsById[clip.mediaRef], asset.isGenerating {
             return asset.name
         }
         return mediaResolver.displayName(for: clip.mediaRef)
@@ -432,7 +432,7 @@ extension EditorViewModel {
 
     func isClipMediaGenerating(_ clip: Clip) -> Bool {
         guard clip.mediaType != .text else { return false }
-        return mediaAssets.first(where: { $0.id == clip.mediaRef })?.isGenerating ?? false
+        return mediaAssetsById[clip.mediaRef]?.isGenerating ?? false
     }
 
     enum MediaSelectionDirection {

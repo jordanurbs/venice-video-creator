@@ -235,12 +235,14 @@ final class ExportService {
         generationLog: GenerationLog,
         sourceProjectURL: URL?,
         outputURL: URL,
+        includeAIHistory: Bool = true,
         acquireSlot: Bool = true
     ) async -> VeniceProjectExporter.Report? {
         let task = Task {
             await self.performVeniceProjectExport(
                 timeline: timeline, manifest: manifest, generationLog: generationLog,
-                sourceProjectURL: sourceProjectURL, outputURL: outputURL, acquireSlot: acquireSlot
+                sourceProjectURL: sourceProjectURL, outputURL: outputURL,
+                includeAIHistory: includeAIHistory, acquireSlot: acquireSlot
             )
         }
         cancelCurrent = { task.cancel() }
@@ -254,6 +256,7 @@ final class ExportService {
         generationLog: GenerationLog,
         sourceProjectURL: URL?,
         outputURL: URL,
+        includeAIHistory: Bool,
         acquireSlot: Bool
     ) async -> VeniceProjectExporter.Report? {
         isExporting = true
@@ -267,7 +270,7 @@ final class ExportService {
 
         do {
             Log.export.notice(
-                "venice export start url=\(outputURL.lastPathComponent)",
+                "venice export start url=\(Log.ref(outputURL))",
                 telemetry: "Venice project export started",
                 data: [
                     "tracks": timeline.tracks.count,
@@ -280,6 +283,7 @@ final class ExportService {
                 try VeniceProjectExporter.export(
                     timeline: timeline, manifest: manifest, generationLog: generationLog,
                     sourceProjectURL: sourceProjectURL, to: outputURL,
+                    includeAIHistory: includeAIHistory,
                     progress: { p in Task { @MainActor in self.progress = p } }
                 )
             }
@@ -332,7 +336,7 @@ final class ExportService {
                 renderSize: renderSize
             )
             try? FileManager.default.removeItem(at: outputURL)
-            Log.export.notice("hdr export start size=\(Int(renderSize.width))x\(Int(renderSize.height)) url=\(outputURL.lastPathComponent)")
+            Log.export.notice("hdr export start size=\(Int(renderSize.width))x\(Int(renderSize.height)) url=\(Log.ref(outputURL))")
             let inputs = HDRVideoExporter.Inputs(
                 composition: result.composition,
                 videoComposition: result.videoComposition,

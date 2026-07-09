@@ -350,7 +350,12 @@ final class ExportService {
             )
             progress = 1.0
             Log.export.notice("hdr export ok")
+        } catch is CancellationError {
+            try? FileManager.default.removeItem(at: outputURL)
+            self.error = "Export cancelled"
+            Log.export.notice("hdr export cancelled", telemetry: "Export cancelled", data: ["format": "hdr"])
         } catch {
+            try? FileManager.default.removeItem(at: outputURL)
             self.error = Log.detail(error)
             Log.export.error("hdr export failed: \(Log.detail(error))")
         }

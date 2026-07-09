@@ -149,13 +149,25 @@ enum HDRVideoExporter {
             progressReporter = nil
         }
         let failure = FailureBox()
+        let cancel = CancelBox()
         let audioPump = (audioInput != nil && audioOutput != nil) ? PumpBox(audioInput!, audioOutput!, reader) : nil
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await pumpVideoProcessed(processing, failure: failure, onSeconds: progressReporter) }
-            if let audioPump { group.addTask { await pump(audioPump, failure: failure) } }
-            await group.waitForAll()
+        nonisolated(unsafe) let unsafeReader = reader
+        await withTaskCancellationHandler {
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { await pumpVideoProcessed(processing, failure: failure, cancel: cancel, onSeconds: progressReporter) }
+                if let audioPump { group.addTask { await pump(audioPump, failure: failure, cancel: cancel) } }
+                await group.waitForAll()
+            }
+        } onCancel: {
+            cancel.cancel()
+            unsafeReader.cancelReading()
         }
 
+        if cancel.isCancelled || Task.isCancelled {
+            writer.cancelWriting()
+            try? FileManager.default.removeItem(at: outputURL)
+            throw CancellationError()
+        }
         if let reason = failure.reason {
             reader.cancelReading()
             writer.cancelWriting()
@@ -184,6 +196,15 @@ enum HDRVideoExporter {
         }
     }
 
+    /// Flipped from the task cancellation handler so the dispatch-queue pumps
+    /// (which have no Swift task context) can observe cancellation and bail.
+    private final class CancelBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var cancelled = false
+        func cancel() { lock.lock(); cancelled = true; lock.unlock() }
+        var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+    }
+
     /// Each box is driven from one dedicated serial queue.
     private final class PumpBox: @unchecked Sendable {
         let input: AVAssetWriterInput
@@ -197,12 +218,15 @@ enum HDRVideoExporter {
     }
 
     /// Drain one reader output into one writer input, honoring back-pressure.
-    private static func pump(_ box: PumpBox, failure: FailureBox, onSeconds: (@Sendable (Double) -> Void)? = nil) async {
+    private static func pump(_ box: PumpBox, failure: FailureBox, cancel: CancelBox, onSeconds: (@Sendable (Double) -> Void)? = nil) async {
         let queue = DispatchQueue(label: "hdr.pump.\(box.input.mediaType.rawValue)")
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             var lastReported = -1.0
             box.input.requestMediaDataWhenReady(on: queue) {
                 while box.input.isReadyForMoreMediaData {
+                    if cancel.isCancelled {
+                        box.reader.cancelReading(); box.input.markAsFinished(); cont.resume(); return
+                    }
                     guard let sample = box.output.copyNextSampleBuffer() else {
                         box.input.markAsFinished()
                         cont.resume()
@@ -239,7 +263,7 @@ enum HDRVideoExporter {
 
     /// Like `pump`, but converts each SDR 709 frame to a 10-bit HLG buffer via the adaptor.
     private static func pumpVideoProcessed(
-        _ c: ProcessingContext, failure: FailureBox, onSeconds: (@Sendable (Double) -> Void)? = nil
+        _ c: ProcessingContext, failure: FailureBox, cancel: CancelBox, onSeconds: (@Sendable (Double) -> Void)? = nil
     ) async {
         let queue = DispatchQueue(label: "hdr.pump.video.processed")
         let bounds = CGRect(origin: .zero, size: c.renderSize)
@@ -247,6 +271,9 @@ enum HDRVideoExporter {
             var lastReported = -1.0
             c.input.requestMediaDataWhenReady(on: queue) {
                 while c.input.isReadyForMoreMediaData {
+                    if cancel.isCancelled {
+                        c.reader.cancelReading(); c.input.markAsFinished(); cont.resume(); return
+                    }
                     guard let sample = c.output.copyNextSampleBuffer(),
                           let srcBuffer = CMSampleBufferGetImageBuffer(sample) else {
                         c.input.markAsFinished()

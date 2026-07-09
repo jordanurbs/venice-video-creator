@@ -269,7 +269,7 @@ enum Transcription {
             return acc
         }
 
-        Log.transcription.notice("analyze start file=\(fileURL.lastPathComponent)", telemetry: "Transcription analysis started")
+        Log.transcription.notice("analyze start file=\(Log.ref(fileURL))", telemetry: "Transcription analysis started")
         do {
             if let lastSampleTime = try await analyzer.analyzeSequence(from: audioFile) {
                 try await analyzer.finalizeAndFinish(through: lastSampleTime)

@@ -88,7 +88,7 @@ enum LottieVideoGenerator {
             try await writeVideo(view: view, animation: animation, meta: meta, target: target, to: outputURL)
             return outputURL
         } catch {
-            Log.preview.error("lottieVideo failed file=\(url.lastPathComponent) size=\(Int(target.width))x\(Int(target.height)): \(error.localizedDescription)")
+            Log.preview.error("lottieVideo failed file=\(Log.ref(url)) size=\(Int(target.width))x\(Int(target.height)): \(error.localizedDescription)")
             throw error
         }
     }

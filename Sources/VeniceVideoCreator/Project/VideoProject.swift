@@ -566,7 +566,7 @@ final class VideoProject: NSDocument {
             // what existed when the resolution snapshot was taken.
             guard let resolution = resolvedByEntryId[entry.id] else { continue }
             guard let url = resolution else {
-                Log.project.warning("restore: could not resolve URL for entry id=\(entry.id) name=\(entry.name)")
+                Log.project.warning("restore: could not resolve URL for entry id=\(entry.id)")
                 missing += 1
                 missingRefs.insert(entry.id)
                 continue
@@ -658,7 +658,7 @@ final class VideoProject: NSDocument {
                         continue
                     }
                 }
-                Log.project.warning("restore: media file missing id=\(candidate.id) name=\(candidate.name) path=\(candidate.url.path)")
+                Log.project.warning("restore: media file missing id=\(candidate.id) file=\(Log.ref(candidate.url))")
                 missing += 1
                 missingRefs.insert(candidate.id)
                 continue

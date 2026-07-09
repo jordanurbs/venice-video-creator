@@ -70,7 +70,7 @@ extension EditorViewModel {
                 try FileManager.default.trashItem(at: url, resultingItemURL: nil)
             } catch {
                 failed += 1
-                Log.project.error("remove unused media failed: \(url.lastPathComponent): \(error.localizedDescription)")
+                Log.project.error("remove unused media failed: \(Log.ref(url)): \(error.localizedDescription)")
             }
         }
         undoManager?.removeAllActions()

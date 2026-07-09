@@ -5,6 +5,15 @@ import Sparkle
 final class Updater: NSObject {
     static let shared = Updater()
 
+    private static let backgroundCheckKey = "ai.venice.videocreator.updates.backgroundCheckEnabled"
+
+    /// Off until the user opts in (first-run setup or Settings → General).
+    /// Gates only the automatic appcast fetch; manual checks always work.
+    static var isBackgroundCheckEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: backgroundCheckKey) }
+        set { UserDefaults.standard.set(newValue, forKey: backgroundCheckKey) }
+    }
+
     private(set) var updateAvailable = false
     private(set) var updateVersion: String?
 
@@ -24,11 +33,18 @@ final class Updater: NSObject {
         )
         self.controller = controller
         installObservers(updater: controller.updater)
-        checkForUpdateInformation()
+        checkForUpdateIfStale()
     }
 
     @objc func checkForUpdates(_ sender: Any?) {
         controller?.checkForUpdates(sender)
+    }
+
+    /// Called when the user opts in so the badge reflects reality promptly.
+    func backgroundCheckPreferenceChanged() {
+        if Self.isBackgroundCheckEnabled {
+            checkForUpdateInformation()
+        }
     }
 
     private func checkForUpdateInformation() {
@@ -37,7 +53,7 @@ final class Updater: NSObject {
     }
 
     private func checkForUpdateIfStale() {
-        guard controller != nil else { return }
+        guard controller != nil, Self.isBackgroundCheckEnabled else { return }
         let now = Date()
         if let lastBackgroundCheck, now.timeIntervalSince(lastBackgroundCheck) < 3600 { return }
         checkForUpdateInformation()

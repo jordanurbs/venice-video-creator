@@ -13,6 +13,7 @@ struct SkillsPane: View {
     @State private var installing: Set<String> = []
     @State private var showMy = true
     @State private var showCommunity = true
+    @State private var catalogEnabled = SkillCatalog.isEnabledPreference
     @State private var editingTitle = false
     @State private var draftTitle = ""
     @State private var titleSkillId: String?
@@ -146,6 +147,7 @@ struct SkillsPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             if selection == nil { selection = store.skills.first?.id }
+            catalogEnabled = SkillCatalog.isEnabledPreference
             Task { await store.reloadInBackground() }
             Task { await catalog.refresh() }
         }
@@ -251,7 +253,12 @@ struct SkillsPane: View {
                     sectionHeader("My Skills", count: mySkills.count, expanded: $showMy)
                     if showMy { skillListRows(mySkills) }
                     sectionHeader("Community", count: communityItems.count, expanded: $showCommunity)
-                    if showCommunity { communityRows }
+                    if showCommunity {
+                        communityRows
+                        if !catalogEnabled {
+                            catalogOptInRow
+                        }
+                    }
                     if let error = catalog.lastError, catalog.entries.isEmpty {
                         Text("Catalog: \(error)")
                             .font(.system(size: AppTheme.FontSize.xxs))
@@ -297,6 +304,24 @@ struct SkillsPane: View {
         SkillRow(skill: skill, isSelected: selected?.id == skill.id, badge: badge) {
             selection = skill.id
         }
+    }
+
+    private var catalogOptInRow: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+            Text("Catalog browsing is off. Turn it on to fetch the community skill list from GitHub.")
+                .font(.system(size: AppTheme.FontSize.xxs))
+                .foregroundStyle(AppTheme.Text.mutedColor)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Enable catalog") {
+                SkillCatalog.isEnabledPreference = true
+                catalogEnabled = true
+                Task { await catalog.refresh() }
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: AppTheme.FontSize.xs, weight: .semibold))
+            .foregroundStyle(AppTheme.Accent.primary)
+        }
+        .padding(AppTheme.Spacing.sm)
     }
 
     private var emptyRow: some View {

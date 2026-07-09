@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 import os
@@ -22,6 +23,23 @@ enum Log {
 
     static let crashLogURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/VeniceVideoCreator/crash.log")
+
+    /// Privacy-safe reference to a user file: extension plus a short stable
+    /// hash of the path — never the filename. Correlate across log lines by hash.
+    static func ref(_ url: URL) -> String {
+        let digest = SHA256.hash(data: Data(url.standardizedFileURL.path.utf8))
+        let short = digest.prefix(4).map { String(format: "%02x", $0) }.joined()
+        let ext = url.pathExtension.lowercased()
+        return ext.isEmpty ? "file#\(short)" : "file#\(short).\(ext)"
+    }
+
+    /// Privacy-safe reference to a remote URL: scheme and host only — query
+    /// strings and paths can carry tokens or user content.
+    static func remote(_ url: URL) -> String {
+        let scheme = url.scheme ?? "?"
+        let host = url.host ?? "?"
+        return "\(scheme)://\(host)/…"
+    }
 
     /// Full NSError chain
     static func detail(_ error: Error) -> String {

@@ -228,7 +228,7 @@ extension ToolExecutor {
             await finishImportedAsset(asset, editor: editor)
         } catch {
             let message = (error as? ToolError)?.message ?? error.localizedDescription
-            Log.project.error("import_media download failed url=\(remoteURL.absoluteString) error=\(message)")
+            Log.project.error("import_media download failed url=\(Log.remote(remoteURL)) error=\(message)")
             failImportedAsset(asset, editor: editor, message: message)
         }
     }
@@ -246,7 +246,7 @@ extension ToolExecutor {
             await finishImportedAsset(asset, editor: editor)
         } catch {
             let message = (error as? ToolError)?.message ?? error.localizedDescription
-            Log.project.error("import_media copy failed path=\(sourceURL.path) error=\(message)")
+            Log.project.error("import_media copy failed src=\(Log.ref(sourceURL)) error=\(message)")
             failImportedAsset(asset, editor: editor, message: message)
         }
     }

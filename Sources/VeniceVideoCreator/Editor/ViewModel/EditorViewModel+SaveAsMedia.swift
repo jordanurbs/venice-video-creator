@@ -49,7 +49,7 @@ extension EditorViewModel {
                 )
                 placeholder.generationStatus = .none
                 await self?.finalizeImportedAsset(placeholder)
-                Log.project.notice("saveClipAsMedia ok clip=\(clipId) out=\(destURL.lastPathComponent)")
+                Log.project.notice("saveClipAsMedia ok clip=\(clipId) out=\(Log.ref(destURL))")
             } catch {
                 placeholder.generationStatus = .failed(error.localizedDescription)
                 Log.project.error("saveClipAsMedia failed clip=\(clipId): \(error.localizedDescription)")
@@ -95,7 +95,7 @@ extension EditorViewModel {
                 try FileManager.default.moveItem(at: tempURL, to: destURL)
                 placeholder.generationStatus = .none
                 await self?.finalizeImportedAsset(placeholder)
-                Log.project.notice("saveTimelineRangeAsMedia ok frames=\(startFrame)..<\(startFrame + frameCount) out=\(destURL.lastPathComponent)")
+                Log.project.notice("saveTimelineRangeAsMedia ok frames=\(startFrame)..<\(startFrame + frameCount) out=\(Log.ref(destURL))")
             } catch {
                 placeholder.generationStatus = .failed(error.localizedDescription)
                 Log.project.error("saveTimelineRangeAsMedia failed: \(error.localizedDescription)")

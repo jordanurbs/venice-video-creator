@@ -58,9 +58,8 @@ final class ModelPreferences {
         disabledIds = Set(stored)
         defaultIds = (UserDefaults.standard.dictionary(forKey: Self.defaultsKey) as? [String: String]) ?? [:]
         agentCharacterSlug = UserDefaults.standard.string(forKey: Self.characterSlugKey)
-        // Granted by default so Seedance jobs with face-bearing media succeed out of
-        // the box; the user can revoke it in Settings → Models.
-        seedanceConsentGranted = UserDefaults.standard.object(forKey: Self.seedanceConsentKey) as? Bool ?? true
+        // Opt-in: off until granted in first-run setup or Settings → Models.
+        seedanceConsentGranted = UserDefaults.standard.object(forKey: Self.seedanceConsentKey) as? Bool ?? false
     }
 
     // MARK: - Enable / disable

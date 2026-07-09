@@ -10,15 +10,10 @@ final class MCPService {
 
     private static let enabledKey = "ai.venice.videocreator.mcp.enabled"
 
+    /// Off until the user opts in (first-run setup or Settings → Agent).
     static var isEnabledPreference: Bool {
-        get {
-            let defaults = UserDefaults.standard
-            if defaults.object(forKey: enabledKey) == nil { return true }
-            return defaults.bool(forKey: enabledKey)
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: enabledKey)
-        }
+        get { UserDefaults.standard.bool(forKey: enabledKey) }
+        set { UserDefaults.standard.set(newValue, forKey: enabledKey) }
     }
 
     private(set) var isRunning: Bool = false

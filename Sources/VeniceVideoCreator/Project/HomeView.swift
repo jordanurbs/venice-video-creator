@@ -13,6 +13,7 @@ struct HomeView: View {
     ]
 
     @AppStorage("hasSeenWelcome") private var hasSeenWelcome = false
+    @AppStorage("hasCompletedSetup") private var hasCompletedSetup = false
     @Bindable private var changelog = ChangelogStore.shared
 
     var body: some View {
@@ -49,6 +50,8 @@ struct HomeView: View {
                 .transition(.opacity)
             } else if !hasSeenWelcome {
                 WelcomeOverlay { withAnimation { hasSeenWelcome = true } }
+            } else if !hasCompletedSetup {
+                SetupOverlay { withAnimation { hasCompletedSetup = true } }
             } else if let entry = changelog.pending {
                 UpdateOverlay(entry: entry, changelogURL: changelog.changelogURL) {
                     withAnimation { changelog.dismiss() }

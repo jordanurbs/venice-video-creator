@@ -41,7 +41,7 @@ enum ImageVideoGenerator {
             )
             return outputURL
         } catch {
-            Log.preview.error("stillVideo failed file=\(imageURL.lastPathComponent) size=\(Int(size.width))x\(Int(size.height)) alpha=\(hasAlpha): \(Log.detail(error))")
+            Log.preview.error("stillVideo failed file=\(Log.ref(imageURL)) size=\(Int(size.width))x\(Int(size.height)) alpha=\(hasAlpha): \(Log.detail(error))")
             throw error
         }
     }

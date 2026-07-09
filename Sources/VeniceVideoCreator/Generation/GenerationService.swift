@@ -197,7 +197,7 @@ final class GenerationService {
             var urlsToUpload = references.map(\.url)
             let refTypes = references.map(\.type)
             if let trim = trimmedSourceOverride, trim.hasTrim, !urlsToUpload.isEmpty {
-                Log.generation.notice("using trimmed source: frames \(trim.trimStartFrame)+\(trim.sourceFramesConsumed) of \(urlsToUpload[0].lastPathComponent)")
+                Log.generation.notice("using trimmed source: frames \(trim.trimStartFrame)+\(trim.sourceFramesConsumed) of \(Log.ref(urlsToUpload[0]))")
                 let extracted = try await VideoTrimExtractor.extract(trim)
                 urlsToUpload[0] = extracted
                 tempFiles.append(extracted)
@@ -318,7 +318,7 @@ final class GenerationService {
             return true
         } catch {
             let message = error.localizedDescription
-            Log.generation.error("download failed url=\(remoteURL.absoluteString) error=\(message)")
+            Log.generation.error("download failed url=\(Log.remote(remoteURL)) error=\(message)")
             asset.pendingDownloadURL = remoteURL
             updateGenerationMetadata(asset, editor: editor, status: .failed(message))
             return false

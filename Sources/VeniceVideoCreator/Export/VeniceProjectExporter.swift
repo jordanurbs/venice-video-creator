@@ -24,6 +24,7 @@ enum VeniceProjectExporter {
         generationLog: GenerationLog,
         sourceProjectURL: URL?,
         to destURL: URL,
+        includeAIHistory: Bool = true,
         progress: (@Sendable (Double) -> Void)? = nil
     ) throws -> Report {
         let fm = FileManager.default
@@ -68,23 +69,37 @@ enum VeniceProjectExporter {
         }
 
         var newManifest = manifest
-        newManifest.entries = newEntries
+        newManifest.entries = includeAIHistory ? newEntries : newEntries.map(strippedOfAIHistory)
 
         let encoder = JSONEncoder()
         try encoder.encode(timeline).write(to: staging.appendingPathComponent(Project.timelineFilename))
         try encoder.encode(newManifest).write(to: staging.appendingPathComponent(Project.manifestFilename))
-        try encoder.encode(generationLog).write(to: staging.appendingPathComponent(Project.generationLogFilename))
+        let exportedLog = includeAIHistory ? generationLog : GenerationLog()
+        try encoder.encode(exportedLog).write(to: staging.appendingPathComponent(Project.generationLogFilename))
 
         // Carry across non-media bundle contents (thumbnail, chat history) when present.
         if let sourceProjectURL {
             copyIfPresent(Project.thumbnailFilename, from: sourceProjectURL, to: staging, fm: fm)
-            copyIfPresent(ChatSessionStore.dirName, from: sourceProjectURL, to: staging, fm: fm)
+            if includeAIHistory {
+                copyIfPresent(ChatSessionStore.dirName, from: sourceProjectURL, to: staging, fm: fm)
+            }
         }
 
         if fm.fileExists(atPath: destURL.path) { try fm.removeItem(at: destURL) }
         try fm.createDirectory(at: destURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try fm.moveItem(at: staging, to: destURL)
         return report
+    }
+
+    /// Drops per-asset AI provenance: prompts, reference/result URLs, job handles,
+    /// and original import paths from the exporting machine. The media itself stays.
+    private static func strippedOfAIHistory(_ entry: MediaManifestEntry) -> MediaManifestEntry {
+        var stripped = entry
+        stripped.generationInput = nil
+        stripped.importInput = nil
+        stripped.cachedRemoteURL = nil
+        stripped.cachedRemoteURLExpiresAt = nil
+        return stripped
     }
 
     // MARK: - Helpers

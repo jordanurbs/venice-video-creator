@@ -49,7 +49,7 @@ extension ToolExecutor {
             }
             return try await exportFCPXML(editor, target: target, outputURL: outputURL)
         case .venice:
-            return try await exportPalmier(editor, outputURL: outputURL)
+            return try await exportPalmier(editor, outputURL: outputURL, includeAIHistory: input.includeAIHistory ?? false)
         }
     }
 
@@ -166,7 +166,7 @@ extension ToolExecutor {
         ])
     }
 
-    private func exportPalmier(_ editor: EditorViewModel, outputURL: URL) async throws -> ToolResult {
+    private func exportPalmier(_ editor: EditorViewModel, outputURL: URL, includeAIHistory: Bool) async throws -> ToolResult {
         guard ExportCoordinator.beginExportIfIdle() else {
             throw ToolError("export_project: Another export is already in progress.")
         }
@@ -179,6 +179,7 @@ extension ToolExecutor {
             generationLog: editor.generationLog,
             sourceProjectURL: editor.projectURL,
             outputURL: outputURL,
+            includeAIHistory: includeAIHistory,
             acquireSlot: false
         ) else {
             throw ToolError("export_project: \(service.error ?? "Venice project export failed")")
@@ -288,7 +289,7 @@ extension ToolExecutor {
 }
 
 private struct ExportProjectArgs: DecodableToolArgs {
-    static let allowedKeys: Set<String> = ["mode", "codec", "resolution", "outputPath", "overwrite", "fcpxmlTarget"]
+    static let allowedKeys: Set<String> = ["mode", "codec", "resolution", "outputPath", "overwrite", "fcpxmlTarget", "includeAIHistory"]
 
     var mode: String?
     var codec: String?
@@ -296,6 +297,7 @@ private struct ExportProjectArgs: DecodableToolArgs {
     var outputPath: String?
     var overwrite: Bool?
     var fcpxmlTarget: String?
+    var includeAIHistory: Bool?
 }
 
 private enum ExportProjectMode: String {

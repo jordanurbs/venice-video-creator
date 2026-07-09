@@ -29,7 +29,7 @@ enum VideoCompressor {
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("ref-compressed-\(UUID().uuidString).mp4")
 
-        Log.generation.notice("compress start url=\(url.lastPathComponent) longside=\(Int(longSide))")
+        Log.generation.notice("compress start url=\(Log.ref(url)) longside=\(Int(longSide))")
         try await session.export(to: outputURL, as: .mp4)
         Log.generation.notice("compress ok url=\(outputURL.lastPathComponent)")
         return outputURL

@@ -62,6 +62,7 @@ struct ExportView: View {
     @State private var resolution: ExportResolution = .matchTimeline
     @State private var resultNote: String?
     @State private var veniceSummary: (collect: Int, missing: Int, bytes: Int64) = (0, 0, 0)
+    @State private var includeAIHistory = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -297,6 +298,23 @@ struct ExportView: View {
             Text("Saves a copy of this project with all media bundled inside, so it opens on any machine.")
                 .font(.system(size: AppTheme.FontSize.sm))
                 .foregroundStyle(AppTheme.Text.secondaryColor)
+
+            HStack(alignment: .top, spacing: AppTheme.Spacing.sm) {
+                Toggle("", isOn: $includeAIHistory)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.xxs) {
+                    Text("Include AI history")
+                        .font(.system(size: AppTheme.FontSize.sm))
+                        .foregroundStyle(AppTheme.Text.primaryColor)
+                    Text("Chat conversations, prompts, and the generation activity log travel inside the package. Leave off to share the project without them.")
+                        .font(.system(size: AppTheme.FontSize.xs))
+                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.top, AppTheme.Spacing.xs)
 
             if veniceSummary.missing > 0 {
                 Text("\(veniceSummary.missing) media file\(veniceSummary.missing == 1 ? "" : "s") missing - they'll be skipped.")
@@ -586,7 +604,8 @@ struct ExportView: View {
                     manifest: editor.mediaManifest,
                     generationLog: editor.generationLog,
                     sourceProjectURL: editor.projectURL,
-                    outputURL: url
+                    outputURL: url,
+                    includeAIHistory: includeAIHistory
                 )
                 guard let report, service.error == nil else { return }
                 if report.missing.isEmpty {

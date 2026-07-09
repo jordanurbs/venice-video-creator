@@ -23,6 +23,15 @@ final class SkillCatalog {
             ?? "https://raw.githubusercontent.com/palmier-io/palmier-skills/main"
     }
 
+    private static let enabledKey = "ai.venice.videocreator.skillCatalog.enabled"
+
+    /// Off until the user opts in (first-run setup or Settings → General).
+    /// Gates the network fetch; locally installed skills always work.
+    static var isEnabledPreference: Bool {
+        get { UserDefaults.standard.bool(forKey: enabledKey) }
+        set { UserDefaults.standard.set(newValue, forKey: enabledKey) }
+    }
+
     private(set) var entries: [SkillCatalogEntry] = []
     private(set) var isLoading = false
     private(set) var lastError: String?
@@ -45,6 +54,7 @@ final class SkillCatalog {
     }
 
     func refresh() async {
+        guard Self.isEnabledPreference else { return }
         guard !isLoading, let url = URL(string: "\(Self.base)/catalog.json") else { return }
         isLoading = true
         defer { isLoading = false }

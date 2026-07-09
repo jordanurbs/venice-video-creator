@@ -507,6 +507,7 @@ enum ToolDefinitions {
                     "outputPath": ["type": "string", "description": "Optional. Absolute destination path. If omitted, a unique project-named file is written to ~/Downloads. If no extension is provided, the mode's extension is appended."],
                     "overwrite": ["type": "boolean", "description": "Optional. Default false: the call fails if outputPath already exists. Pass true to replace an existing file."],
                     "fcpxmlTarget": ["type": "string", "enum": ["resolve", "fcp"], "description": "fcpxml mode only. Optional, default resolve. Davinci Resolve and Final Cut interpret crop and position values differently; pick the app the file will be imported into."],
+                    "includeAIHistory": ["type": "boolean", "description": "venice mode only. Optional, default false. When true the package carries agent chat conversations, generation prompts, and the generation activity log. Leave false when sharing the project so private AI history stays behind."],
                 ]
             )
         ),

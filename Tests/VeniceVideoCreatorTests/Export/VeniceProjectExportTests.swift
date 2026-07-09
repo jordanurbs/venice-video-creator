@@ -97,6 +97,91 @@ struct VeniceProjectExportTests {
         #expect(resolver.resolveURL(for: "miss-1") == nil)   // genuinely gone — stays unresolved
     }
 
+    @Test func stripsAIHistoryWhenExcluded() throws {
+        let (root, source, dest, _) = try makeFixture()
+        defer { try? fm.removeItem(at: root) }
+
+        // Source package has chat history and per-asset AI provenance.
+        let chatDir = source.appendingPathComponent(ChatSessionStore.dirName, isDirectory: true)
+        try fm.createDirectory(at: chatDir, withIntermediateDirectories: true)
+        try Data("{\"messages\":[]}".utf8).write(to: chatDir.appendingPathComponent("session.json"))
+
+        var m = manifest(externalPath: root.appendingPathComponent("external-clip.mov").path)
+        m.entries[0].generationInput = GenerationInput(
+            prompt: "secret prompt", model: "test-model", duration: 5, aspectRatio: "16:9"
+        )
+        m.entries[0].importInput = MediaImportInput(sourcePath: "/Users/someone/private.mov")
+        m.entries[0].cachedRemoteURL = "https://example.com/signed?token=abc"
+
+        var log = GenerationLog()
+        log.entries = [GenerationLogEntry(model: "test-model", costCredits: 10, createdAt: Date())]
+
+        try VeniceProjectExporter.export(
+            timeline: Fixtures.timeline(),
+            manifest: m,
+            generationLog: log,
+            sourceProjectURL: source,
+            to: dest,
+            includeAIHistory: false
+        )
+
+        #expect(!fm.fileExists(atPath: dest.appendingPathComponent(ChatSessionStore.dirName).path))
+
+        let outLog = try JSONDecoder().decode(
+            GenerationLog.self, from: Data(contentsOf: dest.appendingPathComponent(Project.generationLogFilename))
+        )
+        #expect(outLog.entries.isEmpty)
+
+        let outManifest = try JSONDecoder().decode(
+            MediaManifest.self, from: Data(contentsOf: dest.appendingPathComponent(Project.manifestFilename))
+        )
+        for entry in outManifest.entries {
+            #expect(entry.generationInput == nil)
+            #expect(entry.importInput == nil)
+            #expect(entry.cachedRemoteURL == nil)
+        }
+
+        // No prompt text anywhere in the exported JSON files.
+        for name in [Project.timelineFilename, Project.manifestFilename, Project.generationLogFilename] {
+            let contents = try String(contentsOf: dest.appendingPathComponent(name), encoding: .utf8)
+            #expect(!contents.contains("secret prompt"), "\(name) leaked prompt")
+        }
+    }
+
+    @Test func keepsAIHistoryByDefault() throws {
+        let (root, source, dest, _) = try makeFixture()
+        defer { try? fm.removeItem(at: root) }
+
+        let chatDir = source.appendingPathComponent(ChatSessionStore.dirName, isDirectory: true)
+        try fm.createDirectory(at: chatDir, withIntermediateDirectories: true)
+        try Data("{\"messages\":[]}".utf8).write(to: chatDir.appendingPathComponent("session.json"))
+
+        var m = manifest(externalPath: root.appendingPathComponent("external-clip.mov").path)
+        m.entries[0].generationInput = GenerationInput(
+            prompt: "kept prompt", model: "test-model", duration: 5, aspectRatio: "16:9"
+        )
+        var log = GenerationLog()
+        log.entries = [GenerationLogEntry(model: "test-model", costCredits: 10, createdAt: Date())]
+
+        try VeniceProjectExporter.export(
+            timeline: Fixtures.timeline(),
+            manifest: m,
+            generationLog: log,
+            sourceProjectURL: source,
+            to: dest
+        )
+
+        #expect(fm.fileExists(atPath: dest.appendingPathComponent(ChatSessionStore.dirName).appendingPathComponent("session.json").path))
+        let outLog = try JSONDecoder().decode(
+            GenerationLog.self, from: Data(contentsOf: dest.appendingPathComponent(Project.generationLogFilename))
+        )
+        #expect(outLog.entries.count == 1)
+        let outManifest = try JSONDecoder().decode(
+            MediaManifest.self, from: Data(contentsOf: dest.appendingPathComponent(Project.manifestFilename))
+        )
+        #expect(outManifest.entries.first?.generationInput?.prompt == "kept prompt")
+    }
+
     @Test func deduplicatesTwoEntriesPointingAtTheSameExternalFile() throws {
         let (root, source, dest, _) = try makeFixture()
         defer { try? fm.removeItem(at: root) }

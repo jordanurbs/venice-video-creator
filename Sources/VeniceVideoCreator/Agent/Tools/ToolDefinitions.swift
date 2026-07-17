@@ -62,6 +62,9 @@ enum ToolName: String, CaseIterable, Sendable {
     case storyboardShots = "storyboard_shots"
     case qaShot = "qa_shot"
     case fixPanel = "fix_panel"
+    case produceShots = "produce_shots"
+    case regenerateShot = "regenerate_shot"
+    case productionStatus = "production_status"
     case readSkill = "read_skill"
     case getProjects = "get_projects"
     case openProject = "open_project"
@@ -1145,6 +1148,35 @@ enum ToolDefinitions {
                 ],
                 required: ["shotId"]
             )
+        ),
+        AgentTool(
+            name: .produceShots,
+            description: "Start background production of the plan's shots: for each shot it routes a model (character refs → reference-to-video, dissolve/match-cut → chained image-to-video, else text-to-video), quotes the cost, generates, optionally runs vision QA, and lays the finished clip on the timeline in shot order. Returns immediately — progress posts into chat and shot statuses move planned/storyboarded → generating → placed (or failed). Poll get_shot_plan or production_status. Only one run at a time.",
+            inputSchema: objectSchema(
+                properties: [
+                    "shotIds": ["type": "array", "items": ["type": "string"], "description": "Shots to produce (in plan order). Omit to produce every shot not already placed."],
+                    "autoQA": ["type": "boolean", "description": "Run vision QA on each generated shot and auto-retry a hard fail. Default false."],
+                    "maxRetries": ["type": "integer", "description": "Retries per shot on failure (0–5, default 2)."],
+                ]
+            )
+        ),
+        AgentTool(
+            name: .regenerateShot,
+            description: "Regenerate a single shot as a new take and replace its timeline clip in place (earlier takes are kept in the shot's take history). Optionally override the prompt or model first. This is the 'regenerate shot 7' flow. Won't start while another production run is active.",
+            inputSchema: objectSchema(
+                properties: [
+                    "shotId": ["type": "string", "description": "Shot id from get_shot_plan."],
+                    "prompt": ["type": "string", "description": "Optional new prompt for this shot."],
+                    "model": ["type": "string", "description": "Optional video model override for this shot."],
+                    "autoQA": ["type": "boolean", "description": "Run vision QA on the new take. Default false."],
+                ],
+                required: ["shotId"]
+            )
+        ),
+        AgentTool(
+            name: .productionStatus,
+            description: "Return the current production run state: whether it's running/paused, the current shot, completed/total counts, running USD spend, and the last error. Use to monitor a produce_shots run.",
+            inputSchema: objectSchema()
         ),
     ]
 

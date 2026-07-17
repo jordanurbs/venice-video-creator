@@ -153,6 +153,9 @@ final class ToolExecutor {
         case .storyboardShots: return try storyboardShots(editor, args)
         case .qaShot:          return try await qaShot(editor, args)
         case .fixPanel:        return try fixPanel(editor, args)
+        case .produceShots:    return try produceShots(editor, args)
+        case .regenerateShot:  return try regenerateShot(editor, args)
+        case .productionStatus: return productionStatus(editor)
         case .readSkill:     return readSkill(args)
         case .getProjects, .openProject, .newProject:
             return await runProjectTool(tool, args)

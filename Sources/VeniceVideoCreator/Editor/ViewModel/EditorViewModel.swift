@@ -145,6 +145,7 @@ final class EditorViewModel {
 
     let generationService = GenerationService()
     let agentService = AgentService()
+    let productionOrchestrator = ProductionOrchestrator()
 
     var agentPanelVisible: Bool = {
         UserDefaults.standard.object(forKey: "agentPanelVisible") as? Bool ?? false
@@ -202,6 +203,7 @@ final class EditorViewModel {
             projectURL: { [weak self] in self?.projectURL }
         )
         agentService.editor = self
+        productionOrchestrator.editor = self
         searchIndex.assetsProvider = { [weak self] in self?.mediaAssets ?? [] }
 
         // Re-check media presence when the app regains focus: a user may have

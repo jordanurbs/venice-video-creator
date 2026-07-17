@@ -356,6 +356,7 @@ final class VideoProject: NSDocument {
         // A generation finishing after close must not autosave this zombie over a reopened copy; jobs resume on reopen.
         isClosed = true
         editorViewModel.generationService.detachAll()
+        editorViewModel.productionOrchestrator.detachAll()
         editorViewModel.onProjectCheckpointRequired = nil
         editorViewModel.onProjectContentChanged = nil
         editorViewModel.agentService.onSessionsChanged = nil
@@ -690,6 +691,7 @@ final class VideoProject: NSDocument {
 
         editorViewModel.missingMediaRefs = missingRefs
         editorViewModel.generationService.resumePendingGenerations(editor: editorViewModel)
+        editorViewModel.productionOrchestrator.resume(editor: editorViewModel)
         Log.project.notice(
             "restore ok restored=\(restored) missing=\(missing)",
             telemetry: "Media restored",

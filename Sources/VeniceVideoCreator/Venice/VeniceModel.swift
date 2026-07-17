@@ -177,12 +177,17 @@ enum VeniceModelMapper {
         let isSpeechEndpoint = (type == "tts")
         let isSFX = lower.contains("sound-effect") || lower.contains("sound effect") || lower.contains("sfx")
         let isTTSLike = isSpeechEndpoint || lower.contains("tts") || lower.contains("text to speech")
-        let categoryStr: String = isTTSLike ? "tts" : (isSFX ? "sfx" : "music")
+        let constraints = spec["constraints"] as? [String: Any] ?? [:]
+        // Honor an explicit category (used by supplemental async-TTS models like Seed Audio),
+        // else fall back to the slug/name heuristic.
+        let explicitCategory = (constraints["category"] as? String) ?? (spec["category"] as? String)
+        let categoryStr: String = explicitCategory.map { $0.lowercased() }
+            .flatMap { ["tts", "music", "sfx"].contains($0) ? $0 : nil }
+            ?? (isTTSLike ? "tts" : (isSFX ? "sfx" : "music"))
         let endpoint = isSpeechEndpoint ? "audio/speech" : "audio/queue"
 
         // Venice video-to-music / video-to-audio models score a source video.
         // The slug is the reliable signal, but honor an explicit spec flag too.
-        let constraints = spec["constraints"] as? [String: Any] ?? [:]
         let declaredInputs = (constraints["inputs"] as? [String]) ?? (spec["inputs"] as? [String]) ?? []
         let hasVideoInput = !isSpeechEndpoint && (
             lower.contains("video-to-music") || lower.contains("video to music")
@@ -193,27 +198,48 @@ enum VeniceModelMapper {
         )
         let inputs = hasVideoInput ? ["text", "video"] : ["text"]
 
+        // Pre-flight metadata, read from constraints when Venice (or a supplemental entry) exposes it.
+        let voices = (constraints["voices"] as? [String]) ?? (spec["voices"] as? [String])
+        let defaultVoice = (constraints["default_voice"] as? String) ?? (spec["default_voice"] as? String)
+        let durations = (constraints["durations"] as? [String]).map(parseDurations)
+        let maxPromptLength = (constraints["max_prompt_length"] as? Int) ?? (spec["max_prompt_length"] as? Int)
+        let minPromptLength = (constraints["min_prompt_length"] as? Int) ?? 1
+        let minSpeed = (constraints["min_speed"] as? Double)
+        let maxSpeed = (constraints["max_speed"] as? Double)
+        let formats = (constraints["formats"] as? [String]) ?? (constraints["response_formats"] as? [String])
+
         let caps = AudioCaps(
             category: categoryStr,
-            voices: nil,
-            defaultVoice: nil,
-            supportsLyrics: (spec["supports_lyrics"] as? Bool) ?? false,
-            supportsInstrumental: (spec["supports_force_instrumental"] as? Bool) ?? false,
-            supportsStyleInstructions: false,
-            durations: nil,
-            minPromptLength: 1,
+            voices: voices,
+            defaultVoice: defaultVoice,
+            supportsLyrics: (spec["supports_lyrics"] as? Bool) ?? (constraints["supports_lyrics"] as? Bool) ?? false,
+            supportsInstrumental: (spec["supports_force_instrumental"] as? Bool) ?? (constraints["supports_force_instrumental"] as? Bool) ?? false,
+            supportsStyleInstructions: (constraints["supports_style_instructions"] as? Bool) ?? false,
+            durations: durations,
+            minPromptLength: minPromptLength,
             inputs: inputs,
             promptLabel: categoryStr == "tts" ? "Text to speak"
                 : (categoryStr == "sfx" ? "Describe the sound" : "Describe the music"),
             minSeconds: 1,
-            maxSeconds: 600
+            maxSeconds: 600,
+            maxPromptLength: maxPromptLength,
+            minSpeed: minSpeed,
+            maxSpeed: maxSpeed,
+            formats: formats
         )
+        // Per-second pricing when declared (e.g. Seed Audio ~$0.0029/s), else char-based.
+        let audioPricing: CatalogEntry.AudioPricing
+        if let perSecond = (pricing["usd_per_second"] as? Double) ?? nestedUSD(pricing, "per_second") {
+            audioPricing = .perSecond(rate: perSecond)
+        } else {
+            audioPricing = .perThousandChars(rate: usdPrice(pricing))
+        }
         return CatalogEntry(
             id: id, kind: .audio, displayName: name,
             allowedEndpoints: [endpoint],
             responseShape: .audio,
             uiCapabilities: .audio(caps),
-            audioPricing: .perThousandChars(rate: usdPrice(pricing))
+            audioPricing: audioPricing
         )
     }
 

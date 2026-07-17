@@ -81,6 +81,12 @@ struct AudioModelConfig: Identifiable, Sendable {
     var promptLabel: String { caps.promptLabel ?? "Describe the sound" }
     var minSeconds: Int { caps.minSeconds ?? 1 }
     var maxSeconds: Int { caps.maxSeconds ?? 900 }
+    var maxPromptLength: Int? { caps.maxPromptLength }
+    var formats: [String]? { caps.formats }
+    var speedRange: ClosedRange<Double>? {
+        guard let lo = caps.minSpeed, let hi = caps.maxSpeed, lo <= hi else { return nil }
+        return lo...hi
+    }
 
     /// Coerce a requested duration into something this model accepts: clamp
     /// within a video model's span range, snap to the nearest allowed value for
@@ -120,6 +126,9 @@ struct AudioModelConfig: Identifiable, Sendable {
         let promptLen = params.prompt.trimmingCharacters(in: .whitespaces).count
         if inputs.contains(.text), promptLen < minPromptLength {
             return "\(displayName) requires prompt ≥ \(minPromptLength) characters (got \(promptLen))."
+        }
+        if let maxLen = maxPromptLength, promptLen > maxLen {
+            return "\(displayName) accepts at most \(maxLen) characters (got \(promptLen))."
         }
         if let v = params.voice, !v.isEmpty {
             guard let allowed = voices, !allowed.isEmpty else {

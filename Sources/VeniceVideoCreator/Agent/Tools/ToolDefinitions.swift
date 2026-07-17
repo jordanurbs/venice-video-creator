@@ -65,6 +65,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case produceShots = "produce_shots"
     case regenerateShot = "regenerate_shot"
     case productionStatus = "production_status"
+    case produceAudio = "produce_audio"
     case readSkill = "read_skill"
     case getProjects = "get_projects"
     case openProject = "open_project"
@@ -1177,6 +1178,22 @@ enum ToolDefinitions {
             name: .productionStatus,
             description: "Return the current production run state: whether it's running/paused, the current shot, completed/total counts, running USD spend, and the last error. Use to monitor a produce_shots run.",
             inputSchema: objectSchema()
+        ),
+        AgentTool(
+            name: .produceAudio,
+            description: "Generate and place the production's audio layers: per-shot dialogue (text-to-speech in each character's locked voice, placed at the shot's timeline position), an optional music bed and an optional ambient/SFX bed spanning the whole edit. Voice-over lines are spoken by TTS here (the video prompt already suppresses model narration). Async — clips resolve as generation finishes. For subtitles afterward, use add_captions.",
+            inputSchema: objectSchema(
+                properties: [
+                    "shotIds": ["type": "array", "items": ["type": "string"], "description": "Shots to voice. Omit for all shots with dialogue."],
+                    "dialogue": ["type": "boolean", "description": "Generate per-shot dialogue TTS. Default true."],
+                    "music": ["type": "boolean", "description": "Generate a music bed across the edit. Default false."],
+                    "musicPrompt": ["type": "string", "description": "Music description. Defaults to the plan logline."],
+                    "musicModel": ["type": "string", "description": "Music model slug (defaults to an enabled music model)."],
+                    "ambient": ["type": "boolean", "description": "Generate an ambient/SFX bed across the edit. Default false."],
+                    "ambientPrompt": ["type": "string", "description": "Ambient bed description."],
+                    "ambientModel": ["type": "string", "description": "Model slug for the ambient bed."],
+                ]
+            )
         ),
     ]
 

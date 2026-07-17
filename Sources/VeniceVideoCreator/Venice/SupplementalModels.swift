@@ -28,7 +28,7 @@ enum SupplementalModels {
     /// truth still wins on conflicts (dropped from additions when already present).
     static func merged(into live: [[String: Any]]) -> [[String: Any]] {
         let liveIds = Set(live.compactMap { $0["id"] as? String })
-        let additions = videoEntries.filter { entry in
+        let additions = (videoEntries + audioEntries).filter { entry in
             guard let id = entry["id"] as? String else { return false }
             return !liveIds.contains(id)
         }
@@ -68,6 +68,53 @@ enum SupplementalModels {
             videoEntry(id: "seedance-2-0-fast-image-to-video", name: "Seedance 2.0 Fast", modelType: "image-to-video", durations: seedanceFastDurations, resolutions: seedanceResolutions),
             videoEntry(id: "seedance-2-0-fast-reference-to-video", name: "Seedance 2.0 Fast R2V", modelType: "image-to-video", durations: seedanceFastDurations, resolutions: seedanceResolutions),
         ]
+    }
+
+    // MARK: - Audio
+
+    /// Seed Audio 1.0's 25 named voices (harness registry, 2026-07-17). The default,
+    /// "Describe in prompt", lets the prompt steer delivery instead of picking a fixed voice.
+    private static let seedAudioVoices = [
+        "Describe in prompt",
+        "Aria", "Nova", "Sol", "Ember", "Cove", "Vale", "Onyx", "Iris",
+        "Juno", "Atlas", "Wren", "Sage", "Rowan", "Lyra", "Orion", "Hazel",
+        "Milo", "Freya", "Reed", "Ada", "Cyrus", "Nora", "Felix", "Luna",
+    ]
+
+    /// Audio models Venice accepts but a key's `/models` may omit. Seed Audio 1.0 is a premium
+    /// prompt-directed narration/VO model on the async audio queue (25 voices, 2048-char cap,
+    /// speed 0.5–2, mp3/wav, ~$0.0029/s — harness `b137102`, 2026-07-17). The three music
+    /// models are added conservatively (prompt-only, no lyrics/instrumental/style flags) pending
+    /// a live capability probe, per the never-over-enable rule in the harness-sync workspace rule.
+    private static var audioEntries: [[String: Any]] {
+        [
+            audioEntry(
+                id: "seed-audio-1-0", name: "Seed Audio 1.0", type: "music", category: "tts",
+                constraints: [
+                    "voices": seedAudioVoices,
+                    "default_voice": "Describe in prompt",
+                    "max_prompt_length": 2048,
+                    "min_speed": 0.5,
+                    "max_speed": 2.0,
+                    "formats": ["mp3", "wav"],
+                ],
+                usdPerSecond: 0.0029
+            ),
+            audioEntry(id: "minimax-music-v25", name: "MiniMax Music v2.5", type: "music", category: "music"),
+            audioEntry(id: "minimax-music-v26", name: "MiniMax Music v2.6", type: "music", category: "music"),
+            audioEntry(id: "lyria-3-pro", name: "Lyria 3 Pro", type: "music", category: "music"),
+        ]
+    }
+
+    private static func audioEntry(
+        id: String, name: String, type: String, category: String,
+        constraints extra: [String: Any] = [:], usdPerSecond: Double? = nil
+    ) -> [String: Any] {
+        var constraints: [String: Any] = ["category": category]
+        constraints.merge(extra) { _, new in new }
+        var spec: [String: Any] = ["name": name, "constraints": constraints]
+        if let usdPerSecond { spec["pricing"] = ["usd_per_second": usdPerSecond] }
+        return ["id": id, "type": type, "model_spec": spec]
     }
 
     private static func videoEntry(id: String, name: String, modelType: String, durations: [String], resolutions: [String]) -> [String: Any] {

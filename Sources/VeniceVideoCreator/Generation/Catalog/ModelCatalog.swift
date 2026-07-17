@@ -254,6 +254,12 @@ struct AudioCaps: Decodable, Sendable {
     let promptLabel: String?
     let minSeconds: Int?
     let maxSeconds: Int?
+    /// Pre-flight metadata mirrored from the harness `MusicModelSpec` so paid 400s are caught
+    /// before submission. Optional: absent for models Venice doesn't describe.
+    var maxPromptLength: Int? = nil
+    var minSpeed: Double? = nil
+    var maxSpeed: Double? = nil
+    var formats: [String]? = nil
 }
 
 struct UpscaleCaps: Decodable, Sendable {

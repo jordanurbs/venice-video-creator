@@ -59,6 +59,9 @@ enum ToolName: String, CaseIterable, Sendable {
     case createCharacter = "create_character"
     case auditionVoices = "audition_voices"
     case lockVoice = "lock_voice"
+    case storyboardShots = "storyboard_shots"
+    case qaShot = "qa_shot"
+    case fixPanel = "fix_panel"
     case readSkill = "read_skill"
     case getProjects = "get_projects"
     case openProject = "open_project"
@@ -1102,6 +1105,45 @@ enum ToolDefinitions {
                     "voiceModel": ["type": "string", "description": "Audio model slug the voice belongs to (recommended, e.g. 'seed-audio-1-0')."],
                 ],
                 required: ["characterId", "voiceId"]
+            )
+        ),
+        AgentTool(
+            name: .storyboardShots,
+            description: "Generate a storyboard panel image for each shot so the look can be reviewed before paying for video. By default panels are made for every shot without one yet; pass shotIds to target specific shots (or regenerate). When a shot references characters with ready reference images, those are passed as image references so the panel keeps the character's likeness. Each panel is linked to its shot and the shot moves to 'storyboarded'. Async — poll get_media, then inspect_media / qa_shot / fix_panel.",
+            inputSchema: objectSchema(
+                properties: [
+                    "shotIds": ["type": "array", "items": ["type": "string"], "description": "Shots to storyboard. Omit to storyboard every shot without a panel yet."],
+                    "model": ["type": "string", "description": "Image model slug (defaults to an enabled reference-capable image model)."],
+                    "aspectRatio": ["type": "string", "description": "Panel aspect ratio (defaults to the plan's)."],
+                    "resolution": ["type": "string", "description": "Panel resolution (defaults to the cheapest)."],
+                    "useCharacterRefs": ["type": "boolean", "description": "Augment panels with character reference images when available. Default true."],
+                    "folderId": ["type": "string", "description": "Folder to place panels in."],
+                ]
+            )
+        ),
+        AgentTool(
+            name: .qaShot,
+            description: "Run vision QA on a shot: reviews its generated video (preferred) or storyboard panel against the shot's intent with a vision model, returns a structured verdict (score, pass/fail, concrete issues) plus the reviewed frames, and annotates the shot's QA notes. Requires the asset to be ready — poll get_media first. Use before approving a shot; on fail, use fix_panel (panel) or regenerate_shot (video).",
+            inputSchema: objectSchema(
+                properties: [
+                    "shotId": ["type": "string", "description": "Shot id from get_shot_plan."],
+                    "mediaRef": ["type": "string", "description": "Optional asset id to review instead of the shot's own video/panel."],
+                    "frameCount": ["type": "integer", "description": "Frames to sample from a video (1–6, default 3)."],
+                    "autoApprove": ["type": "boolean", "description": "If it passes, set the shot to 'approved'. Default false."],
+                ],
+                required: ["shotId"]
+            )
+        ),
+        AgentTool(
+            name: .fixPanel,
+            description: "Correct a shot's storyboard panel with a multi-edit pass. Defaults the instruction to the shot's QA notes; pass 'instructions' to override. The corrected panel replaces the shot's storyboard (async — poll get_media, then qa_shot again).",
+            inputSchema: objectSchema(
+                properties: [
+                    "shotId": ["type": "string", "description": "Shot id whose storyboard panel to fix."],
+                    "instructions": ["type": "string", "description": "What to change. Defaults to the shot's QA notes."],
+                    "model": ["type": "string", "description": "Edit model slug (defaults to the standard edit model)."],
+                ],
+                required: ["shotId"]
             )
         ),
     ]

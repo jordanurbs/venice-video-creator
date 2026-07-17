@@ -150,6 +150,9 @@ final class ToolExecutor {
         case .createCharacter: return try createCharacter(editor, args)
         case .auditionVoices:  return try auditionVoices(editor, args)
         case .lockVoice:       return try lockVoice(editor, args)
+        case .storyboardShots: return try storyboardShots(editor, args)
+        case .qaShot:          return try await qaShot(editor, args)
+        case .fixPanel:        return try fixPanel(editor, args)
         case .readSkill:     return readSkill(args)
         case .getProjects, .openProject, .newProject:
             return await runProjectTool(tool, args)

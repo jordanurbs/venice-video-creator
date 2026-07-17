@@ -98,6 +98,11 @@ struct GenerationInput: Codable, Sendable, Equatable {
     /// Venice queue id for async video/audio jobs; the handle that survives relaunch.
     var queueId: String?
     var queueDownloadURL: String?
+    /// Provenance (ported from harness `provenance.ts`): whether this image depicts a face,
+    /// and any edit models applied after the base generation. Feeds the Seedance
+    /// face-provenance gate when the image is used as a reference.
+    var hasFace: Bool?
+    var editModels: [String]?
 }
 
 enum MediaSource: Codable, Sendable, Equatable {

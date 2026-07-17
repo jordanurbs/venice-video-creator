@@ -147,6 +147,9 @@ final class ToolExecutor {
         case .saveShotPlan:  return try saveShotPlan(editor, args)
         case .getShotPlan:   return try getShotPlan(editor)
         case .updateShots:   return try updateShots(editor, args)
+        case .createCharacter: return try createCharacter(editor, args)
+        case .auditionVoices:  return try auditionVoices(editor, args)
+        case .lockVoice:       return try lockVoice(editor, args)
         case .readSkill:     return readSkill(args)
         case .getProjects, .openProject, .newProject:
             return await runProjectTool(tool, args)

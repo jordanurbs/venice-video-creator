@@ -56,6 +56,9 @@ enum ToolName: String, CaseIterable, Sendable {
     case saveShotPlan = "save_shot_plan"
     case getShotPlan = "get_shot_plan"
     case updateShots = "update_shots"
+    case createCharacter = "create_character"
+    case auditionVoices = "audition_voices"
+    case lockVoice = "lock_voice"
     case readSkill = "read_skill"
     case getProjects = "get_projects"
     case openProject = "open_project"
@@ -1054,6 +1057,51 @@ enum ToolDefinitions {
                     ],
                 ],
                 required: ["operations"]
+            )
+        ),
+        AgentTool(
+            name: .createCharacter,
+            description: "Create a recurring character for the production and (by default) generate reference images for it so shots stay visually consistent (used later as Seedance R2V references). Pass name plus a visual 'prompt' (or 'description'); by default it generates 2 reference views (front + three-quarter). Pass count/poses to control that, or referenceMediaRefs to attach existing images instead of generating. Generated references are async — poll get_media on the returned generatingAssetIds. The character is stored in the shot plan; reference to it from shots via characterIds.",
+            inputSchema: objectSchema(
+                properties: [
+                    "name": ["type": "string", "description": "Character name."],
+                    "description": ["type": "string", "description": "Persona/appearance notes (also used as the image prompt if 'prompt' is omitted)."],
+                    "prompt": ["type": "string", "description": "Visual prompt for the reference images (appearance, wardrobe, style)."],
+                    "count": ["type": "integer", "description": "Number of reference views to generate (0–4). Default 2, or 0 when referenceMediaRefs are supplied."],
+                    "poses": ["type": "array", "items": ["type": "string"], "description": "Optional pose/angle descriptors, one per view (e.g. 'front view', 'three-quarter view')."],
+                    "referenceMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Existing image asset ids to attach as references instead of (or in addition to) generating."],
+                    "model": ["type": "string", "description": "Image model slug (defaults to an enabled image model)."],
+                    "aspectRatio": ["type": "string", "description": "Reference image aspect ratio."],
+                    "resolution": ["type": "string", "description": "Reference image resolution (defaults to the cheapest)."],
+                    "folderId": ["type": "string", "description": "Folder to place generated references in."],
+                ],
+                required: ["name"]
+            )
+        ),
+        AgentTool(
+            name: .auditionVoices,
+            description: "Generate one short text-to-speech sample per candidate voice so the user can choose one for a character. Uses an enabled TTS model; pass specific 'voices' or let it pick the first few. Samples are async — poll get_media, then inspect_media to listen. This does NOT lock a voice; call lock_voice with the winner afterward.",
+            inputSchema: objectSchema(
+                properties: [
+                    "characterId": ["type": "string", "description": "Character to audition for (labels the samples and the default line)."],
+                    "model": ["type": "string", "description": "TTS model slug (defaults to an enabled speech model with voices)."],
+                    "voices": ["type": "array", "items": ["type": "string"], "description": "Specific voice ids to try. Omit to use the first few the model offers."],
+                    "count": ["type": "integer", "description": "How many voices to sample when 'voices' is omitted (1–8, default 4)."],
+                    "text": ["type": "string", "description": "The line each voice speaks. Defaults to a generic self-introduction."],
+                    "folderId": ["type": "string", "description": "Folder to place the samples in."],
+                ]
+            )
+        ),
+        AgentTool(
+            name: .lockVoice,
+            description: "Lock a character's voice after auditioning. Sets the character's voice id (and the audio model it belongs to) so dialogue for that character always uses it. Provide voiceModel to validate the voice belongs to that model.",
+            inputSchema: objectSchema(
+                properties: [
+                    "characterId": ["type": "string", "description": "Character id from get_shot_plan."],
+                    "voiceId": ["type": "string", "description": "Chosen voice id."],
+                    "voiceModel": ["type": "string", "description": "Audio model slug the voice belongs to (recommended, e.g. 'seed-audio-1-0')."],
+                ],
+                required: ["characterId", "voiceId"]
             )
         ),
     ]

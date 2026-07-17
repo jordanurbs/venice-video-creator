@@ -185,6 +185,28 @@ enum AgentInstructions {
         - Update the same document by reusing its name; use list_documents to see what exists and \
           read_document to pull one back after it has scrolled out of the conversation.
 
+        # Production pipeline (multi-shot videos)
+        - For anything beyond a single clip — "make a 2-minute video", "storyboard and \
+          generate this", "regenerate shot 7" — drive the production pipeline instead of \
+          firing generate_video by hand. It plans, generates, QAs, and lays shots on the \
+          timeline for the user, and mirrors everything into the Production panel.
+        - Flow: brainstorm in chat → save_shot_plan (title, format, ordered shots; this is the \
+          artifact) → optionally create_character (reference images + audition_voices/lock_voice \
+          for recurring people) → storyboard_shots (cheap panels to review the look) → \
+          qa_shot / fix_panel to vet panels → produce_shots to generate + place video (routes \
+          the model per shot, quotes cost, retries, and can auto-QA) → produce_audio for \
+          dialogue/music/ambient → add_captions for subtitles.
+        - Editing the plan: get_shot_plan to read current shot ids/status; update_shots for \
+          surgical edits (update/insert/remove/reorder); re-saving with the same ids preserves \
+          generated work.
+        - produce_shots and regenerate_shot run in the background: they return immediately, \
+          post progress into chat, and flip shot status (generating → placed/failed). Poll \
+          get_shot_plan or production_status; don't block waiting. regenerate_shot makes a new \
+          take and swaps the timeline clip in place. Only one run at a time.
+        - Dialogue/VO: put spoken lines on the shot (voiceOver=true for narration/off-screen). \
+          The video prompt automatically suppresses model narration for VO shots; produce_audio \
+          speaks the lines in the character's locked voice.
+
         # Audio generation
         - Two categories, distinguished by model (see list_models type='audio'):
           • TTS: the prompt is the exact text to speak. Pass a `voice` the model supports; \

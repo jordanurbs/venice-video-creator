@@ -44,4 +44,26 @@ enum VideoModelCapabilities {
         if lower.contains("wan-2-7") { return 3 }
         return nil
     }
+
+    /// Whether the model accepts an `elements[]` array (per-element reference + optional
+    /// per-element `audio_url`), as used by Kling O3 and Wan 2.7 R2V. Conservative default
+    /// off; the request builder for `elements[]` is deliberately deferred (see plan), so no
+    /// family is enabled yet — flipping this on must accompany the builder + a live probe.
+    static func supportsElements(id: String) -> Bool {
+        false
+    }
+
+    /// Whether the model accepts `scene_images` (multiple scene/setting reference images
+    /// distinct from character references). Conservative default off pending a live probe.
+    static func supportsSceneImages(id: String) -> Bool {
+        false
+    }
+
+    /// Whether the model supports per-reference audio (each reference image/element carrying
+    /// its own `audio_url`), e.g. Wan 2.7 R2V's `elements[].audio_url`. This is why Wan 2.7
+    /// R2V is excluded from the top-level `audioInputCapable` path above. Conservative default
+    /// off until the `elements[]` builder lands; only Wan 2.7 R2V is a known candidate.
+    static func perReferenceAudio(id: String) -> Bool {
+        false
+    }
 }

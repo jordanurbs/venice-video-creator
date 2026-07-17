@@ -17,6 +17,10 @@ struct GenerationView: View {
     @State private var selectedResolution = "1080p"
     @State private var selectedQuality = "high"
     @State private var selectedNumImages = 1
+    /// Number of independent video takes to submit sequentially (t2v models).
+    @State private var selectedVideoCount = 1
+    /// Progress state for the sequential video-batch send; non-nil shows the blocking sheet.
+    @State private var videoBatchProgress: VideoBatchProgress?
     /// Image style preset (Venice `/image/styles`); empty = none.
     @State private var selectedStyle = ""
     @Bindable private var styleCatalog = ImageStyleCatalog.shared
@@ -200,6 +204,7 @@ struct GenerationView: View {
     }
 
     private var canSubmit: Bool {
+        if videoBatchProgress != nil { return false }
         if selectedType == .video && videoModel.requiresSourceVideo {
             guard sourceVideo != nil else { return false }
             if videoModel.requiresReferenceImage && imageReferences.isEmpty { return false }
@@ -323,6 +328,20 @@ struct GenerationView: View {
         selectedType == .image && imageReferences.isEmpty && imageModel.maxImages > 1
     }
 
+    /// Venice has no video batch param, so multiple takes are separate requests sent
+    /// one at a time. Offered for text/image-to-video only (not video-to-video edit).
+    private static let videoVariantMax = 12
+
+    private var supportsVideoVariants: Bool {
+        selectedType == .video && !videoModel.requiresSourceVideo
+    }
+
+    /// Clamped video take count for the current form state.
+    private var effectiveVideoCount: Int {
+        guard supportsVideoVariants else { return 1 }
+        return min(Self.videoVariantMax, max(1, selectedVideoCount))
+    }
+
     private var supportsImageStylePreset: Bool {
         selectedType == .image && imageReferences.isEmpty && !styleCatalog.styles.isEmpty
     }
@@ -383,12 +402,13 @@ struct GenerationView: View {
     private var estimatedCost: Int? {
         switch selectedType {
         case .video:
-            return CostEstimator.videoCost(
+            let unit = CostEstimator.videoCost(
                 model: videoModel,
                 durationSeconds: effectiveVideoSeconds,
                 resolution: effectiveResolution,
                 generateAudio: effectiveGenerateAudio
             )
+            return unit.map { $0 * effectiveVideoCount }
         case .image:
             let quality = currentQualities != nil ? selectedQuality : nil
             return CostEstimator.imageCost(
@@ -429,6 +449,9 @@ struct GenerationView: View {
         }
         if supportsImageVariants, selectedNumImages > 1 {
             parts.append("×\(selectedNumImages)")
+        }
+        if supportsVideoVariants, effectiveVideoCount > 1 {
+            parts.append("×\(effectiveVideoCount)")
         }
         return parts.joined(separator: " \u{00B7} ")
     }
@@ -589,6 +612,16 @@ struct GenerationView: View {
         .padding(.horizontal, AppTheme.Spacing.sm)
         .padding(.bottom, AppTheme.Spacing.sm)
         .frame(maxHeight: max(0, CGFloat(maxPanelHeight)), alignment: .top)
+        .sheet(isPresented: Binding(
+            get: { videoBatchProgress != nil },
+            set: { if !$0 { videoBatchProgress = nil } }
+        )) {
+            if let progress = videoBatchProgress {
+                VideoBatchSendingView(progress: progress) {
+                    videoBatchProgress?.cancelled = true
+                }
+            }
+        }
         .onAppear {
             ImageStyleCatalog.shared.configure()
             let hadSeed = editor.pendingPanelSeed != nil
@@ -894,7 +927,7 @@ struct GenerationView: View {
 
     /// Changes to any of these re-fetch the cost estimate.
     private var costSignature: String {
-        "\(selectedType.rawValue)|\(currentModelId)|\(effectiveVideoSeconds)|\(effectiveResolution ?? "")|\(selectedAspectRatio)|\(selectedNumImages)|\(selectedAudioDuration)"
+        "\(selectedType.rawValue)|\(currentModelId)|\(effectiveVideoSeconds)|\(effectiveResolution ?? "")|\(selectedAspectRatio)|\(selectedNumImages)|\(effectiveVideoCount)|\(selectedAudioDuration)"
     }
 
     /// Live USD estimate: Venice quote for video/audio, static per-image price for images.
@@ -902,12 +935,13 @@ struct GenerationView: View {
         guard let api = VeniceAPI.fromKeychain() else { estimatedUSD = nil; return }
         switch selectedType {
         case .video:
-            estimatedUSD = await api.videoQuote(
+            let unit = await api.videoQuote(
                 model: currentModelId,
                 duration: effectiveVideoSeconds,
                 resolution: effectiveResolution,
                 aspectRatio: selectedAspectRatio
             )
+            estimatedUSD = unit.map { $0 * Double(effectiveVideoCount) }
         case .audio:
             let secs: Int? = audioModel.durations?.isEmpty == false
                 ? selectedAudioDuration
@@ -1695,6 +1729,13 @@ struct GenerationView: View {
                     options: Array(1...imageModel.maxImages)
                 ) { "\($0)" }
             }
+            if supportsVideoVariants {
+                settingsPicker(
+                    "Count",
+                    selection: $selectedVideoCount,
+                    options: Array(1...Self.videoVariantMax)
+                ) { "\($0)" }
+            }
             if supportsImageStylePreset {
                 stylePickerMenu
             }
@@ -1863,6 +1904,41 @@ struct GenerationView: View {
         )
     }
 
+    /// Submits `count` independent video takes one at a time — Venice has no batch
+    /// param — advancing only after each request reaches the queue so a large source
+    /// upload isn't repeated and the API isn't hammered. A blocking sheet reports
+    /// progress; Cancel stops further sends but keeps takes already submitted.
+    private func sendVideoBatch(
+        submission: VideoGenerationSubmission,
+        count: Int,
+        onComplete: (@MainActor (MediaAsset) -> Void)?,
+        onFailure: (@MainActor () -> Void)?,
+        autoOpenPreview: @escaping (String) -> Void
+    ) {
+        videoBatchProgress = VideoBatchProgress(sent: 0, total: count)
+        Task { @MainActor in
+            var firstAssetId: String?
+            for index in 0..<count {
+                if videoBatchProgress?.cancelled == true { break }
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    let resumedOnce = FirstOnlyFlag()
+                    let assetId = submission.submit(
+                        service: editor.generationService,
+                        projectURL: editor.projectURL,
+                        editor: editor,
+                        onComplete: onComplete,
+                        onFailure: onFailure,
+                        onQueued: { if resumedOnce.fire() { continuation.resume() } }
+                    )
+                    if firstAssetId == nil { firstAssetId = assetId }
+                }
+                if videoBatchProgress != nil { videoBatchProgress?.sent = index + 1 }
+            }
+            videoBatchProgress = nil
+            if let firstAssetId { autoOpenPreview(firstAssetId) }
+        }
+    }
+
     private func submitGeneration() {
         let audioDuration: Int = {
             guard selectedType == .audio else { return 0 }
@@ -1957,7 +2033,7 @@ struct GenerationView: View {
                     ? (inputAssets.sourceVideo?.folderId ?? inputAssets.imageRefs.last?.folderId)
                     : inputAssets.textToVideoReferences.last?.folderId
             ) ?? editor.mediaPanelCurrentFolderId
-            let videoAssetId = VideoGenerationSubmission.make(
+            let submission = VideoGenerationSubmission.make(
                 genInput: genInput,
                 model: model,
                 inputAssets: inputAssets,
@@ -1965,14 +2041,27 @@ struct GenerationView: View {
                 trimmedSourceOverride: trimmedSource,
                 folderId: videoFolderId,
                 generateAudio: effectiveGenerateAudio
-            ).submit(
-                service: editor.generationService,
-                projectURL: editor.projectURL,
-                editor: editor,
-                onComplete: makeOnComplete(trimmedSource?.hasTrim == true),
-                onFailure: onFailure
             )
-            autoOpenPreview(videoAssetId)
+            let videoOnComplete = makeOnComplete(trimmedSource?.hasTrim == true)
+            let count = effectiveVideoCount
+            if count > 1 {
+                sendVideoBatch(
+                    submission: submission,
+                    count: count,
+                    onComplete: videoOnComplete,
+                    onFailure: onFailure,
+                    autoOpenPreview: autoOpenPreview
+                )
+            } else {
+                let videoAssetId = submission.submit(
+                    service: editor.generationService,
+                    projectURL: editor.projectURL,
+                    editor: editor,
+                    onComplete: videoOnComplete,
+                    onFailure: onFailure
+                )
+                autoOpenPreview(videoAssetId)
+            }
         case .image:
             let model = imageModel
             let imageAssetId = ImageGenerationSubmission.make(
@@ -2170,6 +2259,9 @@ struct GenerationView: View {
         if selectedType == .video, !videoModel.durations.contains(selectedDuration) {
             selectedDuration = videoModel.durations.first ?? 5
         }
+        selectedVideoCount = supportsVideoVariants
+            ? min(max(1, selectedVideoCount), Self.videoVariantMax)
+            : 1
         if selectedType == .image {
             selectedNumImages = supportsImageVariants
                 ? min(max(1, selectedNumImages), imageModel.maxImages)
@@ -2181,5 +2273,45 @@ struct GenerationView: View {
         } else {
             selectedStyle = ""
         }
+    }
+}
+
+/// Progress for a sequential video-take batch send.
+struct VideoBatchProgress: Equatable {
+    var sent: Int
+    var total: Int
+    var cancelled = false
+}
+
+/// Blocking sheet shown while video takes are submitted one at a time.
+private struct VideoBatchSendingView: View {
+    let progress: VideoBatchProgress
+    let onCancel: () -> Void
+
+    private var current: Int { min(progress.sent + 1, progress.total) }
+
+    var body: some View {
+        VStack(spacing: AppTheme.Spacing.lg) {
+            ProgressView(value: Double(progress.sent), total: Double(progress.total))
+                .progressViewStyle(.linear)
+                .tint(AppTheme.Accent.primary)
+            VStack(spacing: AppTheme.Spacing.xxs) {
+                Text(progress.cancelled
+                    ? "Finishing current request…"
+                    : "Sending request \(current) of \(progress.total)…")
+                    .font(.system(size: AppTheme.FontSize.md, weight: .semibold))
+                    .foregroundStyle(AppTheme.Text.primaryColor)
+                Text("Keep this open until all takes are queued.")
+                    .font(.system(size: AppTheme.FontSize.xs))
+                    .foregroundStyle(AppTheme.Text.secondaryColor)
+            }
+            Button("Cancel", action: onCancel)
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(progress.cancelled)
+        }
+        .padding(AppTheme.Spacing.xl)
+        .frame(width: 320)
+        .interactiveDismissDisabled(true)
     }
 }

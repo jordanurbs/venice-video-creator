@@ -19,7 +19,8 @@ struct VideoGenerationSubmission {
         projectURL: URL?,
         editor: EditorViewModel,
         onComplete: (@MainActor (MediaAsset) -> Void)? = nil,
-        onFailure: (@MainActor () -> Void)? = nil
+        onFailure: (@MainActor () -> Void)? = nil,
+        onQueued: (@MainActor () -> Void)? = nil
     ) -> String {
         service.generate(
             genInput: genInput,
@@ -36,7 +37,8 @@ struct VideoGenerationSubmission {
             projectURL: projectURL,
             editor: editor,
             onComplete: onComplete,
-            onFailure: onFailure
+            onFailure: onFailure,
+            onQueued: onQueued
         )
     }
 

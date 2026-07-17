@@ -49,9 +49,21 @@ final class GenerationService {
         projectURL: URL?,
         editor: EditorViewModel,
         onComplete: (@MainActor (MediaAsset) -> Void)? = nil,
-        onFailure: (@MainActor () -> Void)? = nil
+        onFailure: (@MainActor () -> Void)? = nil,
+        onQueued: (@MainActor () -> Void)? = nil
     ) -> String {
         let count = max(1, min(4, numImages))
+        // Fires once when the request reaches the Venice queue (or settles before it);
+        // batch drivers use this to send the next request only after this one lands.
+        let queuedOnce = FirstOnlyFlag()
+        let fireQueued: (@MainActor () -> Void)?
+        if let onQueued {
+            fireQueued = { @MainActor in
+                if queuedOnce.fire() { onQueued() }
+            }
+        } else {
+            fireQueued = nil
+        }
         let baseName = name ?? String(genInput.prompt.prefix(30))
         editor.recordUsedModel(id: genInput.model, assetType: assetType)
 
@@ -119,7 +131,8 @@ final class GenerationService {
                     genInput: finalGenInput,
                     editor: editor,
                     onComplete: onComplete,
-                    onFailure: onFailure
+                    onFailure: onFailure,
+                    onQueued: fireQueued
                 )
             } catch {
                 // VeniceAPI wraps URLError, so a cancelled upload surfaces as .transport, not CancellationError — trust the task's cancellation flag.
@@ -134,6 +147,7 @@ final class GenerationService {
                         updateGenerationMetadata(placeholder, editor: editor, status: .failed("Upload failed: \(message)"))
                     }
                 }
+                fireQueued?()
                 onFailure?()
             }
         }
@@ -519,7 +533,8 @@ final class GenerationService {
         genInput: GenerationInput,
         editor: EditorViewModel,
         onComplete: (@MainActor (MediaAsset) -> Void)?,
-        onFailure: (@MainActor () -> Void)?
+        onFailure: (@MainActor () -> Void)?,
+        onQueued: (@MainActor () -> Void)? = nil
     ) async {
         let runId = String(UUID().uuidString.prefix(8))
         Log.generation.notice("run \(runId) start model=\(genInput.model) placeholders=\(placeholders.count)")
@@ -538,6 +553,7 @@ final class GenerationService {
             for placeholder in placeholders {
                 updateGenerationMetadata(placeholder, editor: editor, status: .failed(message))
             }
+            onQueued?()
             onFailure?()
             return
         }
@@ -558,6 +574,7 @@ final class GenerationService {
                 updateGenerationMetadata(placeholder, editor: editor, status: .cancelled)
             }
             editor.onProjectCheckpointRequired?()
+            onQueued?()
             onFailure?()
             return
         }
@@ -568,7 +585,8 @@ final class GenerationService {
             editor: editor,
             failIfUnavailable: true,
             onComplete: onComplete,
-            onFailure: onFailure
+            onFailure: onFailure,
+            onQueued: onQueued
         )
     }
 
@@ -578,7 +596,8 @@ final class GenerationService {
         editor: EditorViewModel,
         failIfUnavailable: Bool = false,
         onComplete: (@MainActor (MediaAsset) -> Void)?,
-        onFailure: (@MainActor () -> Void)?
+        onFailure: (@MainActor () -> Void)?,
+        onQueued: (@MainActor () -> Void)? = nil
     ) async {
         guard let publisher = GenerationBackend.subscribe(jobId: backendJobId) else {
             if failIfUnavailable {
@@ -586,6 +605,7 @@ final class GenerationService {
                     updateGenerationMetadata(placeholder, editor: editor, status: .failed("Generation couldn't start. Check your Venice key in Settings."))
                 }
                 editor.onProjectCheckpointRequired?()
+                onQueued?()
                 onFailure?()
             }
             return
@@ -599,7 +619,8 @@ final class GenerationService {
                 placeholders: placeholders,
                 editor: editor,
                 onComplete: onComplete,
-                onFailure: onFailure
+                onFailure: onFailure,
+                onQueued: onQueued
             ) {
                 return
             }
@@ -637,10 +658,12 @@ final class GenerationService {
         placeholders: [MediaAsset],
         editor: EditorViewModel,
         onComplete: (@MainActor (MediaAsset) -> Void)?,
-        onFailure: (@MainActor () -> Void)?
+        onFailure: (@MainActor () -> Void)?,
+        onQueued: (@MainActor () -> Void)? = nil
     ) async -> Bool {
         switch job.status {
         case .succeeded:
+            onQueued?()
             if updateBackendJobMetadata(
                 placeholders,
                 backendJobId: backendJobId,
@@ -657,6 +680,7 @@ final class GenerationService {
             )
             return true
         case .failed:
+            onQueued?()
             let message = job.errorMessage ?? "Generation failed"
             Log.generation.error("job \(backendJobId) failed: \(message)")
             for placeholder in placeholders {
@@ -677,6 +701,7 @@ final class GenerationService {
             onFailure?()
             return true
         case .cancelled:
+            onQueued?()
             Log.generation.notice("job \(backendJobId) cancelled")
             for placeholder in placeholders {
                 updateGenerationMetadata(placeholder, editor: editor, status: .cancelled)
@@ -685,6 +710,7 @@ final class GenerationService {
             onFailure?()
             return true
         case .queued, .running:
+            if job.queueId != nil { onQueued?() }
             var changed = updateBackendJobMetadata(
                 placeholders,
                 backendJobId: backendJobId,

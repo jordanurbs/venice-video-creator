@@ -33,7 +33,8 @@ extension VeniceAPI {
     func fetchCatalog() async throws -> VeniceCatalog {
         let obj = try await getJSON(path: "models?type=all")
         let data = (obj["data"] as? [[String: Any]]) ?? []
-        return VeniceModelMapper.map(data)
+        // Add known-good models this key's /models omits (de-duped against live).
+        return VeniceModelMapper.map(SupplementalModels.merged(into: data))
     }
 }
 

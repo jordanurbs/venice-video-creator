@@ -1,10 +1,12 @@
 import Foundation
 
 struct MediaManifest: Codable, Sendable, Equatable {
-    var version: Int = 2
+    var version: Int = 3
     var entries: [MediaManifestEntry] = []
     var folders: [MediaFolder] = []
     var documents: [ProjectDocument] = []
+    /// The agent/production shot plan for this project, if any (version 3+).
+    var shotPlan: ShotPlan?
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -12,11 +14,12 @@ struct MediaManifest: Codable, Sendable, Equatable {
         entries = try c.decodeIfPresent([MediaManifestEntry].self, forKey: .entries) ?? []
         folders = try c.decodeIfPresent([MediaFolder].self, forKey: .folders) ?? []
         documents = try c.decodeIfPresent([ProjectDocument].self, forKey: .documents) ?? []
+        shotPlan = try c.decodeIfPresent(ShotPlan.self, forKey: .shotPlan)
     }
 
     init() {}
 
-    private enum CodingKeys: String, CodingKey { case version, entries, folders, documents }
+    private enum CodingKeys: String, CodingKey { case version, entries, folders, documents, shotPlan }
 }
 
 /// A markdown document authored in the project (scripts, storyboards, shot lists).

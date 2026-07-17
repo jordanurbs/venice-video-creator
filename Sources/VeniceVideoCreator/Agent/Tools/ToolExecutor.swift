@@ -144,6 +144,9 @@ final class ToolExecutor {
         case .saveDocument:  return try saveDocument(editor, args)
         case .readDocument:  return try readDocument(editor, args)
         case .listDocuments: return listDocuments(editor)
+        case .saveShotPlan:  return try saveShotPlan(editor, args)
+        case .getShotPlan:   return try getShotPlan(editor)
+        case .updateShots:   return try updateShots(editor, args)
         case .readSkill:     return readSkill(args)
         case .getProjects, .openProject, .newProject:
             return await runProjectTool(tool, args)
@@ -201,6 +204,24 @@ final class ToolExecutor {
     nonisolated static func jsonString(_ obj: Any) -> String? {
         guard let data = try? JSONSerialization.data(withJSONObject: obj) else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    /// Encodes an `Encodable` to a Foundation JSON object (dict/array) for embedding in a
+    /// `[String: Any]` response, or nil on failure.
+    nonisolated static func encodeAsJSONObject<T: Encodable>(_ value: T) -> Any? {
+        guard let data = try? JSONEncoder().encode(value),
+              let obj = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        return obj
+    }
+
+    /// Decodes a `Decodable` from a JSON object dictionary (e.g. tool args), throwing a
+    /// `ToolError` with `path` context on failure.
+    nonisolated static func decode<T: Decodable>(_ dict: [String: Any], as type: T.Type, path: String) throws -> T {
+        let data: Data
+        do { data = try JSONSerialization.data(withJSONObject: dict) }
+        catch { throw ToolError("\(path): could not serialize (\(error.localizedDescription))") }
+        do { return try JSONDecoder().decode(T.self, from: data) }
+        catch { throw ToolError("\(path): \(error.localizedDescription)") }
     }
 
     func withUndoGroup<T>(_ editor: EditorViewModel, actionName: String, _ work: () throws -> T) rethrows -> T {

@@ -53,6 +53,9 @@ enum ToolName: String, CaseIterable, Sendable {
     case saveDocument = "save_document"
     case readDocument = "read_document"
     case listDocuments = "list_documents"
+    case saveShotPlan = "save_shot_plan"
+    case getShotPlan = "get_shot_plan"
+    case updateShots = "update_shots"
     case readSkill = "read_skill"
     case getProjects = "get_projects"
     case openProject = "open_project"
@@ -995,7 +998,113 @@ enum ToolDefinitions {
             description: "List the project's saved markdown documents (id, name, size, last updated). Call this to see what written deliverables already exist before creating or reading one.",
             inputSchema: objectSchema()
         ),
+        AgentTool(
+            name: .saveShotPlan,
+            description: "Create or replace the project's shot plan — the structured artifact that drives production (storyboarding, generation, timeline assembly). Use this after brainstorming a video in chat to commit the plan: title, format, and an ordered list of shots. Re-saving with the same shot ids preserves their production state (status, storyboard/video assets, take history) so you never lose generated work — pass back the ids from get_shot_plan when revising. New shots (no id) get fresh ids and status 'planned'. A human-readable mirror appears in the Documents tab automatically. Returns a summary with each shot's id and index.",
+            inputSchema: objectSchema(
+                properties: [
+                    "title": ["type": "string", "description": "Production title."],
+                    "logline": ["type": "string", "description": "One-line premise (optional)."],
+                    "aspectRatio": ["type": "string", "description": "e.g. '16:9', '9:16'. Default '16:9'."],
+                    "resolution": ["type": "string", "description": "e.g. '720p', '1080p'. Default '1080p'."],
+                    "defaultModel": ["type": "string", "description": "Default video model slug for shots without a modelOverride. Optional — the orchestrator routes a sensible default otherwise."],
+                    "defaultShotSeconds": ["type": "number", "description": "Fallback shot duration in seconds. Default 5."],
+                    "characters": ["type": "array", "description": "Recurring characters referenced by shots.", "items": characterSchema()],
+                    "shots": ["type": "array", "description": "Ordered shots. Array order is the timeline order.", "items": shotSchema()],
+                ],
+                required: ["title", "shots"]
+            )
+        ),
+        AgentTool(
+            name: .getShotPlan,
+            description: "Return the current shot plan as JSON (title, format, characters, and every shot with its id, prompt, status, take history, and linked assets). Call this before update_shots or before generating, so you have the current shot ids and production state. Returns null when no plan exists yet.",
+            inputSchema: objectSchema()
+        ),
+        AgentTool(
+            name: .updateShots,
+            description: "Make surgical edits to the existing shot plan without rewriting the whole thing. Applies an ordered list of operations: update (patch fields on a shot by id), insert (add a shot, optionally after a given id or at an index), remove (delete a shot by id), reorder (set the full shot order by id). Planning only — this does not generate anything. Returns the updated plan summary.",
+            inputSchema: objectSchema(
+                properties: [
+                    "operations": [
+                        "type": "array",
+                        "description": "Operations applied in order.",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "action": ["type": "string", "enum": ["update", "insert", "remove", "reorder"], "description": "Operation type."],
+                                "id": ["type": "string", "description": "Shot id (for update/remove)."],
+                                "afterId": ["type": "string", "description": "insert: place the new shot after this shot id."],
+                                "atIndex": ["type": "integer", "description": "insert: place at this 0-based index (ignored if afterId given)."],
+                                "orderedIds": ["type": "array", "items": ["type": "string"], "description": "reorder: the full shot order by id."],
+                                "shot": shotSchema(),
+                                "slug": ["type": "string"],
+                                "summary": ["type": "string"],
+                                "prompt": ["type": "string"],
+                                "durationSeconds": ["type": "number"],
+                                "motionLevel": ["type": "string", "enum": ShotMotionLevel.allCases.map(\.rawValue)],
+                                "transition": ["type": "string", "enum": ShotTransition.allCases.map(\.rawValue)],
+                                "modelOverride": ["type": "string"],
+                                "characterIds": ["type": "array", "items": ["type": "string"]],
+                                "nativeAudio": ["type": "string", "enum": ShotNativeAudio.allCases.map(\.rawValue)],
+                                "status": ["type": "string", "enum": ShotStatus.allCases.map(\.rawValue)],
+                                "dialogue": ["type": "array", "items": dialogueSchema()],
+                            ],
+                            "required": ["action"],
+                        ],
+                    ],
+                ],
+                required: ["operations"]
+            )
+        ),
     ]
+
+    private static func shotSchema() -> [String: Any] {
+        [
+            "type": "object",
+            "description": "A single shot. Omit id for a new shot; pass an existing id to keep its production state.",
+            "properties": [
+                "id": ["type": "string", "description": "Existing shot id (from get_shot_plan). Omit to create a new shot."],
+                "slug": ["type": "string", "description": "Short handle shown in the UI/chat, e.g. 'S1'."],
+                "summary": ["type": "string", "description": "One-line human description of the shot."],
+                "prompt": ["type": "string", "description": "The prompt sent to the video model."],
+                "durationSeconds": ["type": "number", "description": "Shot length in seconds."],
+                "motionLevel": ["type": "string", "enum": ShotMotionLevel.allCases.map(\.rawValue), "description": "Motion intensity hint."],
+                "transition": ["type": "string", "enum": ShotTransition.allCases.map(\.rawValue), "description": "Transition into the next shot. dissolve/matchCut drive last-frame chaining."],
+                "modelOverride": ["type": "string", "description": "Per-shot video model slug; falls back to the plan default."],
+                "characterIds": ["type": "array", "items": ["type": "string"], "description": "Character ids appearing in this shot."],
+                "nativeAudio": ["type": "string", "enum": ShotNativeAudio.allCases.map(\.rawValue), "description": "How to treat the model's own audio once placed: keep (ambient/SFX), duck, or mute."],
+                "dialogue": ["type": "array", "items": dialogueSchema(), "description": "Spoken lines. Voice-over lines drive TTS but are kept out of the video prompt."],
+            ],
+        ]
+    }
+
+    private static func dialogueSchema() -> [String: Any] {
+        [
+            "type": "object",
+            "properties": [
+                "characterId": ["type": "string", "description": "Character id for the locked voice; omit for anonymous/narrator lines."],
+                "speaker": ["type": "string", "description": "Free-text speaker label when no character is linked (e.g. 'NARRATOR')."],
+                "text": ["type": "string", "description": "The line."],
+                "voiceOver": ["type": "boolean", "description": "True for off-screen narration/V.O. — drives TTS but never the video prompt."],
+            ],
+            "required": ["text"],
+        ]
+    }
+
+    private static func characterSchema() -> [String: Any] {
+        [
+            "type": "object",
+            "properties": [
+                "id": ["type": "string", "description": "Existing character id. Omit to create."],
+                "name": ["type": "string", "description": "Character name."],
+                "description": ["type": "string", "description": "Appearance/persona notes."],
+                "referenceImageAssetIds": ["type": "array", "items": ["type": "string"], "description": "Reference image asset ids for visual consistency."],
+                "lockedVoiceId": ["type": "string", "description": "Locked TTS voice id for this character's dialogue."],
+                "voiceModel": ["type": "string", "description": "Audio model slug the locked voice belongs to."],
+            ],
+            "required": ["name"],
+        ]
+    }
 
     /// One line per non-color effect for apply_effect's description, generated from the registry.
     private static func effectCatalog() -> String {

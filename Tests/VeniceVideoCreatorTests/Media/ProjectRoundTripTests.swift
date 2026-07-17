@@ -236,6 +236,56 @@ struct ProjectRoundTripTests {
         #expect(manifest.folders.isEmpty)
     }
 
+    // MARK: - ShotPlan
+
+    @Test func shotPlanSurvivesRoundTripInManifest() throws {
+        var manifest = MediaManifest()
+        let character = CharacterSpec(
+            id: "char-1", name: "Nova", description: "lead",
+            referenceImageAssetIds: ["img-1", "img-2"],
+            lockedVoiceId: "aria", voiceModel: "seed-audio-1-0",
+            provenance: CharacterProvenance(generationModel: "flux", editModels: ["nano-banana"], hasFace: true),
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        var shot = Shot(
+            id: "shot-1", slug: "S1", summary: "Opening",
+            prompt: "wide establishing shot", durationSeconds: 8,
+            motionLevel: .dynamic, transition: .dissolve,
+            modelOverride: "seedance-2-0-reference-to-video",
+            characterIds: ["char-1"],
+            dialogue: [ShotDialogue(id: "d1", characterId: "char-1", text: "We begin.", voiceOver: true)],
+            nativeAudio: .mute, status: .approved,
+            storyboardAssetId: "sb-1", videoAssetId: "vid-1",
+            takes: [ShotTake(id: "t1", videoAssetId: "vid-1", model: "seedance", createdAt: Date(timeIntervalSince1970: 1_700_000_100), qaScore: 0.9)]
+        )
+        shot.qaSummary = "looks good"
+        manifest.shotPlan = ShotPlan(
+            title: "My Film", logline: "a test", aspectRatio: "9:16", resolution: "1080p",
+            defaultModel: "seedance-2-0-text-to-video", defaultShotSeconds: 6,
+            shots: [shot], characters: [character],
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_200)
+        )
+        #expect(try roundTrip(manifest) == manifest)
+        #expect(manifest.version == 3)
+    }
+
+    @Test func shotPlanDecodesWithDefaultsWhenFieldsMissing() throws {
+        let json = #"{"shots":[{"summary":"a"}]}"#
+        let plan = try JSONDecoder().decode(ShotPlan.self, from: Data(json.utf8))
+        #expect(plan.aspectRatio == "16:9")
+        #expect(plan.resolution == "1080p")
+        #expect(plan.shots.count == 1)
+        #expect(plan.shots[0].status == .planned)
+        #expect(plan.shots[0].motionLevel == .moderate)
+        #expect(!plan.shots[0].id.isEmpty)
+    }
+
+    @Test func manifestWithoutShotPlanDecodesAsNil() throws {
+        let json = "{}"
+        let manifest = try JSONDecoder().decode(MediaManifest.self, from: Data(json.utf8))
+        #expect(manifest.shotPlan == nil)
+    }
+
     // MARK: - GenerationLog
 
     @Test func generationLogSurvivesRoundTrip() throws {

@@ -747,13 +747,6 @@ extension ToolExecutor {
         return meta
     }
 
-    private static func encodeAsJSONObject<T: Encodable>(_ value: T) -> Any? {
-        guard let data = try? JSONEncoder().encode(value),
-              let obj = try? JSONSerialization.jsonObject(with: data)
-        else { return nil }
-        return obj
-    }
-
     private static func imagePropertiesSummary(at url: URL) -> [String: Any]? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]

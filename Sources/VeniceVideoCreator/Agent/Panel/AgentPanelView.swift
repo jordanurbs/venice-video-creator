@@ -10,6 +10,26 @@ struct AgentPanelView: View {
             prompt: "Generate an AI video of "
         ),
         AgentStarterPrompt(
+            title: "Produce a multi-shot video",
+            systemImage: "movieclapper",
+            prompt: "Produce a multi-shot video. Brainstorm the concept with me, save a shot plan, storyboard the shots so I can review the look, then generate each shot and place it on the timeline. The idea: "
+        ),
+        AgentStarterPrompt(
+            title: "Brainstorm a video",
+            systemImage: "lightbulb",
+            prompt: "Brainstorm a video with me. Ask what I'm trying to make, pitch a few distinct directions with format, tone, and rough shot ideas, and refine the one I pick. Don't generate anything yet. Here's what I have so far: "
+        ),
+        AgentStarterPrompt(
+            title: "Write a script",
+            systemImage: "doc.text",
+            prompt: "Write a script for a video. Ask what it's about, its length, and its audience if unclear, then draft narration and dialogue with rough scene directions, and save it as a document I can review and revise with you. The video: "
+        ),
+        AgentStarterPrompt(
+            title: "Storyboard a script",
+            systemImage: "rectangle.grid.2x2",
+            prompt: "Storyboard a script. Take the script or outline I give you, break it into an ordered shot plan with framing and duration per shot, save the plan, and generate storyboard panels so I can review the look before producing anything. The script: "
+        ),
+        AgentStarterPrompt(
             title: "Generate B-roll",
             systemImage: "film",
             prompt: "Generate B-roll for my timeline. Inspect the current edit, identify sections that would benefit from cutaways, generate suitable B-roll, and place it where it supports the story."

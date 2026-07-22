@@ -65,7 +65,7 @@ extension EditorViewModel {
     /// Reorders shots to match `orderedIds`; ids not present are left in their relative order at the end.
     func reorderShots(orderedIds: [String]) {
         mutateShotPlan(actionName: "Reorder Shots") { plan in
-            var byId = Dictionary(uniqueKeysWithValues: plan.shots.map { ($0.id, $0) })
+            var byId = Dictionary(plan.shots.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             var reordered: [Shot] = []
             for id in orderedIds {
                 if let shot = byId.removeValue(forKey: id) { reordered.append(shot) }

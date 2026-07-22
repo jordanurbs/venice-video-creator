@@ -4,46 +4,46 @@ overview: Port the venice-video-harness production pipeline natively into the ap
 todos:
   - id: commit-inflight
     content: Commit the in-flight batching + SupplementalModels changes (orchestrator depends on onQueued)
-    status: pending
+    status: completed
   - id: shot-plan-model
     content: "Phase 1: ShotPlan/Shot/CharacterSpec models + MediaManifest persistence + markdown mirror"
-    status: pending
+    status: completed
   - id: plan-tools
     content: "Phase 1: save_shot_plan / get_shot_plan / update_shots agent tools"
-    status: pending
+    status: completed
   - id: characters
     content: "Phase 2: create_character, audition_voices, lock_voice tools + provenance sidecars"
-    status: pending
+    status: completed
   - id: storyboard
     content: "Phase 2: storyboard_shots tool (reference-augmented panels + multi-edit refine)"
-    status: pending
+    status: completed
   - id: vision-qa
-    content: "Phase 2: VisionQA.swift + qa_shot / fix_panel tools"
-    status: pending
+    content: "Phase 2: VisionQA.swift + qa_shot / fix_panel tools (fix_panel currently single-image /image/edit, not multi-edit with character refs)"
+    status: completed
   - id: orchestrator
     content: "Phase 3: ProductionOrchestrator with sequential shot loop, quoting, routing, retry, resume"
-    status: pending
+    status: completed
   - id: keyframe-pipeline
-    content: "Phase 3: Seedance R2V → frame extract → Wan 2.7 lip-sync shot strategy + frame chaining"
+    content: "Phase 3: Seedance R2V → frame extract → Wan 2.7 lip-sync shot strategy (DEFERRED — see below; frame chaining on dissolve/match-cut IS done)"
     status: pending
   - id: regenerate-shot
     content: "Phase 3: regenerate_shot tool with take history + in-place timeline clip replacement"
-    status: pending
+    status: completed
   - id: progress
     content: "Phase 3: orchestrator progress → postSystemNotice into chat + observable run state"
-    status: pending
+    status: completed
   - id: audio-assembly
-    content: "Phase 4: dialogue/music/ambient lanes, per-shot native-audio flags, VO prompt rules, captions step"
-    status: pending
+    content: "Phase 4: dialogue/music/ambient lanes, per-shot native-audio flags, VO prompt rules, captions step (partial — no named lanes, duck flag unapplied, captions is a hint to add_captions)"
+    status: completed
   - id: seed-audio
     content: "Phase 4: Seed Audio 1.0 + new music models in AudioModelConfig with MusicModelSpec-style pre-flight metadata"
-    status: pending
+    status: completed
   - id: production-panel
-    content: "Phase 5: ProductionPanel UI (shot list, statuses, costs, run controls)"
-    status: pending
+    content: "Phase 5: ProductionPanel UI (shot list, statuses, costs, run controls) — no per-shot cost column yet, running total only"
+    status: completed
   - id: capability-sync
     content: Extend VideoModelCapabilities (elements/sceneImages/perReferenceAudio) + sync harness models.ts
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -129,10 +129,32 @@ Key decision: a native `ProductionOrchestrator` (per-editor, like `GenerationSer
 
 ## Deliberately deferred
 
+- **Seedance→Wan keyframe lip-sync pipeline** (2026-07-17 audit): the Stage A R2V render →
+  frame extract → Stage C Wan 2.7 i2v + padded `audio_url` shot strategy was not built in the
+  initial port. The building blocks all exist (`LastFrameExtractor.pngData(url:atSeconds:)`,
+  `AudioSilencePadder` + `minAudioInputSeconds` in `VideoGenerationSubmission`,
+  `audioInputCapable` in `VideoModelCapabilities`), but no orchestrator stage chains them and
+  the router has no lip-sync route. Deferred until the basic produce loop has real-world mileage;
+  when built, it should be a `ShotStrategy` the router picks when a shot has dialogue with
+  `voiceOver == false` and a character with a locked voice.
+- Explicit family-default routing port (`resolveVideoFamilyDefaults`): current routing is
+  generic capability-based; Seedance R2V wins character-consistency shots only because
+  SupplementalModels orders it first. Fine for now, revisit with the lip-sync strategy.
 - `elements[]` request builder (Kling O3 / Wan 2.7 R2V per-element audio) — phase 2 of routing, after the basic pipeline works
 - Cross-project asset library, EDL/text-based editing pipeline, NLE timeline export additions (app already has FCPXML export)
 - Whisper-based cut-qa self-eval
+- Phase 4 remainder: dedicated named dialogue/SFX/music timeline lanes, applying per-shot
+  `nativeAudio` duck/volume to placed clips, a real `generate_captions_for_production` step
+  (today the produce_audio hint points at `add_captions`), export loudness normalization check.
+- Phase 5 remainder: per-shot cost quote column in the panel (running total only today).
 
 ## Open item
 
-The uncommitted batching changes (`onQueued` plumbing, `SupplementalModels.swift`, Count picker) should be committed first — the orchestrator builds directly on `onQueued`.
+~~The uncommitted batching changes (`onQueued` plumbing, `SupplementalModels.swift`, Count picker) should be committed first — the orchestrator builds directly on `onQueued`.~~ Done (`505e068`). Note the orchestrator ended up awaiting `onComplete` only; `onQueued` is used by the generation panel's sequential batching.
+
+## Post-port fixes (2026-07-17 audit)
+
+- Provenance: edit paths (`submitImageEdit`, background-remove, upscale — covering `edit_image` and `fix_panel`) now carry `hasFace` forward and append to `editModels`, so the Seedance face-provenance gate sees post-edit lineage.
+- `save_shot_plan` no longer wipes characters when the `characters` key is omitted on a re-save.
+- Duplicate shot ids are rejected on save/insert; the reorder/merge dictionaries no longer trap on duplicates.
+- Orchestrator `resume(editor:)` reconciles stuck `generating`/`qa` shots: places finished assets, watches still-recovering generations, and fails shots whose asset is gone or settled unusable.

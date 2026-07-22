@@ -4,6 +4,13 @@ import Foundation
 @MainActor
 enum EditSubmitter {
 
+    /// Carries face/edit provenance from the source asset onto a derived result, appending
+    /// the edit model, so the Seedance face-provenance gate sees post-edit lineage.
+    private static func carryProvenance(from asset: MediaAsset, into input: inout GenerationInput, editModel: String) {
+        input.hasFace = asset.generationInput?.hasFace
+        input.editModels = (asset.generationInput?.editModels ?? []) + [editModel]
+    }
+
     /// Marks the source asset busy for the life of the job so a second click
     /// can't submit (and charge for) a duplicate.
     private static func trackJob(
@@ -47,13 +54,14 @@ enum EditSubmitter {
             }
             return max(1, Int(asset.duration.rounded()))
         }()
-        let genInput = GenerationInput(
+        var genInput = GenerationInput(
             prompt: "",
             model: model.id,
             duration: effectiveDuration,
             aspectRatio: "",
             resolution: nil
         )
+        carryProvenance(from: asset, into: &genInput, editModel: model.id)
 
         let isImage = asset.type == .image
         let placeholderDuration: Double
@@ -104,10 +112,11 @@ enum EditSubmitter {
         guard AccountService.shared.isSignedIn, asset.type == .image else { return nil }
         guard !editor.activeAIEditSourceIds.contains(asset.id) else { return nil }
         let tracked = trackJob(sourceAssetId: asset.id, editor: editor, onComplete: onComplete, onFailure: onFailure)
-        let genInput = GenerationInput(
+        var genInput = GenerationInput(
             prompt: "", model: VeniceBuiltInModel.backgroundRemove,
             duration: 0, aspectRatio: "", resolution: nil
         )
+        carryProvenance(from: asset, into: &genInput, editModel: VeniceBuiltInModel.backgroundRemove)
         let sourceAssetId = asset.id
         return editor.generationService.generate(
             genInput: genInput,
@@ -150,10 +159,11 @@ enum EditSubmitter {
         let model = modelId
             ?? ModelCatalog.shared.editModels.first?.id
             ?? VeniceBuiltInModel.defaultEdit
-        let genInput = GenerationInput(
+        var genInput = GenerationInput(
             prompt: trimmed, model: model,
             duration: 0, aspectRatio: "", resolution: nil
         )
+        carryProvenance(from: asset, into: &genInput, editModel: model)
         let sourceAssetId = asset.id
         return editor.generationService.generate(
             genInput: genInput,

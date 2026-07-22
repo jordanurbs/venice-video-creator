@@ -5,11 +5,17 @@ extension ToolExecutor {
 
     /// Creates or replaces the whole shot plan. Runtime state (status, storyboard/video
     /// assets, take history, QA) is preserved for shots whose id matches an existing shot,
-    /// so re-saving a plan never discards generated work.
+    /// so re-saving a plan never discards generated work. Characters are likewise kept
+    /// unless the args explicitly pass a `characters` array — an omitted key must not
+    /// wipe locked voices and reference images.
     func saveShotPlan(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         var plan = try Self.decode(args, as: ShotPlan.self, path: "save_shot_plan")
+        try Self.requireUniqueShotIds(plan.shots, path: "save_shot_plan")
         plan.shots = try plan.shots.map { try Self.validated($0, index: nil) }
         plan.shots = Self.mergeRuntimeState(newShots: plan.shots, existing: editor.shotPlan?.shots ?? [])
+        if args["characters"] == nil, let existing = editor.shotPlan?.characters {
+            plan.characters = existing
+        }
         let saved = editor.saveShotPlan(plan)
         return .ok(Self.jsonString(Self.summary(of: saved)) ?? "{}")
     }
@@ -66,6 +72,9 @@ extension ToolExecutor {
             }
             var shot = try decode(shotObj, as: Shot.self, path: "\(path).shot")
             shot = try validated(shot, index: nil)
+            guard !plan.shots.contains(where: { $0.id == shot.id }) else {
+                throw ToolError("\(path): a shot with id '\(shot.id)' already exists. Omit 'id' to insert a new shot.")
+            }
             let insertIdx: Int
             if let afterId = op.string("afterId") {
                 guard let after = plan.shots.firstIndex(where: { $0.id == afterId }) else {
@@ -89,7 +98,7 @@ extension ToolExecutor {
         case "reorder":
             let ids = op.stringArray("orderedIds")
             guard !ids.isEmpty else { throw ToolError("\(path): 'reorder' requires 'orderedIds'.") }
-            var byId = Dictionary(uniqueKeysWithValues: plan.shots.map { ($0.id, $0) })
+            var byId = Dictionary(plan.shots.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             var reordered: [Shot] = []
             for id in ids {
                 if let shot = byId.removeValue(forKey: id) { reordered.append(shot) }
@@ -144,10 +153,19 @@ extension ToolExecutor {
         return s
     }
 
+    /// Duplicate shot ids would silently merge state (and used to trap in
+    /// `Dictionary(uniqueKeysWithValues:)`), so reject them up front with a clear error.
+    private static func requireUniqueShotIds(_ shots: [Shot], path: String) throws {
+        var seen: Set<String> = []
+        for shot in shots where !seen.insert(shot.id).inserted {
+            throw ToolError("\(path): duplicate shot id '\(shot.id)'. Each shot needs a unique id (or omit 'id' for new shots).")
+        }
+    }
+
     /// Carries production state (status, assets, takes, QA) from `existing` shots onto
     /// re-saved shots with the same id; new ids keep their planned defaults.
     private static func mergeRuntimeState(newShots: [Shot], existing: [Shot]) -> [Shot] {
-        let byId = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+        let byId = Dictionary(existing.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return newShots.map { incoming in
             guard let old = byId[incoming.id] else { return incoming }
             var merged = incoming

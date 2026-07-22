@@ -49,17 +49,54 @@ final class ProductionOrchestrator {
     }
 
     /// On reopen: place any shot whose generated video finished while closed and reconcile
-    /// statuses. Does not auto-resume the loop — the user restarts it from the panel/agent.
+    /// statuses — a shot stuck `generating`/`qa` with no recoverable asset flips to `failed`
+    /// instead of shimmering forever; one still generating server-side gets a watcher that
+    /// places it on completion. Does not auto-resume the loop — the user restarts it from
+    /// the panel/agent.
     func resume(editor: EditorViewModel) {
         guard let plan = editor.shotPlan else { return }
         for shot in plan.shots {
             guard shot.status == .generating || shot.status == .qa else { continue }
-            if let assetId = shot.videoAssetId,
-               let asset = editor.mediaAssets.first(where: { $0.id == assetId }),
-               ToolExecutor.isReady(asset, editor: editor),
-               editor.productionClipId(forAsset: assetId) == nil {
-                _ = editor.placeProductionShotClip(asset: asset, actionName: "Place Shot")
+            guard let assetId = shot.videoAssetId,
+                  let asset = editor.mediaAssets.first(where: { $0.id == assetId }) else {
+                failShot(shot.id, reason: "Generation was interrupted before it could be recovered. Regenerate the shot.")
+                continue
+            }
+            if ToolExecutor.isReady(asset, editor: editor) {
+                if editor.productionClipId(forAsset: assetId) == nil {
+                    _ = editor.placeProductionShotClip(asset: asset, actionName: "Place Shot")
+                }
                 editor.setShotStatus(id: shot.id, .placed)
+            } else if asset.isGenerating || asset.isRecoveringGeneration {
+                watchAndPlace(shotId: shot.id, assetId: assetId)
+            } else {
+                failShot(shot.id, reason: "Generation did not finish. Regenerate the shot.")
+            }
+        }
+    }
+
+    /// Polls a recovering generation and places the shot when its asset becomes ready
+    /// (or marks the shot failed when the generation settles without a usable file).
+    private func watchAndPlace(shotId: String, assetId: String) {
+        Task { @MainActor [weak self] in
+            while let self, let editor = self.editor {
+                guard let asset = editor.mediaAssets.first(where: { $0.id == assetId }) else {
+                    self.failShot(shotId, reason: "Generated asset disappeared. Regenerate the shot.")
+                    return
+                }
+                if ToolExecutor.isReady(asset, editor: editor) {
+                    if editor.productionClipId(forAsset: assetId) == nil {
+                        _ = editor.placeProductionShotClip(asset: asset, actionName: "Place Shot")
+                    }
+                    editor.setShotStatus(id: shotId, .placed)
+                    return
+                }
+                if !asset.isGenerating && !asset.isRecoveringGeneration {
+                    self.failShot(shotId, reason: "Generation did not finish. Regenerate the shot.")
+                    return
+                }
+                try? await Task.sleep(for: .seconds(3))
+                if self.cancelRequested { return }
             }
         }
     }

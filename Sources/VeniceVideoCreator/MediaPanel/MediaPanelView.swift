@@ -7,7 +7,7 @@ struct MediaPanelView: View {
     @State private var hoveredTab: PanelTab?
 
     enum PanelTab: String, CaseIterable {
-        case media = "Media", captions = "Captions", music = "Music", documents = "Documents", production = "Production"
+        case media = "Media", captions = "Captions", music = "Music", documents = "Documents", production = "Shot List", cast = "Cast & Objects", locations = "Locations"
         var icon: String {
             switch self {
             case .media: "folder"
@@ -15,6 +15,8 @@ struct MediaPanelView: View {
             case .music: "music.note"
             case .documents: "doc.text"
             case .production: "film.stack"
+            case .cast: "person.2"
+            case .locations: "map"
             }
         }
     }
@@ -31,6 +33,8 @@ struct MediaPanelView: View {
                 case .music: MusicTab()
                 case .documents: DocumentsTab()
                 case .production: ProductionPanel()
+                case .cast: CastPanel()
+                case .locations: LocationsPanel()
                 }
             }
             .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -42,6 +46,15 @@ struct MediaPanelView: View {
         }
         .onChange(of: editor.mediaPanelShowMediaTabTick) { _, _ in
             withAnimation(.easeInOut(duration: AppTheme.Anim.transition)) { panelTab = .media }
+        }
+        .onChange(of: editor.mediaPanelShowProductionTabTick) { _, _ in
+            withAnimation(.easeInOut(duration: AppTheme.Anim.transition)) { panelTab = .production }
+        }
+        .onChange(of: editor.mediaPanelShowCastTabTick) { _, _ in
+            withAnimation(.easeInOut(duration: AppTheme.Anim.transition)) { panelTab = .cast }
+        }
+        .onChange(of: editor.mediaPanelShowLocationsTabTick) { _, _ in
+            withAnimation(.easeInOut(duration: AppTheme.Anim.transition)) { panelTab = .locations }
         }
         .overlay(alignment: .topLeading) {
             if let hoveredTab {

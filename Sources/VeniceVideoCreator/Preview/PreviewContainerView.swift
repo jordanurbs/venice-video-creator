@@ -343,10 +343,8 @@ struct PreviewContainerView: View {
 
     private func generatingPreview(label: String) -> some View {
         ZStack {
-            if let image = activeGeneratingReferenceImage {
-                Color.clear
-                    .overlay { Image(nsImage: image).resizable().scaledToFill().blur(radius: 24) }
-                    .clipped()
+            if let asset = activeMediaAsset {
+                GeneratingReferenceBlur(asset: asset, blurRadius: 24)
             }
             Color.black.opacity(AppTheme.Opacity.strong)
             GeneratingOverlay(label: label, size: .preview)
@@ -354,18 +352,6 @@ struct PreviewContainerView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .allowsHitTesting(false)
-    }
-
-    private var activeGeneratingReferenceImage: NSImage? {
-        guard let input = activeMediaAsset?.generationInput else { return nil }
-        let refIds = (input.imageURLAssetIds ?? []) + (input.referenceImageAssetIds ?? [])
-        for id in refIds {
-            guard let ref = editor.mediaAssets.first(where: { $0.id == id }), ref.type == .image else { continue }
-            if let image = ref.thumbnail ?? NSImage(contentsOf: ref.url) {
-                return image
-            }
-        }
-        return nil
     }
 
     private static func unprocessablePrefill(path: String?) -> String {

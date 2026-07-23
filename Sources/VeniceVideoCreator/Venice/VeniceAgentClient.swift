@@ -45,11 +45,15 @@ struct VeniceAgentClient: AgentClient {
             characterSlug: characterSlug
         )
         let api = VeniceAPI(apiKey: apiKey)
-        let request = api.makeRequest(
+        var request = api.makeRequest(
             path: "chat/completions",
             accept: "text/event-stream",
             body: try JSONSerialization.data(withJSONObject: body, options: [])
         )
+        // timeoutInterval is an idle (between-bytes) timeout for streams, not a
+        // total cap — 90s of silence means the stream is dead, fail it visibly
+        // instead of hanging behind the thinking dots forever.
+        request.timeoutInterval = 90
 
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
         if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
@@ -71,6 +75,9 @@ enum OpenAISSE {
         var id: String = ""
         var name: String = ""
         var arguments: String = ""
+        /// Whether `.toolUseStarted` was yielded. Once announced the id is
+        /// pinned so the later `.toolUseComplete` carries the same id.
+        var announced: Bool = false
     }
 
     static func parse(
@@ -98,10 +105,15 @@ enum OpenAISSE {
                     for call in toolCalls {
                         let index = call["index"] as? Int ?? 0
                         var acc = tools[index] ?? ToolAccumulator()
-                        if let id = call["id"] as? String, !id.isEmpty { acc.id = id }
+                        if !acc.announced, let id = call["id"] as? String, !id.isEmpty { acc.id = id }
                         if let function = call["function"] as? [String: Any] {
                             if let name = function["name"] as? String, !name.isEmpty { acc.name = name }
                             if let args = function["arguments"] as? String { acc.arguments += args }
+                        }
+                        if !acc.announced, !acc.name.isEmpty {
+                            if acc.id.isEmpty { acc.id = "call_\(index)" }
+                            acc.announced = true
+                            continuation.yield(.toolUseStarted(id: acc.id, name: acc.name))
                         }
                         tools[index] = acc
                     }

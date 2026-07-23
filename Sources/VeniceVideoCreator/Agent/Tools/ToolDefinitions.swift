@@ -35,6 +35,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case createMatte = "create_matte"
     case listModels = "list_models"
     case inspectMedia = "inspect_media"
+    case waitForMedia = "wait_for_media"
     case getTranscript = "get_transcript"
     case inspectTimeline = "inspect_timeline"
     case searchMedia = "search_media"
@@ -57,6 +58,9 @@ enum ToolName: String, CaseIterable, Sendable {
     case getShotPlan = "get_shot_plan"
     case updateShots = "update_shots"
     case createCharacter = "create_character"
+    case updateCharacter = "update_character"
+    case createLocation = "create_location"
+    case updateLocation = "update_location"
     case auditionVoices = "audition_voices"
     case lockVoice = "lock_voice"
     case storyboardShots = "storyboard_shots"
@@ -94,6 +98,20 @@ enum ToolDefinitions {
             name: .getMedia,
             description: "Call before referencing any asset. Every mediaRef/reference ID in other tools comes from the IDs returned here. Also exposes generationStatus (preparing | generating | downloading | failed | none) for async-generated and async-imported assets.",
             inputSchema: objectSchema()
+        ),
+        AgentTool(
+            name: .waitForMedia,
+            description: "Block until async-generated assets finish (or fail), instead of polling get_media / inspect_media in a loop. Pass the mediaRefs returned by generation tools (generate_image, generate_video, storyboard_shots, etc.). Returns per-asset status once every asset is settled or the timeout elapses — assets still in flight at timeout come back as 'pending', so you can wait again or report progress. Prefer ONE call with all ids over per-asset calls.",
+            inputSchema: objectSchema(
+                properties: [
+                    "mediaRefs": [
+                        "type": "array", "items": ["type": "string"],
+                        "description": "Asset IDs to wait for (placeholder ids returned by generation tools).",
+                    ],
+                    "timeoutSeconds": ["type": "integer", "description": "Max seconds to wait before returning whatever has settled (default 120, max 300)."],
+                ],
+                required: ["mediaRefs"]
+            )
         ),
         AgentTool(
             name: .inspectMedia,
@@ -1056,6 +1074,9 @@ enum ToolDefinitions {
                                 "modelOverride": ["type": "string"],
                                 "characterIds": ["type": "array", "items": ["type": "string"]],
                                 "nativeAudio": ["type": "string", "enum": ShotNativeAudio.allCases.map(\.rawValue)],
+                                "audioContent": ["type": "string", "enum": ShotAudioContent.allCases.map(\.rawValue)],
+                                "audioReferenceAssetId": ["type": "string", "description": "Explicit audio asset to attach as audio_url for this shot (wins over the cast default). Pass empty/null to clear."],
+                                "attachCastVoiceReference": ["type": "boolean", "description": "Attach the first attached character's locked voice reference as audio_url on audio-input models. Default true."],
                                 "status": ["type": "string", "enum": ShotStatus.allCases.map(\.rawValue)],
                                 "dialogue": ["type": "array", "items": dialogueSchema()],
                             ],
@@ -1068,10 +1089,11 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .createCharacter,
-            description: "Create a recurring character for the production and (by default) generate reference images for it so shots stay visually consistent (used later as Seedance R2V references). Pass name plus a visual 'prompt' (or 'description'); by default it generates 2 reference views (front + three-quarter). Pass count/poses to control that, or referenceMediaRefs to attach existing images instead of generating. Generated references are async — poll get_media on the returned generatingAssetIds. The character is stored in the shot plan; reference to it from shots via characterIds.",
+            description: "Create a recurring cast entry — a person OR an inanimate object/prop — for the production and (by default) generate reference images so shots stay visually consistent (used later as Seedance R2V references). Pass name plus a visual 'prompt' (or 'description'); by default it generates 2 reference views. Set kind='object' for a recurring prop (a specific car, weapon, gadget): objects skip the face-provenance gate and have no voice, and get product-style reference plates. Pass count/poses to control views, or referenceMediaRefs to attach existing images instead of generating. Generated references are async — wait_for_media on the returned generatingAssetIds. Stored in the shot plan (Cast & Objects); reference it from shots via characterIds.",
             inputSchema: objectSchema(
                 properties: [
-                    "name": ["type": "string", "description": "Character name."],
+                    "name": ["type": "string", "description": "Character or object name."],
+                    "kind": ["type": "string", "enum": ["person", "object"], "description": "'person' (default — face gate + lockable voice) or 'object' for a recurring prop/object (no face, no voice)."],
                     "description": ["type": "string", "description": "Persona/appearance notes (also used as the image prompt if 'prompt' is omitted)."],
                     "prompt": ["type": "string", "description": "Visual prompt for the reference images (appearance, wardrobe, style)."],
                     "count": ["type": "integer", "description": "Number of reference views to generate (0–4). Default 2, or 0 when referenceMediaRefs are supplied."],
@@ -1086,8 +1108,60 @@ enum ToolDefinitions {
             )
         ),
         AgentTool(
+            name: .updateCharacter,
+            description: "Update an existing character in the shot plan — rename, change description/visual prompt, or (most importantly) attach reference images that already exist in the media library so they show in the Cast tab and drive R2V consistency. Use this whenever images meant as character references were generated via generate_image / edit_image: loose Media images are invisible to the production pipeline until attached here. referenceMediaRefs REPLACES the character's reference set when provided; pass addReferenceMediaRefs to append instead.",
+            inputSchema: objectSchema(
+                properties: [
+                    "characterId": ["type": "string", "description": "Character id from get_shot_plan."],
+                    "name": ["type": "string", "description": "New name."],
+                    "description": ["type": "string", "description": "New persona/appearance notes."],
+                    "prompt": ["type": "string", "description": "New visual prompt for reference [re]generation."],
+                    "referenceMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Image asset ids that REPLACE the character's reference set."],
+                    "addReferenceMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Image asset ids to APPEND to the character's reference set."],
+                    "lockedReferenceMediaRef": ["type": "string", "description": "Lock ONE attached reference as the character's canonical look — generation then uses only it (recommended when references show different-looking takes). Pass empty/null to unlock."],
+                    "voiceReferenceMediaRef": ["type": "string", "description": "Lock ONE audio asset as the character's canonical voice reference — shots with this character then attach it as audio_url by default on audio-input models (Seedance R2V, Wan 2.5/2.6/2.7). Pass empty/null to unlock."],
+                ],
+                required: ["characterId"]
+            )
+        ),
+        AgentTool(
+            name: .createLocation,
+            description: "Create a recurring location/setting for the production and (by default) generate 2 reference plates (wide establishing + entrance perspective) so environments stay consistent across shots. Pass name plus a visual 'prompt' (or 'description'). Pass count/angles to control views, or referenceMediaRefs to attach existing images instead. Async — wait_for_media on generatingAssetIds. Attach to shots via locationIds; shot generation feeds the location's references alongside character references.",
+            inputSchema: objectSchema(
+                properties: [
+                    "name": ["type": "string", "description": "Location name (e.g. 'Dale's kitchen', 'Mill interior')."],
+                    "description": ["type": "string", "description": "Setting notes (also used as the image prompt if 'prompt' is omitted)."],
+                    "prompt": ["type": "string", "description": "Visual prompt for the reference plates (architecture, era, mood, palette)."],
+                    "count": ["type": "integer", "description": "Number of reference plates to generate (0–4). Default 2, or 0 when referenceMediaRefs are supplied."],
+                    "angles": ["type": "array", "items": ["type": "string"], "description": "Optional angle descriptors, one per plate (e.g. 'wide establishing shot')."],
+                    "referenceMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Existing image asset ids to attach instead of (or in addition to) generating."],
+                    "model": ["type": "string", "description": "Image model slug (defaults to an enabled image model)."],
+                    "aspectRatio": ["type": "string", "description": "Reference plate aspect ratio."],
+                    "resolution": ["type": "string", "description": "Reference plate resolution (defaults to the cheapest)."],
+                    "folderId": ["type": "string", "description": "Folder to place generated references in."],
+                ],
+                required: ["name"]
+            )
+        ),
+        AgentTool(
+            name: .updateLocation,
+            description: "Update an existing location — rename, change description/visual prompt, attach reference images that already exist in the media library (loose Media images are invisible to the Locations tab until attached), or lock one reference as the canonical look. referenceMediaRefs REPLACES the set; addReferenceMediaRefs appends.",
+            inputSchema: objectSchema(
+                properties: [
+                    "locationId": ["type": "string", "description": "Location id from get_shot_plan."],
+                    "name": ["type": "string", "description": "New name."],
+                    "description": ["type": "string", "description": "New setting notes."],
+                    "prompt": ["type": "string", "description": "New visual prompt for reference [re]generation."],
+                    "referenceMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Image asset ids that REPLACE the location's reference set."],
+                    "addReferenceMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Image asset ids to APPEND to the location's reference set."],
+                    "lockedReferenceMediaRef": ["type": "string", "description": "Lock ONE attached reference as the location's canonical look. Pass empty/null to unlock."],
+                ],
+                required: ["locationId"]
+            )
+        ),
+        AgentTool(
             name: .auditionVoices,
-            description: "Generate one short text-to-speech sample per candidate voice so the user can choose one for a character. Uses an enabled TTS model; pass specific 'voices' or let it pick the first few. Samples are async — poll get_media, then inspect_media to listen. This does NOT lock a voice; call lock_voice with the winner afterward.",
+            description: "Generate one short text-to-speech sample per candidate voice so the user can choose one for a character. Uses an enabled TTS model; pass specific 'voices' or let it pick the first few. Samples are async — wait_for_media on the sample ids, then inspect_media to listen. This does NOT lock a voice; call lock_voice with the winner afterward.",
             inputSchema: objectSchema(
                 properties: [
                     "characterId": ["type": "string", "description": "Character to audition for (labels the samples and the default line)."],
@@ -1101,19 +1175,20 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .lockVoice,
-            description: "Lock a character's voice after auditioning. Sets the character's voice id (and the audio model it belongs to) so dialogue for that character always uses it. Provide voiceModel to validate the voice belongs to that model.",
+            description: "Lock a character's voice after auditioning. Sets the character's voice id (and the audio model it belongs to) so dialogue for that character always uses it. Provide voiceModel to validate the voice belongs to that model. Pass voiceReferenceMediaRef (usually the winning audition sample) to also lock that audio as the character's voice reference — shot generation then attaches it as audio_url by default on audio-input models. When omitted and no reference exists yet, a canonical sample is generated in the locked voice and auto-locked when ready.",
             inputSchema: objectSchema(
                 properties: [
                     "characterId": ["type": "string", "description": "Character id from get_shot_plan."],
                     "voiceId": ["type": "string", "description": "Chosen voice id."],
                     "voiceModel": ["type": "string", "description": "Audio model slug the voice belongs to (recommended, e.g. 'seed-audio-1-0')."],
+                    "voiceReferenceMediaRef": ["type": "string", "description": "Audio asset id to lock as the character's voice reference (e.g. the chosen audition sample). Omit to auto-generate one in the locked voice."],
                 ],
                 required: ["characterId", "voiceId"]
             )
         ),
         AgentTool(
             name: .storyboardShots,
-            description: "Generate a storyboard panel image for each shot so the look can be reviewed before paying for video. By default panels are made for every shot without one yet; pass shotIds to target specific shots (or regenerate). When a shot references characters with ready reference images, those are passed as image references so the panel keeps the character's likeness. Each panel is linked to its shot and the shot moves to 'storyboarded'. Async — poll get_media, then inspect_media / qa_shot / fix_panel.",
+            description: "Generate a storyboard panel image for each shot so the look can be reviewed before paying for video. By default panels are made for every shot without one yet; pass shotIds to target specific shots (or regenerate). When a shot references characters with ready reference images, those are passed as image references so the panel keeps the character's likeness. Each panel is linked to its shot and the shot moves to 'storyboarded'. Async — wait_for_media on the panel ids, then inspect_media / qa_shot / fix_panel.",
             inputSchema: objectSchema(
                 properties: [
                     "shotIds": ["type": "array", "items": ["type": "string"], "description": "Shots to storyboard. Omit to storyboard every shot without a panel yet."],
@@ -1127,7 +1202,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .qaShot,
-            description: "Run vision QA on a shot: reviews its generated video (preferred) or storyboard panel against the shot's intent with a vision model, returns a structured verdict (score, pass/fail, concrete issues) plus the reviewed frames, and annotates the shot's QA notes. Requires the asset to be ready — poll get_media first. Use before approving a shot; on fail, use fix_panel (panel) or regenerate_shot (video).",
+            description: "Run vision QA on a shot: reviews its generated video (preferred) or storyboard panel against the shot's intent with a vision model, returns a structured verdict (score, pass/fail, concrete issues) plus the reviewed frames, and annotates the shot's QA notes. Requires the asset to be ready — wait_for_media first. Use before approving a shot; on fail, use fix_panel (panel) or regenerate_shot (video).",
             inputSchema: objectSchema(
                 properties: [
                     "shotId": ["type": "string", "description": "Shot id from get_shot_plan."],
@@ -1140,7 +1215,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .fixPanel,
-            description: "Correct a shot's storyboard panel with a multi-edit pass. Defaults the instruction to the shot's QA notes; pass 'instructions' to override. The corrected panel replaces the shot's storyboard (async — poll get_media, then qa_shot again).",
+            description: "Correct a shot's storyboard panel with a multi-edit pass. Defaults the instruction to the shot's QA notes; pass 'instructions' to override. The corrected panel replaces the shot's storyboard (async — wait_for_media, then qa_shot again).",
             inputSchema: objectSchema(
                 properties: [
                     "shotId": ["type": "string", "description": "Shot id whose storyboard panel to fix."],
@@ -1152,7 +1227,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .produceShots,
-            description: "Start background production of the plan's shots: for each shot it routes a model (character refs → reference-to-video, dissolve/match-cut → chained image-to-video, else text-to-video), quotes the cost, generates, optionally runs vision QA, and lays the finished clip on the timeline in shot order. Returns immediately — progress posts into chat and shot statuses move planned/storyboarded → generating → placed (or failed). Poll get_shot_plan or production_status. Only one run at a time.",
+            description: "Start background production of the plan's shots: for each shot it routes a model (character refs → reference-to-video, dissolve/match-cut → chained image-to-video, else text-to-video), quotes the cost, generates, optionally runs vision QA, and lays the finished clip on the timeline in shot order. Returns immediately — progress posts into chat and shot statuses move planned/storyboarded → generating → placed (or failed). Poll get_shot_plan or production_status. One shot generates at a time; shots requested mid-run queue behind the active shot rather than being refused.",
             inputSchema: objectSchema(
                 properties: [
                     "shotIds": ["type": "array", "items": ["type": "string"], "description": "Shots to produce (in plan order). Omit to produce every shot not already placed."],
@@ -1211,7 +1286,10 @@ enum ToolDefinitions {
                 "transition": ["type": "string", "enum": ShotTransition.allCases.map(\.rawValue), "description": "Transition into the next shot. dissolve/matchCut drive last-frame chaining."],
                 "modelOverride": ["type": "string", "description": "Per-shot video model slug; falls back to the plan default."],
                 "characterIds": ["type": "array", "items": ["type": "string"], "description": "Character ids appearing in this shot."],
-                "nativeAudio": ["type": "string", "enum": ShotNativeAudio.allCases.map(\.rawValue), "description": "How to treat the model's own audio once placed: keep (ambient/SFX), duck, or mute."],
+                "nativeAudio": ["type": "string", "enum": ShotNativeAudio.allCases.map(\.rawValue), "description": "Mix of the model's audio once the clip is placed (audio is ALWAYS generated): keep = full volume (default), duck = lowered for a VO/music bed, mute = volume 0 (recoverable in the timeline)."],
+                "audioContent": ["type": "string", "enum": ShotAudioContent.allCases.map(\.rawValue), "description": "What KIND of audio the model generates: full (default), noMusic (ambience+speech, post adds music), ambienceOnly (no speech/music), dialogueOnly (no music, minimal ambience). Steers the prompt; never disables audio."],
+                "audioReferenceAssetId": ["type": "string", "description": "Explicit audio asset attached as audio_url when the routed model accepts audio input (Seedance R2V, Wan 2.5/2.6/2.7). Wins over the cast-voice default."],
+                "attachCastVoiceReference": ["type": "boolean", "description": "Attach the first attached character's locked voice reference as audio_url on audio-input models (default true)."],
                 "dialogue": ["type": "array", "items": dialogueSchema(), "description": "Spoken lines. Voice-over lines drive TTS but are kept out of the video prompt."],
             ],
         ]

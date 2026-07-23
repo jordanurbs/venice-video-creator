@@ -39,7 +39,7 @@ extension ToolExecutor {
         }
 
         guard !images.isEmpty else {
-            throw ToolError("Nothing ready to review for shot \(shot.slug ?? shotId). Storyboard or generate it first, then poll get_media until the asset finishes.")
+            throw ToolError("Nothing ready to review for shot \(shot.slug ?? shotId). Storyboard or generate it first, then wait_for_media until the asset finishes.")
         }
 
         let rubric = Self.qaRubric(for: shot, plan: plan)
@@ -106,7 +106,7 @@ extension ToolExecutor {
             throw ToolError("The shot's storyboard asset is not an image.")
         }
         guard Self.isReady(panel, editor: editor) else {
-            throw ToolError("The storyboard panel is still generating. Poll get_media until it finishes.")
+            throw ToolError("The storyboard panel is still generating. Call wait_for_media with its id first.")
         }
 
         let instruction = args.string("instructions")
@@ -130,7 +130,7 @@ extension ToolExecutor {
             "shotId": shotId,
             "storyboardAssetId": placeholderId,
             "instruction": instruction,
-            "hint": "Correction started. Poll get_media until it finishes, then qa_shot again.",
+            "hint": "Correction started. wait_for_media on the new storyboardAssetId, then qa_shot again.",
         ]
         return .ok(Self.jsonString(body) ?? "{}")
     }

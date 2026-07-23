@@ -40,6 +40,9 @@ struct AnthropicToolSchema: @unchecked Sendable {
 
 enum AnthropicStreamEvent: Sendable {
     case textDelta(String)
+    /// Emitted as soon as a tool call's name is known, before its arguments
+    /// finish streaming — lets the UI show the call while the model writes.
+    case toolUseStarted(id: String, name: String)
     case toolUseComplete(id: String, name: String, inputJSON: String)
     case messageStop(stopReason: AnthropicStopReason)
 }
@@ -112,6 +115,7 @@ enum AnthropicSSE {
                    let id = block["id"] as? String,
                    let name = block["name"] as? String {
                     pendingTools[index] = (id, name, "")
+                    continuation.yield(.toolUseStarted(id: id, name: name))
                 }
 
             case "content_block_delta":

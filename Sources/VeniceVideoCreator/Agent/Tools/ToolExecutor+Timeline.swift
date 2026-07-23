@@ -281,15 +281,18 @@ extension ToolExecutor {
         let asset = try asset(mediaRef, editor: editor)
         let url = asset.url
         guard FileManager.default.fileExists(atPath: url.path) else {
+            // In-flight generation is expected, not an error — a red ✕ per poll
+            // reads like a failure to the user. Return a neutral status instead.
             switch asset.generationStatus {
-            case .preparing:
-                throw ToolError("Asset \(asset.id) is still preparing. Poll get_media and retry once generationStatus becomes 'none'.")
-            case .downloading:
-                throw ToolError("Asset \(asset.id) is still downloading. Poll get_media and retry once generationStatus becomes 'none'.")
-            case .generating:
-                throw ToolError("Asset \(asset.id) is still generating. Poll get_media and retry once generationStatus becomes 'none'.")
-            case .rendering:
-                throw ToolError("Asset \(asset.id) is still rendering. Poll get_media and retry once generationStatus becomes 'none'.")
+            case .preparing, .downloading, .generating, .rendering:
+                let status = asset.generationStatus.serialized
+                let body: [String: Any] = [
+                    "mediaRef": asset.id,
+                    "status": status,
+                    "ready": false,
+                    "hint": "Not an error — the asset is still \(status). Use wait_for_media to block until it finishes instead of re-calling inspect_media.",
+                ]
+                return .ok(Self.jsonString(body) ?? "{}")
             case .failed(let msg):
                 throw ToolError("Asset \(asset.id) failed: \(msg)")
             case .cancelled:

@@ -33,12 +33,36 @@ enum ShotPromptBuilder {
             parts.append("No narration, no voice-over, no spoken words in this shot.")
         }
 
+        // Steer what KIND of audio the model generates (content), independent of
+        // how the placed clip is mixed (nativeAudio).
+        switch shot.audioContent {
+        case .full:
+            break
+        case .noMusic:
+            parts.append("Natural ambient sound and effects, no background music.")
+        case .ambienceOnly:
+            parts.append("Ambient sound and sound effects only — no speech, no music.")
+        case .dialogueOnly:
+            parts.append("Dialogue only — no background music, minimal ambient noise.")
+        }
+
         return parts.joined(separator: ". ")
     }
 
-    /// Whether the video model should generate its own audio for this shot. Native audio is
-    /// kept on for ambient/SFX unless the shot explicitly mutes it.
+    /// Audio is ALWAYS generated. Users expect footage to have sound — a muted
+    /// generation is unrecoverable (the speech/ambience never existed), while an
+    /// unwanted track is one timeline mute away. `nativeAudio` mixes the placed
+    /// clip (volume), `audioContent` steers the prompt; neither gates generation.
     static func generateNativeAudio(for shot: Shot) -> Bool {
-        shot.nativeAudio != .mute
+        true
+    }
+
+    /// Placed-clip volume for the shot's mix treatment.
+    static func placedClipVolume(for shot: Shot) -> Double {
+        switch shot.nativeAudio {
+        case .keep: 1.0
+        case .duck: 0.3
+        case .mute: 0.0
+        }
     }
 }

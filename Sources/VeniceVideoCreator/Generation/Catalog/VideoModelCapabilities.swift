@@ -27,12 +27,17 @@ enum VideoModelCapabilities {
     /// Registry `audioInput: true` families: the Wan 2.5/2.6/2.7 lines — except
     /// Wan 2.7 R2V, which takes per-reference `elements[].audio_url` rather than a
     /// top-level `audio_url` and so must stay off this path.
+    /// Seedance 2.0 R2V variants accept `audio_url` despite the live catalog
+    /// reporting `audio_input: false` — probe 2026-07-23: queue accepted
+    /// audio_url on all four R2V variants (real job completed on Fast R2V);
+    /// i2v/t2v returned "This model does not support audio input".
     static func audioInputCapable(id: String) -> Bool {
         let lower = id.lowercased()
         if lower.contains("wan-2-7-reference-to-video") { return false }
         if lower.contains("wan-2-7") { return true }
         if lower.contains("wan-2.6") { return true }
         if lower.contains("wan-2.5-preview") { return true }
+        if lower.contains("seedance") && lower.contains("reference-to-video") { return true }
         return false
     }
 
@@ -63,6 +68,9 @@ enum VideoModelCapabilities {
     /// its own `audio_url`), e.g. Wan 2.7 R2V's `elements[].audio_url`. This is why Wan 2.7
     /// R2V is excluded from the top-level `audioInputCapable` path above. Conservative default
     /// off until the `elements[]` builder lands; only Wan 2.7 R2V is a known candidate.
+    /// HappyHorse 1.1 R2V accepts `image_references[{image_url, audio_url}]` (probe
+    /// 2026-07-23: queue accepted a paid job) but that object builder is also deferred,
+    /// so it stays off this flag too.
     static func perReferenceAudio(id: String) -> Bool {
         false
     }

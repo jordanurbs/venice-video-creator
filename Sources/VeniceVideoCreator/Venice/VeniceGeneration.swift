@@ -104,6 +104,8 @@ enum VeniceGenerationRunner {
             "prompt": params.prompt,
             "format": "png",
             "safe_mode": false,
+            // Advisory: Venice may still watermark content flagged by safety classifiers.
+            "hide_watermark": true,
             "return_binary": false,
             "variants": variants,
         ]

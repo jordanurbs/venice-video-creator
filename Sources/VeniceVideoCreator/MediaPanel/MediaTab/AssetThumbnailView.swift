@@ -164,12 +164,8 @@ struct AssetThumbnailView: View {
         Group {
             if asset.isGenerating {
                 ZStack {
-                    if let image = generatingReferenceImage {
-                        Color.clear
-                            .overlay { Image(nsImage: image).resizable().scaledToFill().blur(radius: 12) }
-                            .clipped()
-                        Color.black.opacity(AppTheme.Opacity.strong)
-                    }
+                    GeneratingReferenceBlur(asset: asset, blurRadius: 12)
+                    Color.black.opacity(AppTheme.Opacity.strong)
                     GeneratingOverlay(label: asset.generatingLabel, startedAt: asset.generationInput?.createdAt)
                 }
                 .clipped()
@@ -189,18 +185,6 @@ struct AssetThumbnailView: View {
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
             }
         }
-    }
-
-    private var generatingReferenceImage: NSImage? {
-        guard let input = asset.generationInput else { return nil }
-        let refIds = (input.imageURLAssetIds ?? []) + (input.referenceImageAssetIds ?? [])
-        for id in refIds {
-            guard let ref = editor.mediaAssets.first(where: { $0.id == id }), ref.type == .image else { continue }
-            if let image = ref.thumbnail ?? NSImage(contentsOf: ref.url) {
-                return image
-            }
-        }
-        return nil
     }
 
     @ViewBuilder

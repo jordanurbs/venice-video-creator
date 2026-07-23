@@ -75,6 +75,19 @@ struct VideoModelAudioCapabilityTests {
         }
     }
 
+    @Test func seedanceR2VAcceptsAudioUrl() {
+        // Live probe 2026-07-23: R2V variants accept audio_url; i2v/t2v reject it.
+        for id in [
+            "seedance-2-0-reference-to-video", "seedance-2-0-fast-reference-to-video",
+            "seedance-2-0-enhanced-reference-to-video", "seedance-2-0-mini-reference-to-video",
+        ] {
+            #expect(VideoModelCapabilities.audioInputCapable(id: id), "expected audio_url for \(id)")
+        }
+        for id in ["seedance-2-0-text-to-video", "seedance-2-0-fast-image-to-video", "happyhorse-1-1-reference-to-video"] {
+            #expect(!VideoModelCapabilities.audioInputCapable(id: id), "did not expect audio_url for \(id)")
+        }
+    }
+
     @Test func wan27EnforcesThreeSecondFloor() {
         #expect(VideoModelCapabilities.minAudioInputSeconds(id: "wan-2-7-image-to-video") == 3)
         // Wan 2.6 / 2.5 accept audio but declare no minimum.

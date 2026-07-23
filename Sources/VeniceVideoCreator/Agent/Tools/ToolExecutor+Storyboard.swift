@@ -47,19 +47,23 @@ extension ToolExecutor {
             }
             let panelPrompt = "\(basePrompt), cinematic storyboard frame, \(shot.motionLevel.rawValue) motion"
 
-            // Gather ready character reference images (up to 3 total for multi-edit).
+            // Gather ready character + location reference images (up to 3 total
+            // for multi-edit); a locked reference represents its entity alone.
             var refs: [MediaAsset] = []
             if useRefs {
+                var refIds: [String] = []
                 for cid in shot.characterIds {
-                    guard let character = plan.character(id: cid) else { continue }
-                    for aid in character.referenceImageAssetIds {
-                        if refs.count >= 3 { break }
-                        if let a = editor.mediaAssets.first(where: { $0.id == aid }),
-                           a.type == .image, Self.isReady(a, editor: editor) {
-                            refs.append(a)
-                        }
-                    }
+                    refIds += plan.character(id: cid)?.activeReferenceAssetIds ?? []
+                }
+                for lid in shot.locationIds {
+                    refIds += plan.location(id: lid)?.activeReferenceAssetIds ?? []
+                }
+                for aid in refIds {
                     if refs.count >= 3 { break }
+                    if let a = editor.mediaAssets.first(where: { $0.id == aid }),
+                       a.type == .image, Self.isReady(a, editor: editor) {
+                        refs.append(a)
+                    }
                 }
             }
 
@@ -97,10 +101,14 @@ extension ToolExecutor {
             ])
         }
 
+        // Surface the run where it lives: the Production tab, panels per shot.
+        editor.mediaPanelVisible = true
+        editor.showMediaPanelProductionTab()
+
         let body: [String: Any] = [
             "model": model.id,
             "storyboarded": results,
-            "hint": "Panels are generating. Poll get_media until they finish, inspect_media to review, then qa_shot / fix_panel or start production.",
+            "hint": "Panels are generating. Call wait_for_media with the storyboardAssetIds, then inspect_media to review, then qa_shot / fix_panel or start production.",
         ]
         return .ok(Self.jsonString(body) ?? "{}")
     }

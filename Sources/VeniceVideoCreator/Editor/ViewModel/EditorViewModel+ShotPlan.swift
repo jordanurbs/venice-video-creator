@@ -7,6 +7,74 @@ extension EditorViewModel {
 
     func shot(id: String) -> Shot? { mediaManifest.shotPlan?.shot(id: id) }
     func character(id: String) -> CharacterSpec? { mediaManifest.shotPlan?.character(id: id) }
+    func location(id: String) -> LocationSpec? { mediaManifest.shotPlan?.location(id: id) }
+
+    /// The shot backing the inspector, or nil when the selection is stale.
+    var selectedShot: Shot? {
+        guard let id = selectedShotId else { return nil }
+        return shot(id: id)
+    }
+
+    // MARK: - Selection
+
+    /// Selecting a shot claims the inspector: clip/asset selection is cleared so
+    /// the routing (clip > shot > character > asset > project) lands on the shot.
+    func selectShot(id: String) {
+        guard shot(id: id) != nil else { return }
+        selectedShotId = id
+        selectedCharacterId = nil
+        selectedLocationId = nil
+        selectedClipIds = []
+        selectedGap = nil
+        selectedTimelineRange = nil
+        selectedMediaAssetIds = []
+    }
+
+    func deselectShot() {
+        selectedShotId = nil
+    }
+
+    /// The character backing the inspector, or nil when the selection is stale.
+    var selectedCharacter: CharacterSpec? {
+        guard let id = selectedCharacterId else { return nil }
+        return character(id: id)
+    }
+
+    func selectCharacter(id: String) {
+        guard character(id: id) != nil else { return }
+        selectedCharacterId = id
+        selectedShotId = nil
+        selectedLocationId = nil
+        selectedClipIds = []
+        selectedGap = nil
+        selectedTimelineRange = nil
+        selectedMediaAssetIds = []
+    }
+
+    func deselectCharacter() {
+        selectedCharacterId = nil
+    }
+
+    /// The location backing the inspector, or nil when the selection is stale.
+    var selectedLocation: LocationSpec? {
+        guard let id = selectedLocationId else { return nil }
+        return location(id: id)
+    }
+
+    func selectLocation(id: String) {
+        guard location(id: id) != nil else { return }
+        selectedLocationId = id
+        selectedShotId = nil
+        selectedCharacterId = nil
+        selectedClipIds = []
+        selectedGap = nil
+        selectedTimelineRange = nil
+        selectedMediaAssetIds = []
+    }
+
+    func deselectLocation() {
+        selectedLocationId = nil
+    }
 
     // MARK: - Writes
 
@@ -39,6 +107,7 @@ extension EditorViewModel {
         }
         undoManager?.setActionName("Clear Shot Plan")
         onProjectContentChanged?()
+        requestDebouncedCheckpoint()
     }
 
     // MARK: - Shot mutations
@@ -109,6 +178,232 @@ extension EditorViewModel {
         }
     }
 
+    /// Generates a fresh set of reference images for a character (front +
+    /// three-quarter) via the image path and swaps them onto the character.
+    /// Old assets stay in the media library. Mirrors create_character's flow.
+    func regenerateCharacterReferences(characterId: String, count: Int = 2) {
+        guard let character = character(id: characterId) else { return }
+        guard AccountService.shared.hasVeniceKey else {
+            editorToast = MediaPanelToast(message: "Add your Venice API key in Settings to generate references.")
+            return
+        }
+        guard let model = ImageModelConfig.allModels.first(where: { ModelPreferences.shared.isEnabled($0.id) }) else {
+            editorToast = MediaPanelToast(message: "No enabled image model. Turn one on in Settings → Models.")
+            return
+        }
+
+        let visualPrompt = character.effectiveVisualPrompt
+        let aspectRatio = model.aspectRatios.first ?? ""
+        let resolution = ToolExecutor.cheapestResolution(model)
+        let quality = model.qualities?.last
+        let poses = [
+            "front view, facing the camera, neutral expression",
+            "three-quarter view",
+            "profile side view",
+            "full-body shot",
+        ]
+        // Keep new references in the same folder as the outgoing set.
+        let folderId = character.referenceImageAssetIds
+            .compactMap { id in mediaAssets.first { $0.id == id }?.folderId }
+            .first
+
+        var generatedIds: [String] = []
+        for i in 0..<max(1, min(4, count)) {
+            let pose = poses[i % poses.count]
+            var genInput = GenerationInput(
+                prompt: "\(visualPrompt), \(pose), \(ToolExecutor.characterRefStyleSuffix)",
+                model: model.id, duration: 0,
+                aspectRatio: aspectRatio, resolution: resolution, quality: quality
+            )
+            genInput.hasFace = true
+            let pid = ImageGenerationSubmission.make(
+                genInput: genInput, model: model, references: [],
+                name: "\(character.name) · ref \(i + 1)", folderId: folderId
+            ).submit(service: generationService, projectURL: projectURL, editor: self)
+            generatedIds.append(pid)
+        }
+
+        var updated = character
+        updated.referenceImageAssetIds = generatedIds
+        // Old lock is gone; lock the first new take so one canonical look stays
+        // set by default (the user can switch it in the inspector).
+        updated.lockedReferenceAssetId = generatedIds.first
+        updated.provenance = CharacterProvenance(generationModel: model.id, hasFace: true)
+        upsertCharacter(updated)
+    }
+
+    /// Generates a spoken voice sample for a character via TTS and appends it to
+    /// the character's voice samples. Uses the character's locked voice when set,
+    /// else the model's default. The sample can then be locked as the character's
+    /// voice reference (attached as audio_url during shot generation).
+    func generateCharacterVoiceSample(characterId: String, voice: String? = nil, text: String? = nil) {
+        guard let character = character(id: characterId) else { return }
+        guard AccountService.shared.hasVeniceKey else {
+            editorToast = MediaPanelToast(message: "Add your Venice API key in Settings to generate a voice sample.")
+            return
+        }
+        let model = character.voiceModel
+            .flatMap { vm in AudioModelConfig.allModels.first { $0.id == vm && ModelPreferences.shared.isEnabled($0.id) } }
+            ?? AudioModelConfig.allModels.first {
+                $0.category == .tts && $0.voices?.isEmpty == false && ModelPreferences.shared.isEnabled($0.id)
+            }
+        guard let model else {
+            editorToast = MediaPanelToast(message: "No enabled text-to-speech model. Turn one on in Settings → Models.")
+            return
+        }
+        let chosenVoice = voice ?? character.lockedVoiceId ?? model.defaultVoice ?? model.voices?.first
+        var line = text ?? Self.voiceReferenceLine(name: character.name)
+        if line.count < model.minPromptLength {
+            line += " " + String(repeating: "Testing one two three. ", count: max(1, (model.minPromptLength - line.count) / 22 + 1))
+        }
+        let params = AudioGenerationParams(
+            prompt: line, voice: chosenVoice, lyrics: nil, styleInstructions: nil,
+            instrumental: false, durationSeconds: nil
+        )
+        if let err = model.validate(params: params) {
+            editorToast = MediaPanelToast(message: err)
+            return
+        }
+        var genInput = GenerationInput(
+            prompt: line, model: model.id, duration: 0,
+            aspectRatio: "", resolution: nil, voice: chosenVoice
+        )
+        genInput.createdAt = Date()
+        let folderId = character.voiceSampleAssetIds
+            .compactMap { id in mediaAssets.first { $0.id == id }?.folderId }
+            .first
+        let pid = AudioGenerationSubmission.make(
+            genInput: genInput, model: model, params: params,
+            name: "\(character.name.isEmpty ? "Character" : character.name) · voice", folderId: folderId
+        ).submit(service: generationService, projectURL: projectURL, editor: self)
+
+        var updated = character
+        updated.voiceSampleAssetIds.append(pid)
+        if updated.lockedVoiceId == nil { updated.lockedVoiceId = chosenVoice }
+        if updated.voiceModel == nil { updated.voiceModel = model.id }
+        upsertCharacter(updated)
+    }
+
+    /// A neutral spoken line long enough to clear model audio-input floors (3s+).
+    static func voiceReferenceLine(name: String) -> String {
+        let who = name.isEmpty ? "this character" : name
+        return "Hello, my name is \(who). This is my voice: steady, clear, and always the same, in every scene and every shot we film together."
+    }
+
+    // MARK: - Shot splitting
+
+    /// Splits an overlong shot into consecutive ≤`cap` parts covering the same
+    /// beat: same prompt/references, slugs suffixed a/b/c…, chained with
+    /// matchCut so production seeds each part from the previous part's last
+    /// frame. The original shot becomes part one; generated work is kept on it.
+    @discardableResult
+    func splitShot(id: String, cap: Double) -> [Shot]? {
+        guard let original = shot(id: id), original.durationSeconds > cap, cap > 0 else { return nil }
+
+        let partCount = Int(ceil(original.durationSeconds / cap))
+        let partSeconds = (original.durationSeconds / Double(partCount)).rounded()
+        let suffixes = ["a", "b", "c", "d", "e", "f", "g", "h"]
+        let baseSlug = original.slug ?? "S?"
+
+        var parts: [Shot] = []
+        for i in 0..<partCount {
+            var part = i == 0 ? original : Shot(
+                summary: original.summary,
+                prompt: original.prompt,
+                motionLevel: original.motionLevel,
+                modelOverride: original.modelOverride,
+                characterIds: original.characterIds,
+                locationIds: original.locationIds,
+                nativeAudio: original.nativeAudio
+            )
+            part.slug = baseSlug + suffixes[min(i, suffixes.count - 1)]
+            part.durationSeconds = partSeconds
+            // Chain parts for continuity; the last part keeps the original transition.
+            part.transition = i == partCount - 1 ? original.transition : .matchCut
+            if i > 0 {
+                part.summary = original.summary.isEmpty ? "" : "\(original.summary) (part \(i + 1))"
+                // Spoken lines stay on part one only, so produce_audio doesn't
+                // voice the same beat once per part.
+                part.dialogue = []
+            }
+            parts.append(part)
+        }
+
+        mutateShotPlan(actionName: "Split Shot") { plan in
+            guard let idx = plan.shots.firstIndex(where: { $0.id == id }) else { return }
+            plan.shots.replaceSubrange(idx...idx, with: parts)
+        }
+        return parts
+    }
+
+    // MARK: - Location mutations
+
+    @discardableResult
+    func upsertLocation(_ location: LocationSpec) -> LocationSpec {
+        mutateShotPlan(actionName: "Update Location") { plan in
+            if let idx = plan.locations.firstIndex(where: { $0.id == location.id }) {
+                plan.locations[idx] = location
+            } else {
+                plan.locations.append(location)
+            }
+        }
+        return location
+    }
+
+    func removeLocation(id: String) {
+        mutateShotPlan(actionName: "Remove Location") { plan in
+            plan.locations.removeAll { $0.id == id }
+            for i in plan.shots.indices {
+                plan.shots[i].locationIds.removeAll { $0 == id }
+            }
+        }
+    }
+
+    /// Location counterpart of `regenerateCharacterReferences`: fresh angle set
+    /// via the image path, swapped onto the location (old assets stay in Media).
+    func regenerateLocationReferences(locationId: String, count: Int = 2) {
+        guard let location = location(id: locationId) else { return }
+        guard AccountService.shared.hasVeniceKey else {
+            editorToast = MediaPanelToast(message: "Add your Venice API key in Settings to generate references.")
+            return
+        }
+        guard let model = ImageModelConfig.allModels.first(where: { ModelPreferences.shared.isEnabled($0.id) }) else {
+            editorToast = MediaPanelToast(message: "No enabled image model. Turn one on in Settings → Models.")
+            return
+        }
+
+        let visualPrompt = location.effectiveVisualPrompt
+        let aspectRatio = model.aspectRatios.first ?? ""
+        let resolution = ToolExecutor.cheapestResolution(model)
+        let quality = model.qualities?.last
+        let angles = ToolExecutor.locationAngles
+        let folderId = location.referenceImageAssetIds
+            .compactMap { id in mediaAssets.first { $0.id == id }?.folderId }
+            .first
+
+        var generatedIds: [String] = []
+        for i in 0..<max(1, min(4, count)) {
+            let angle = angles[i % angles.count]
+            var genInput = GenerationInput(
+                prompt: "\(visualPrompt), \(angle), \(ToolExecutor.locationRefStyleSuffix)",
+                model: model.id, duration: 0,
+                aspectRatio: aspectRatio, resolution: resolution, quality: quality
+            )
+            genInput.hasFace = false
+            let pid = ImageGenerationSubmission.make(
+                genInput: genInput, model: model, references: [],
+                name: "\(location.name) · ref \(i + 1)", folderId: folderId
+            ).submit(service: generationService, projectURL: projectURL, editor: self)
+            generatedIds.append(pid)
+        }
+
+        var updated = location
+        updated.referenceImageAssetIds = generatedIds
+        // Lock the first new plate so one canonical look stays set by default.
+        updated.lockedReferenceAssetId = generatedIds.first
+        upsertLocation(updated)
+    }
+
     // MARK: - Internal apply + undo + mirror
 
     private func applyShotPlan(_ plan: ShotPlan, actionName: String) {
@@ -125,6 +420,8 @@ extension EditorViewModel {
         // Mirror a human-readable version into the Documents library (upserted by name).
         saveDocument(name: Self.shotPlanDocumentName, content: plan.markdown())
         onProjectContentChanged?()
+        // Flush the plan to disk soon so a hang/crash can't lose it (coalesced).
+        requestDebouncedCheckpoint()
     }
 
     static let shotPlanDocumentName = "Shot Plan"
@@ -147,6 +444,7 @@ extension ShotPlan {
                 out += "- **\(c.name.isEmpty ? "(unnamed)" : c.name)**"
                 if let d = c.description, !d.isEmpty { out += " — \(d)" }
                 if let v = c.lockedVoiceId, !v.isEmpty { out += " · voice: `\(v)`" }
+                if c.voiceReferenceAssetId != nil { out += " · voice ref locked" }
                 let refs = c.referenceImageAssetIds.count
                 if refs > 0 { out += " · \(refs) ref image\(refs == 1 ? "" : "s")" }
                 out += "\n"

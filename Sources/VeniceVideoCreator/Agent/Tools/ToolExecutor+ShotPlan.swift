@@ -16,6 +16,9 @@ extension ToolExecutor {
         if args["characters"] == nil, let existing = editor.shotPlan?.characters {
             plan.characters = existing
         }
+        if args["locations"] == nil, let existing = editor.shotPlan?.locations {
+            plan.locations = existing
+        }
         let saved = editor.saveShotPlan(plan)
         return .ok(Self.jsonString(Self.summary(of: saved)) ?? "{}")
     }
@@ -65,6 +68,7 @@ extension ToolExecutor {
                 throw ToolError("\(path): shot not found: \(id)")
             }
             try patch(&plan.shots[idx], from: op, path: path)
+            plan.shots[idx] = try validated(plan.shots[idx], index: idx)
 
         case "insert":
             guard let shotObj = op["shot"] as? [String: Any] else {
@@ -123,7 +127,11 @@ extension ToolExecutor {
         if let v = op.string("transition") { shot.transition = try parseEnum(v, ShotTransition.self, field: "\(path).transition") }
         if op["modelOverride"] != nil { shot.modelOverride = op.string("modelOverride") }
         if op["characterIds"] != nil { shot.characterIds = op.stringArray("characterIds") }
+        if op["locationIds"] != nil { shot.locationIds = op.stringArray("locationIds") }
         if let v = op.string("nativeAudio") { shot.nativeAudio = try parseEnum(v, ShotNativeAudio.self, field: "\(path).nativeAudio") }
+        if let v = op.string("audioContent") { shot.audioContent = try parseEnum(v, ShotAudioContent.self, field: "\(path).audioContent") }
+        if op["audioReferenceAssetId"] != nil { shot.audioReferenceAssetId = op.string("audioReferenceAssetId") }
+        if let v = op.bool("attachCastVoiceReference") { shot.attachCastVoiceReference = v }
         if let v = op.string("status") { shot.status = try parseEnum(v, ShotStatus.self, field: "\(path).status") }
         if let dlg = op["dialogue"] {
             shot.dialogue = try parseDialogue(dlg, path: "\(path).dialogue")
@@ -150,7 +158,26 @@ extension ToolExecutor {
     private static func validated(_ shot: Shot, index: Int?) throws -> Shot {
         var s = shot
         if s.durationSeconds <= 0 { s.durationSeconds = 5 }
+        let cap = maxGenerableShotSeconds()
+        if s.durationSeconds > cap {
+            let label = s.slug ?? s.id
+            throw ToolError(
+                "Shot \(label): \(Int(s.durationSeconds))s exceeds the longest generable clip (\(Int(cap))s). "
+                + "No video model generates more than \(Int(cap))s — split it into consecutive shots of ≤\(Int(cap))s "
+                + "covering the same beat, with transition 'matchCut' (or 'dissolve') on all but the last part so "
+                + "production chains each part from the previous part's last frame."
+            )
+        }
         return s
+    }
+
+    /// Longest duration any enabled video model can generate (fallback 15s).
+    static func maxGenerableShotSeconds() -> Double {
+        let maxDuration = VideoModelConfig.allModels
+            .filter { ModelPreferences.shared.isEnabled($0.id) }
+            .flatMap(\.durations)
+            .max()
+        return Double(maxDuration ?? 15)
     }
 
     /// Duplicate shot ids would silently merge state (and used to trap in

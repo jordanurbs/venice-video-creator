@@ -406,6 +406,8 @@ final class AgentService {
                     switch event {
                     case .textDelta(let chunk):
                         appendTextDelta(chunk, toAssistant: assistantID)
+                    case .toolUseStarted(let id, let name):
+                        appendToolUse(id: id, name: name, inputJSON: "", toAssistant: assistantID)
                     case .toolUseComplete(let id, let name, let inputJSON):
                         appendToolUse(id: id, name: name, inputJSON: inputJSON, toAssistant: assistantID)
                     case .messageStop(let reason):
@@ -471,10 +473,19 @@ final class AgentService {
         }
     }
 
+    /// Upserts by tool-use id: `.toolUseStarted` inserts a placeholder row and
+    /// `.toolUseComplete` fills in the streamed arguments on the same block.
     private func appendToolUse(id toolUseID: String, name: String, inputJSON: String, toAssistant assistantID: UUID) {
         flushPendingDeltas()
         guard let index = assistantMessageIndex(id: assistantID) else { return }
-        messages[index].blocks.append(.toolUse(id: toolUseID, name: name, inputJSON: inputJSON))
+        if let blockIndex = messages[index].blocks.firstIndex(where: {
+            if case .toolUse(let id, _, _) = $0 { return id == toolUseID }
+            return false
+        }) {
+            messages[index].blocks[blockIndex] = .toolUse(id: toolUseID, name: name, inputJSON: inputJSON)
+        } else {
+            messages[index].blocks.append(.toolUse(id: toolUseID, name: name, inputJSON: inputJSON))
+        }
     }
 
     private func runPendingToolUses(assistantID: UUID) async {
@@ -575,16 +586,28 @@ final class AgentService {
         }
     }
 
+    /// Whether the active model accepts image content. Non-vision models
+    /// (e.g. GLM) 400 on ANY request carrying an image, so inlining must be
+    /// gated or one image mention poisons every subsequent turn.
+    private var modelSupportsVision: Bool {
+        availableModels.first { $0.id == effectiveModelId }?.supportsVision ?? false
+    }
+
     private func apiMessages() async -> [AnthropicMessage] {
+        let vision = modelSupportsVision
         var result: [AnthropicMessage] = []
         for msg in messages {
             if msg.role == .system { continue }
             var content = msg.blocks.compactMap(Self.contentBlockJSON)
             if msg.role == .user, !msg.mentions.isEmpty {
-                let inlined = await inlineImageBlocks(for: msg.mentions)
                 var hint = msg.contextHint ?? AgentMentionContext.hint(msg.mentions, editor: editor)
-                if let note = AgentMentionContext.inlineNote(for: inlined) { hint += " " + note }
-                content.insert(contentsOf: inlined.blocks, at: 0)
+                if vision {
+                    let inlined = await inlineImageBlocks(for: msg.mentions)
+                    if let note = AgentMentionContext.inlineNote(for: inlined) { hint += " " + note }
+                    content.insert(contentsOf: inlined.blocks, at: 0)
+                } else if msg.mentions.contains(where: { $0.type == .image }) {
+                    hint += " (Image attachments not inlined — the current model has no vision. Use inspect_media if needed, or the user can switch to a vision model.)"
+                }
                 content.insert(["type": "text", "text": hint], at: 0)
             }
             guard !content.isEmpty else { continue }

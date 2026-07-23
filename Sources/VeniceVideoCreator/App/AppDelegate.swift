@@ -6,6 +6,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
+        // Periodic autosave backstop. Without a delay, NSDocument (autosavesInPlace)
+        // only writes on generation/import checkpoints, window close, or quit — so a
+        // hang/crash mid-session could lose everything since the last checkpoint.
+        NSDocumentController.shared.autosavingDelay = 20
+
         // Start Sparkle updater
         _ = Updater.shared
 

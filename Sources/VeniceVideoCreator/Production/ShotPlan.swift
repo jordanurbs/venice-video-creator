@@ -17,6 +17,7 @@ struct ShotPlan: Codable, Sendable, Equatable {
     var defaultShotSeconds: Double
     var shots: [Shot]
     var characters: [CharacterSpec]
+    var locations: [LocationSpec]
     var updatedAt: Date
 
     init(
@@ -28,6 +29,7 @@ struct ShotPlan: Codable, Sendable, Equatable {
         defaultShotSeconds: Double = 5,
         shots: [Shot] = [],
         characters: [CharacterSpec] = [],
+        locations: [LocationSpec] = [],
         updatedAt: Date = Date()
     ) {
         self.title = title
@@ -38,11 +40,12 @@ struct ShotPlan: Codable, Sendable, Equatable {
         self.defaultShotSeconds = defaultShotSeconds
         self.shots = shots
         self.characters = characters
+        self.locations = locations
         self.updatedAt = updatedAt
     }
 
     private enum CodingKeys: String, CodingKey {
-        case title, logline, aspectRatio, resolution, defaultModel, defaultShotSeconds, shots, characters, updatedAt
+        case title, logline, aspectRatio, resolution, defaultModel, defaultShotSeconds, shots, characters, locations, updatedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -55,11 +58,13 @@ struct ShotPlan: Codable, Sendable, Equatable {
         defaultShotSeconds = try c.decodeIfPresent(Double.self, forKey: .defaultShotSeconds) ?? 5
         shots = try c.decodeIfPresent([Shot].self, forKey: .shots) ?? []
         characters = try c.decodeIfPresent([CharacterSpec].self, forKey: .characters) ?? []
+        locations = try c.decodeIfPresent([LocationSpec].self, forKey: .locations) ?? []
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
     }
 
     func shot(id: String) -> Shot? { shots.first { $0.id == id } }
     func character(id: String) -> CharacterSpec? { characters.first { $0.id == id } }
+    func location(id: String) -> LocationSpec? { locations.first { $0.id == id } }
 
     var totalPlannedSeconds: Double { shots.reduce(0) { $0 + $1.durationSeconds } }
 }
@@ -83,9 +88,19 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
     /// Optional per-shot video model override (Venice slug); falls back to the plan default.
     var modelOverride: String?
     var characterIds: [String]
+    var locationIds: [String]
     var dialogue: [ShotDialogue]
     /// How to treat the video model's own audio track once the clip is placed.
     var nativeAudio: ShotNativeAudio
+    /// What KIND of audio the model should generate (prompt steering). Audio is
+    /// always generated; this shapes its content, `nativeAudio` shapes the mix.
+    var audioContent: ShotAudioContent
+    /// Explicit audio reference (audio_url) for this shot. When set it wins over
+    /// the default cast-voice attachment.
+    var audioReferenceAssetId: String?
+    /// Attach the locked voice reference of the shot's first voiced character as
+    /// the audio reference when the routed model supports audio input. Default on.
+    var attachCastVoiceReference: Bool
     var status: ShotStatus
     var storyboardAssetId: String?
     var videoAssetId: String?
@@ -103,8 +118,12 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         transition: ShotTransition = .cut,
         modelOverride: String? = nil,
         characterIds: [String] = [],
+        locationIds: [String] = [],
         dialogue: [ShotDialogue] = [],
         nativeAudio: ShotNativeAudio = .keep,
+        audioContent: ShotAudioContent = .full,
+        audioReferenceAssetId: String? = nil,
+        attachCastVoiceReference: Bool = true,
         status: ShotStatus = .planned,
         storyboardAssetId: String? = nil,
         videoAssetId: String? = nil,
@@ -121,8 +140,12 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         self.transition = transition
         self.modelOverride = modelOverride
         self.characterIds = characterIds
+        self.locationIds = locationIds
         self.dialogue = dialogue
         self.nativeAudio = nativeAudio
+        self.audioContent = audioContent
+        self.audioReferenceAssetId = audioReferenceAssetId
+        self.attachCastVoiceReference = attachCastVoiceReference
         self.status = status
         self.storyboardAssetId = storyboardAssetId
         self.videoAssetId = videoAssetId
@@ -133,7 +156,8 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, slug, summary, prompt, durationSeconds, motionLevel, transition
-        case modelOverride, characterIds, dialogue, nativeAudio, status
+        case modelOverride, characterIds, locationIds, dialogue, nativeAudio, audioContent, status
+        case audioReferenceAssetId, attachCastVoiceReference
         case storyboardAssetId, videoAssetId, takes, qaSummary, failureReason
     }
 
@@ -148,8 +172,12 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         transition = try c.decodeIfPresent(ShotTransition.self, forKey: .transition) ?? .cut
         modelOverride = try c.decodeIfPresent(String.self, forKey: .modelOverride)
         characterIds = try c.decodeIfPresent([String].self, forKey: .characterIds) ?? []
+        locationIds = try c.decodeIfPresent([String].self, forKey: .locationIds) ?? []
         dialogue = try c.decodeIfPresent([ShotDialogue].self, forKey: .dialogue) ?? []
         nativeAudio = try c.decodeIfPresent(ShotNativeAudio.self, forKey: .nativeAudio) ?? .keep
+        audioContent = try c.decodeIfPresent(ShotAudioContent.self, forKey: .audioContent) ?? .full
+        audioReferenceAssetId = try c.decodeIfPresent(String.self, forKey: .audioReferenceAssetId)
+        attachCastVoiceReference = try c.decodeIfPresent(Bool.self, forKey: .attachCastVoiceReference) ?? true
         status = try c.decodeIfPresent(ShotStatus.self, forKey: .status) ?? .planned
         storyboardAssetId = try c.decodeIfPresent(String.self, forKey: .storyboardAssetId)
         videoAssetId = try c.decodeIfPresent(String.self, forKey: .videoAssetId)
@@ -166,6 +194,12 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
 }
 
 // MARK: - Enums
+
+/// A cast entry's nature: a person (face provenance gate + lockable voice) or an
+/// inanimate object/prop (no face, no voice) kept for reference consistency.
+enum CharacterKind: String, Codable, Sendable, CaseIterable {
+    case person, object
+}
 
 /// Motion intensity hint, routed into the prompt and (later) model selection.
 enum ShotMotionLevel: String, Codable, Sendable, CaseIterable {
@@ -184,6 +218,28 @@ enum ShotStatus: String, Codable, Sendable, CaseIterable {
 /// How the video model's own generated audio track is handled once a shot is placed.
 enum ShotNativeAudio: String, Codable, Sendable, CaseIterable {
     case keep, duck, mute
+}
+
+/// What kind of audio the model should generate. Content steering only —
+/// audio is always generated; the mix is `ShotNativeAudio`'s job.
+enum ShotAudioContent: String, Codable, Sendable, CaseIterable {
+    /// Everything the prompt implies (speech, ambience, music).
+    case full
+    /// Ambient + SFX + speech, but no music bed (post adds music).
+    case noMusic
+    /// Ambience/SFX only — no speech, no music.
+    case ambienceOnly
+    /// Speech only, minimal ambience, no music.
+    case dialogueOnly
+
+    var label: String {
+        switch self {
+        case .full: "Full"
+        case .noMusic: "No music"
+        case .ambienceOnly: "Ambience only"
+        case .dialogueOnly: "Dialogue only"
+        }
+    }
 }
 
 // MARK: - Dialogue
@@ -279,36 +335,148 @@ struct ShotTake: Codable, Sendable, Equatable, Identifiable {
 struct CharacterSpec: Codable, Sendable, Equatable, Identifiable {
     let id: String
     var name: String
+    /// Person (face gate + voice) or an inanimate object/prop (no face, no voice)
+    /// reused as a reference for visual consistency. Both live in the Cast & Objects tab.
+    var kind: CharacterKind
     var description: String?
+    /// The exact styled prompt reference images are generated from (carries the
+    /// production's look, e.g. photorealism). Falls back to description/name.
+    var visualPrompt: String?
     var referenceImageAssetIds: [String]
+    /// When set, this single reference is the character's canonical look:
+    /// generation consumers use ONLY it, so models aren't fed divergent takes.
+    var lockedReferenceAssetId: String?
     var lockedVoiceId: String?
     /// Audio model slug the locked voice belongs to (e.g. "seed-audio-1-0").
     var voiceModel: String?
+    /// Generated voice sample assets (audition takes), mirroring referenceImageAssetIds.
+    var voiceSampleAssetIds: [String]
+    /// When set, this audio asset is the character's canonical voice: shot
+    /// generation attaches it as the audio reference (audio_url) by default.
+    var voiceReferenceAssetId: String?
     var provenance: CharacterProvenance?
     var createdAt: Date
 
     init(
         id: String = UUID().uuidString,
         name: String = "",
+        kind: CharacterKind = .person,
         description: String? = nil,
+        visualPrompt: String? = nil,
         referenceImageAssetIds: [String] = [],
+        lockedReferenceAssetId: String? = nil,
         lockedVoiceId: String? = nil,
         voiceModel: String? = nil,
+        voiceSampleAssetIds: [String] = [],
+        voiceReferenceAssetId: String? = nil,
         provenance: CharacterProvenance? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
         self.name = name
+        self.kind = kind
         self.description = description
+        self.visualPrompt = visualPrompt
         self.referenceImageAssetIds = referenceImageAssetIds
+        self.lockedReferenceAssetId = lockedReferenceAssetId
         self.lockedVoiceId = lockedVoiceId
         self.voiceModel = voiceModel
+        self.voiceSampleAssetIds = voiceSampleAssetIds
+        self.voiceReferenceAssetId = voiceReferenceAssetId
         self.provenance = provenance
         self.createdAt = createdAt
     }
 
+    /// Prompt used to generate this character's reference images.
+    var effectiveVisualPrompt: String {
+        if let p = visualPrompt, !p.isEmpty { return p }
+        if let d = description, !d.isEmpty { return d }
+        return name
+    }
+
+    /// Reference ids generation consumers should use: the locked one when set
+    /// (and still present), otherwise all of them.
+    var activeReferenceAssetIds: [String] {
+        if let locked = lockedReferenceAssetId, referenceImageAssetIds.contains(locked) {
+            return [locked]
+        }
+        return referenceImageAssetIds
+    }
+
+    var isObject: Bool { kind == .object }
+
     private enum CodingKeys: String, CodingKey {
-        case id, name, description, referenceImageAssetIds, lockedVoiceId, voiceModel, provenance, createdAt
+        case id, name, kind, description, visualPrompt, referenceImageAssetIds
+        case lockedReferenceAssetId, lockedVoiceId, voiceModel
+        case voiceSampleAssetIds, voiceReferenceAssetId, provenance, createdAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        kind = try c.decodeIfPresent(CharacterKind.self, forKey: .kind) ?? .person
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        visualPrompt = try c.decodeIfPresent(String.self, forKey: .visualPrompt)
+        referenceImageAssetIds = try c.decodeIfPresent([String].self, forKey: .referenceImageAssetIds) ?? []
+        lockedReferenceAssetId = try c.decodeIfPresent(String.self, forKey: .lockedReferenceAssetId)
+        lockedVoiceId = try c.decodeIfPresent(String.self, forKey: .lockedVoiceId)
+        voiceModel = try c.decodeIfPresent(String.self, forKey: .voiceModel)
+        voiceSampleAssetIds = try c.decodeIfPresent([String].self, forKey: .voiceSampleAssetIds) ?? []
+        voiceReferenceAssetId = try c.decodeIfPresent(String.self, forKey: .voiceReferenceAssetId)
+        provenance = try c.decodeIfPresent(CharacterProvenance.self, forKey: .provenance)
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+    }
+}
+
+// MARK: - Location
+
+/// A recurring setting/location in the production: reference images keep the
+/// environment consistent across shots, mirroring `CharacterSpec` (no voice).
+struct LocationSpec: Codable, Sendable, Equatable, Identifiable {
+    let id: String
+    var name: String
+    var description: String?
+    /// The exact styled prompt reference images are generated from.
+    var visualPrompt: String?
+    var referenceImageAssetIds: [String]
+    /// When set, this single reference is the location's canonical look.
+    var lockedReferenceAssetId: String?
+    var createdAt: Date
+
+    init(
+        id: String = UUID().uuidString,
+        name: String = "",
+        description: String? = nil,
+        visualPrompt: String? = nil,
+        referenceImageAssetIds: [String] = [],
+        lockedReferenceAssetId: String? = nil,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name
+        self.description = description
+        self.visualPrompt = visualPrompt
+        self.referenceImageAssetIds = referenceImageAssetIds
+        self.lockedReferenceAssetId = lockedReferenceAssetId
+        self.createdAt = createdAt
+    }
+
+    var effectiveVisualPrompt: String {
+        if let p = visualPrompt, !p.isEmpty { return p }
+        if let d = description, !d.isEmpty { return d }
+        return name
+    }
+
+    var activeReferenceAssetIds: [String] {
+        if let locked = lockedReferenceAssetId, referenceImageAssetIds.contains(locked) {
+            return [locked]
+        }
+        return referenceImageAssetIds
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, description, visualPrompt, referenceImageAssetIds, lockedReferenceAssetId, createdAt
     }
 
     init(from decoder: Decoder) throws {
@@ -316,10 +484,9 @@ struct CharacterSpec: Codable, Sendable, Equatable, Identifiable {
         id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
         description = try c.decodeIfPresent(String.self, forKey: .description)
+        visualPrompt = try c.decodeIfPresent(String.self, forKey: .visualPrompt)
         referenceImageAssetIds = try c.decodeIfPresent([String].self, forKey: .referenceImageAssetIds) ?? []
-        lockedVoiceId = try c.decodeIfPresent(String.self, forKey: .lockedVoiceId)
-        voiceModel = try c.decodeIfPresent(String.self, forKey: .voiceModel)
-        provenance = try c.decodeIfPresent(CharacterProvenance.self, forKey: .provenance)
+        lockedReferenceAssetId = try c.decodeIfPresent(String.self, forKey: .lockedReferenceAssetId)
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     }
 }

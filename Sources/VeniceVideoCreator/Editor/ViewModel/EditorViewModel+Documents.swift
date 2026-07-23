@@ -34,6 +34,7 @@ extension EditorViewModel {
             registerDocumentUndo(previous: previous, actionName: "Edit Document")
             writeDocumentMirror(updated)
             onProjectContentChanged?()
+            requestDebouncedCheckpoint()
             return updated
         }
 
@@ -46,6 +47,7 @@ extension EditorViewModel {
         undoManager?.setActionName("New Document")
         writeDocumentMirror(doc)
         onProjectContentChanged?()
+        requestDebouncedCheckpoint()
         return doc
     }
 
@@ -60,6 +62,7 @@ extension EditorViewModel {
         undoManager?.setActionName("Delete Document")
         removeDocumentMirror(removed)
         onProjectContentChanged?()
+        requestDebouncedCheckpoint()
     }
 
     // MARK: - Undo helper

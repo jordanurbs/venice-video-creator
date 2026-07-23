@@ -133,7 +133,10 @@ struct ProductionPanel: View {
                         index: index,
                         thumbnail: thumbnail(for: shot),
                         isCurrent: orchestrator.currentShotId == shot.id,
-                        canRegenerate: !orchestrator.isRunning,
+                        isSelected: editor.selectedShotId == shot.id,
+                        isAssetInFlight: assetInFlight(for: shot),
+                        isQueued: orchestrator.pendingQueue.contains(shot.id),
+                        onSelect: { editor.selectShot(id: shot.id) },
                         onApprove: { editor.setShotStatus(id: shot.id, .approved) },
                         onRegenerate: { editor.productionOrchestrator.produceShots(ids: [shot.id]) }
                     )
@@ -150,6 +153,17 @@ struct ProductionPanel: View {
         guard let id, let asset = editor.mediaAssets.first(where: { $0.id == id }) else { return nil }
         return asset.thumbnail
     }
+
+    /// True while the shot's storyboard panel or video is still generating,
+    /// so the row can show live progress instead of an empty film icon.
+    private func assetInFlight(for shot: Shot) -> Bool {
+        let id = shot.videoAssetId ?? shot.storyboardAssetId
+        guard let id, let asset = editor.mediaAssets.first(where: { $0.id == id }) else { return false }
+        switch asset.generationStatus {
+        case .preparing, .generating, .downloading, .rendering: return true
+        case .none, .failed, .cancelled: return false
+        }
+    }
 }
 
 // MARK: - Shot row
@@ -159,7 +173,10 @@ private struct ShotRow: View {
     let index: Int
     let thumbnail: NSImage?
     let isCurrent: Bool
-    let canRegenerate: Bool
+    let isSelected: Bool
+    let isAssetInFlight: Bool
+    let isQueued: Bool
+    let onSelect: () -> Void
     let onApprove: () -> Void
     let onRegenerate: () -> Void
 
@@ -189,8 +206,17 @@ private struct ShotRow: View {
         .padding(AppTheme.Spacing.xs)
         .background(
             RoundedRectangle(cornerRadius: AppTheme.Radius.sm)
-                .fill(isCurrent ? Color.white.opacity(AppTheme.Opacity.subtle) : Color.clear)
+                .fill(isSelected || isCurrent ? Color.white.opacity(AppTheme.Opacity.subtle) : Color.clear)
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.sm)
+                .strokeBorder(
+                    isSelected ? AppTheme.Accent.primary.opacity(AppTheme.Opacity.strong) : Color.clear,
+                    lineWidth: AppTheme.BorderWidth.thin
+                )
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
     }
 
     private var thumb: some View {
@@ -198,6 +224,8 @@ private struct ShotRow: View {
             RoundedRectangle(cornerRadius: AppTheme.Radius.xs).fill(Color.black)
             if let thumbnail {
                 Image(nsImage: thumbnail).resizable().scaledToFill()
+            } else if isAssetInFlight {
+                ProgressView().controlSize(.small)
             } else {
                 Image(systemName: "film")
                     .font(.system(size: AppTheme.FontSize.sm))
@@ -234,9 +262,14 @@ private struct ShotRow: View {
                     .buttonStyle(.plain)
             }
             if shot.videoAssetId != nil || shot.status == .failed {
-                Button(action: onRegenerate) { rowAction("Regenerate", "arrow.clockwise") }
-                    .buttonStyle(.plain)
-                    .disabled(!canRegenerate)
+                Button(action: onRegenerate) {
+                    rowAction(
+                        isCurrent ? "Generating" : (isQueued ? "Queued" : "Regenerate"),
+                        isCurrent ? "hourglass" : (isQueued ? "clock" : "arrow.clockwise")
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isCurrent || isQueued)
             }
         }
         .padding(.top, AppTheme.Spacing.xxs)

@@ -32,6 +32,12 @@ struct InspectorView: View {
                 marqueeSelectionSummary
             } else if selectedVisualClip != nil || selectedAudioClip != nil {
                 clipInspectorContent()
+            } else if let shot = editor.selectedShot {
+                ShotInspector(shot: shot)
+            } else if let character = editor.selectedCharacter {
+                CharacterInspector(character: character)
+            } else if let location = editor.selectedLocation {
+                LocationInspector(location: location)
             } else if let asset = selectedMediaAsset {
                 mediaAssetInspectorContent(asset)
             } else {
@@ -39,8 +45,20 @@ struct InspectorView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onChange(of: editor.selectedClipIds) { _, _ in
+        .onChange(of: editor.selectedClipIds) { _, new in
+            if !new.isEmpty {
+                editor.deselectShot()
+                editor.deselectCharacter()
+                editor.deselectLocation()
+            }
             if !editor.isMarqueeSelecting { resolvePreferredTab() }
+        }
+        .onChange(of: editor.selectedMediaAssetIds) { _, new in
+            if !new.isEmpty {
+                editor.deselectShot()
+                editor.deselectCharacter()
+                editor.deselectLocation()
+            }
         }
         .onChange(of: editor.isMarqueeSelecting) { _, selecting in
             if !selecting { resolvePreferredTab() }

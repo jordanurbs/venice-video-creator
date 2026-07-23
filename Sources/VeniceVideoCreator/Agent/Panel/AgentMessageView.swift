@@ -71,12 +71,44 @@ struct AgentMessageView: View {
         // Tool-result user messages render merged into the preceding assistant row.
     }
 
+    /// Blocks with consecutive same-named tool calls folded into one group row.
+    private enum RenderItem: Identifiable {
+        case text(index: Int, text: String)
+        case toolGroup(index: Int, name: String, uses: [(id: String, inputJSON: String)])
+
+        var id: Int {
+            switch self {
+            case .text(let index, _), .toolGroup(let index, _, _): return index
+            }
+        }
+    }
+
+    private var renderItems: [RenderItem] {
+        var items: [RenderItem] = []
+        for (index, block) in message.blocks.enumerated() {
+            switch block {
+            case .text(let text):
+                items.append(.text(index: index, text: text))
+            case .toolUse(let id, let name, let inputJSON):
+                if case .toolGroup(let gIndex, let gName, var uses)? = items.last, gName == name {
+                    uses.append((id, inputJSON))
+                    items[items.count - 1] = .toolGroup(index: gIndex, name: gName, uses: uses)
+                } else {
+                    items.append(.toolGroup(index: index, name: name, uses: [(id, inputJSON)]))
+                }
+            case .toolResult:
+                break
+            }
+        }
+        return items
+    }
+
     @ViewBuilder
     private var assistantBody: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-            ForEach(Array(message.blocks.enumerated()), id: \.offset) { _, block in
-                switch block {
-                case .text(let text):
+            ForEach(renderItems) { item in
+                switch item {
+                case .text(_, let text):
                     if isStreaming {
                         Text(text)
                             .font(.body)
@@ -88,10 +120,12 @@ struct AgentMessageView: View {
                         MarkdownText(text: text, selectable: selectable)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                case .toolUse(let id, let name, let inputJSON):
-                    ToolRunRow(name: name, inputJSON: inputJSON, result: toolResults[id], selectable: selectable)
-                case .toolResult:
-                    EmptyView()
+                case .toolGroup(_, let name, let uses):
+                    if uses.count == 1 {
+                        ToolRunRow(name: name, inputJSON: uses[0].inputJSON, result: toolResults[uses[0].id], selectable: selectable)
+                    } else {
+                        ToolRunGroupRow(name: name, uses: uses, toolResults: toolResults, selectable: selectable)
+                    }
                 }
             }
             if !copyableText.isEmpty {
@@ -103,6 +137,71 @@ struct AgentMessageView: View {
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .animation(.easeOut(duration: AppTheme.Anim.hover), value: isHovering)
+    }
+}
+
+/// One collapsed row for N consecutive calls of the same tool, with aggregate
+/// progress (spinner while any run, error tint if any failed) and per-call
+/// expansion.
+private struct ToolRunGroupRow: View {
+    let name: String
+    let uses: [(id: String, inputJSON: String)]
+    let toolResults: [String: ToolRunResult]
+    var selectable: Bool = true
+    @State private var expanded = false
+
+    private var doneCount: Int { uses.filter { toolResults[$0.id] != nil }.count }
+    private var errorCount: Int { uses.filter { toolResults[$0.id]?.isError == true }.count }
+    private var anyRunning: Bool { doneCount < uses.count }
+
+    private var statusIcon: String {
+        errorCount > 0 ? "xmark.circle.fill" : "checkmark.circle.fill"
+    }
+    private var statusTint: Color {
+        errorCount > 0 ? .red.opacity(AppTheme.Opacity.prominent) : AppTheme.Text.tertiaryColor
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: AppTheme.Spacing.sm) {
+                    if anyRunning {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .frame(width: AppTheme.Spacing.md, height: AppTheme.Spacing.md)
+                    } else {
+                        Image(systemName: statusIcon)
+                            .font(.system(size: AppTheme.FontSize.xs))
+                            .foregroundStyle(statusTint)
+                    }
+                    Text(name)
+                        .font(.system(size: AppTheme.FontSize.sm, weight: .medium, design: .monospaced))
+                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                        .opacity(anyRunning ? 0.7 : 1.0)
+                    Text(anyRunning ? "\(doneCount)/\(uses.count)" : "×\(uses.count)")
+                        .font(.system(size: AppTheme.FontSize.xs, design: .monospaced))
+                        .foregroundStyle(AppTheme.Text.mutedColor)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: AppTheme.FontSize.micro, weight: .semibold))
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+                    ForEach(uses, id: \.id) { use in
+                        ToolRunRow(name: name, inputJSON: use.inputJSON, result: toolResults[use.id], selectable: selectable)
+                    }
+                }
+                .padding(.leading, AppTheme.Spacing.lg)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
     }
 }
 

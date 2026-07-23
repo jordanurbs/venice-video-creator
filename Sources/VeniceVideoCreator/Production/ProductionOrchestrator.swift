@@ -29,6 +29,19 @@ final class ProductionOrchestrator {
 
     @ObservationIgnored private var runTask: Task<Void, Never>?
     @ObservationIgnored private var cancelRequested = false
+    /// Shots waiting to produce, drained in order by the run loop. New
+    /// `produceShots` calls append here instead of being refused, so requests made
+    /// mid-run queue behind the active shot. Observable so the UI can show a shot
+    /// as queued.
+    private(set) var pendingQueue: [String] = []
+
+    /// Whether a shot is currently generating or waiting in the queue.
+    func isActive(_ shotId: String) -> Bool {
+        currentShotId == shotId || pendingQueue.contains(shotId)
+    }
+    /// Resumes the continuation `submitAndAwait` is parked on — task cancellation
+    /// can't reach it, so Stop must fire this or `isRunning` sticks true forever.
+    @ObservationIgnored private var interruptAwait: (() -> Void)?
 
     var progressText: String {
         guard isRunning else { return "Idle" }
@@ -43,6 +56,9 @@ final class ProductionOrchestrator {
         cancelRequested = true
         runTask?.cancel()
         runTask = nil
+        interruptAwait?()
+        interruptAwait = nil
+        pendingQueue.removeAll()
         isRunning = false
         isPaused = false
         currentShotId = nil
@@ -105,15 +121,42 @@ final class ProductionOrchestrator {
 
     func pause() { isPaused = true }
     func unpause() { isPaused = false }
+
+    /// Stops the run NOW. The loop is usually parked awaiting a generation —
+    /// task cancellation can't reach that continuation, so it's resumed
+    /// explicitly and run state is reset immediately (not when the in-flight
+    /// Venice job eventually settles). Shots left mid-flight revert from
+    /// `generating` to their pre-run status so per-shot Generate stays usable.
     func cancel() {
+        guard isRunning else { return }
         cancelRequested = true
+        isPaused = false
         runTask?.cancel()
-        postNotice("Production cancelled.")
+        runTask = nil
+        interruptAwait?()
+        interruptAwait = nil
+        pendingQueue.removeAll()
+        revertInFlightShots()
+        currentShotId = nil
+        isRunning = false
+        postNotice("Production stopped.")
     }
 
-    /// Starts producing the given shots (in plan order). Ignored if already running.
+    /// Flips any shot stuck in `generating` back to storyboarded/planned. Used
+    /// on Stop; the abandoned asset keeps generating server-side and is
+    /// reconciled by `resume()` if it lands.
+    private func revertInFlightShots() {
+        guard let editor, let plan = editor.shotPlan else { return }
+        for shot in plan.shots where shot.status == .generating {
+            editor.setShotStatus(id: shot.id, shot.storyboardAssetId != nil ? .storyboarded : .planned)
+        }
+    }
+
+    /// Starts producing the given shots (in plan order), or — if a run is already
+    /// active — appends them to the pending queue so they generate after the
+    /// in-flight shot instead of being refused.
     func produceShots(ids requestedIds: [String], options: Options = Options()) {
-        guard !isRunning, let editor, let plan = editor.shotPlan else { return }
+        guard let editor, let plan = editor.shotPlan else { return }
 
         // Resolve to plan order; if none requested, produce everything not yet placed.
         let ordered = plan.shots.filter { shot in
@@ -126,23 +169,41 @@ final class ProductionOrchestrator {
             return
         }
 
+        // Queue behind the active run. Skip the shot already generating and any
+        // already queued so double-clicks and overlapping requests coalesce rather
+        // than enqueue duplicate takes. Queued shots inherit the running options.
+        if isRunning {
+            let addable = ordered.filter { $0 != currentShotId && !pendingQueue.contains($0) }
+            guard !addable.isEmpty else {
+                postNotice("Those shots are already generating or queued.")
+                return
+            }
+            pendingQueue.append(contentsOf: addable)
+            totalCount += addable.count
+            postNotice("Queued \(addable.count) shot\(addable.count == 1 ? "" : "s") behind the active run.")
+            return
+        }
+
         cancelRequested = false
         isRunning = true
         isPaused = false
         completedCount = 0
         totalCount = ordered.count
         lastError = nil
+        pendingQueue = ordered
         postNotice("Starting production of \(ordered.count) shot\(ordered.count == 1 ? "" : "s").")
 
         runTask = Task { @MainActor in
-            for shotId in ordered {
+            while !pendingQueue.isEmpty {
                 if cancelRequested || Task.isCancelled { break }
                 while isPaused && !cancelRequested { try? await Task.sleep(for: .milliseconds(300)) }
                 if cancelRequested { break }
+                let shotId = pendingQueue.removeFirst()
                 currentShotId = shotId
                 await produceOne(shotId: shotId, options: options)
                 completedCount += 1
             }
+            pendingQueue.removeAll()
             currentShotId = nil
             isRunning = false
             if !cancelRequested {
@@ -178,6 +239,14 @@ final class ProductionOrchestrator {
             failShot(shotId, reason: err)
             return
         }
+        // Legacy overlong shot (planned before the cap): refuse to silently
+        // truncate a paid generation — the user splits it, then re-runs.
+        // Snapping to a nearby ladder rung (12s → 10s) is fine; exceeding the
+        // model's longest clip is not.
+        if let longest = route.model.durations.max(), shot.durationSeconds > Double(longest) {
+            failShot(shotId, reason: "Planned \(Int(shot.durationSeconds))s but \(route.model.displayName) generates at most \(longest)s. Split the shot (shot inspector → Split) instead of truncating.")
+            return
+        }
 
         // Clip currently backing this shot (non-nil only when regenerating) — captured before
         // recordTake rewrites the shot's videoAssetId, so we can replace it in place.
@@ -205,6 +274,9 @@ final class ProductionOrchestrator {
                 genInput: genInput, model: route.model, inputAssets: route.inputAssets,
                 placeholderDuration: Double(duration), generateAudio: generateAudio, editor: editor
             )
+
+            // Interrupted by Stop — state was already reset; don't mark failed.
+            if cancelRequested { return }
 
             guard let asset else {
                 lastFailure = "generation failed"
@@ -251,6 +323,7 @@ final class ProductionOrchestrator {
     ) async -> MediaAsset? {
         await withCheckedContinuation { (continuation: CheckedContinuation<MediaAsset?, Never>) in
             let once = FirstOnlyFlag()
+            interruptAwait = { if once.fire() { continuation.resume(returning: nil) } }
             let submission = VideoGenerationSubmission.make(
                 genInput: genInput,
                 model: model,
@@ -305,10 +378,22 @@ final class ProductionOrchestrator {
 
     private func place(asset: MediaAsset, shotId: String, existingClipId: String?, editor: EditorViewModel) {
         // Replace an existing placed clip in-place (regeneration), else append in shot order.
+        let clipId: String?
         if let existingClipId {
             editor.replaceClipMediaRef(clipId: existingClipId, newAssetId: asset.id, resetTrim: true)
+            clipId = existingClipId
         } else {
-            _ = editor.placeProductionShotClip(asset: asset, actionName: "Place Shot")
+            clipId = editor.placeProductionShotClip(asset: asset, actionName: "Place Shot")?.clipId
+        }
+        // Audio is always generated; the shot's mix choice lands as clip volume
+        // (keep=1, duck=0.3, mute=0) — recoverable in the timeline, unlike a
+        // generation with no audio track.
+        if let clipId, let shot = editor.shotPlan?.shot(id: shotId) {
+            let volume = ShotPromptBuilder.placedClipVolume(for: shot)
+            if volume < 1.0, let loc = editor.findClip(id: clipId) {
+                editor.timeline.tracks[loc.trackIndex].clips[loc.clipIndex].volume = volume
+                editor.notifyTimelineChanged()
+            }
         }
         editor.setShotStatus(id: shotId, .placed)
     }
@@ -339,16 +424,33 @@ final class ProductionOrchestrator {
         let override = find(shot.modelOverride)
         let defaultModel = find(plan.defaultModel)
 
-        // Ready character reference images route to reference-to-video for consistency.
+        // Ready character + location reference images route to reference-to-video
+        // for consistency. A locked reference wins alone — never divergent takes.
         var refs: [MediaAsset] = []
-        for cid in shot.characterIds {
-            guard let c = plan.character(id: cid) else { continue }
-            for aid in c.referenceImageAssetIds {
+        func appendReady(_ assetIds: [String]) {
+            for aid in assetIds {
                 if let a = editor.mediaAssets.first(where: { $0.id == aid }),
                    a.type == .image, ToolExecutor.isReady(a, editor: editor) {
                     refs.append(a)
                 }
             }
+        }
+        for cid in shot.characterIds {
+            guard let c = plan.character(id: cid) else { continue }
+            appendReady(c.activeReferenceAssetIds)
+        }
+        for lid in shot.locationIds {
+            guard let l = plan.location(id: lid) else { continue }
+            appendReady(l.activeReferenceAssetIds)
+        }
+
+        // Explicit shot audio ref wins; else the first attached character with a
+        // locked voice reference (when the shot hasn't opted out). Only attached
+        // to models that accept audio input — never risks a queue rejection.
+        let audioRef = voiceAudioReference(for: shot, plan: plan, editor: editor)
+        func audioRefs(for model: VideoModelConfig) -> [MediaAsset] {
+            guard let audioRef, model.maxReferenceAudios > 0 else { return [] }
+            return [audioRef]
         }
 
         // Frame chaining takes priority when no character refs: seed an image-to-video model
@@ -358,7 +460,7 @@ final class ProductionOrchestrator {
                 .first { $0.supportsFirstFrame && !$0.requiresSourceVideo }
                 ?? enabled.first { $0.supportsFirstFrame && !$0.requiresSourceVideo }
             if let model = i2v {
-                let ia = VideoGenerationSubmission.InputAssets(frames: [chainFrame])
+                let ia = VideoGenerationSubmission.InputAssets(frames: [chainFrame], audioRefs: audioRefs(for: model))
                 if ia.validate(for: model) == nil {
                     return Route(model: model, inputAssets: ia, note: "image-to-video (chained from previous shot)")
                 }
@@ -371,9 +473,11 @@ final class ProductionOrchestrator {
                 ?? enabled.first { $0.requiresReferenceImage && !$0.requiresSourceVideo && $0.maxReferenceImages > 0 }
             if let model = r2v {
                 let capped = Array(refs.prefix(max(1, model.maxReferenceImages)))
-                let ia = VideoGenerationSubmission.InputAssets(imageRefs: capped)
+                let audio = audioRefs(for: model)
+                let ia = VideoGenerationSubmission.InputAssets(imageRefs: capped, audioRefs: audio)
                 if ia.validate(for: model) == nil {
-                    return Route(model: model, inputAssets: ia, note: "reference-to-video (\(capped.count) ref\(capped.count == 1 ? "" : "s"))")
+                    let audioNote = audio.isEmpty ? "" : " + voice ref"
+                    return Route(model: model, inputAssets: ia, note: "reference-to-video (\(capped.count) ref\(capped.count == 1 ? "" : "s")\(audioNote))")
                 }
             }
         }
@@ -383,7 +487,27 @@ final class ProductionOrchestrator {
             ?? enabled.first { !$0.requiresReferenceImage && !$0.requiresSourceVideo }
             ?? enabled.first
         guard let model = t2v else { return nil }
-        return Route(model: model, inputAssets: VideoGenerationSubmission.InputAssets(), note: "text-to-video")
+        let ia = VideoGenerationSubmission.InputAssets(audioRefs: audioRefs(for: model))
+        return Route(model: model, inputAssets: ia.validate(for: model) == nil ? ia : VideoGenerationSubmission.InputAssets(), note: "text-to-video")
+    }
+
+    /// Resolves the audio reference to attach to a shot's generation: the shot's
+    /// explicit audioReferenceAssetId, else (when attachCastVoiceReference) the
+    /// locked voice reference of the first attached character that has one.
+    /// Returns nil unless the asset exists, is audio, and is ready.
+    private func voiceAudioReference(for shot: Shot, plan: ShotPlan, editor: EditorViewModel) -> MediaAsset? {
+        func readyAudio(_ assetId: String?) -> MediaAsset? {
+            guard let assetId,
+                  let a = editor.mediaAssets.first(where: { $0.id == assetId }),
+                  a.type == .audio, ToolExecutor.isReady(a, editor: editor) else { return nil }
+            return a
+        }
+        if let explicit = readyAudio(shot.audioReferenceAssetId) { return explicit }
+        guard shot.attachCastVoiceReference else { return nil }
+        for cid in shot.characterIds {
+            if let ref = readyAudio(plan.character(id: cid)?.voiceReferenceAssetId) { return ref }
+        }
+        return nil
     }
 
     /// Extracts the previous shot's last frame when that shot transitions by dissolve or

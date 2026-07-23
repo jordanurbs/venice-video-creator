@@ -62,6 +62,12 @@ final class EditorViewModel {
     var selectedGap: GapSelection?
     var selectedTimelineRange: TimelineRangeSelection?
     var selectedMediaAssetIds: Set<String> = []
+    /// Shot selected in the Production panel; drives the shot inspector.
+    var selectedShotId: String?
+    /// Character selected in the Cast panel; drives the character inspector.
+    var selectedCharacterId: String?
+    /// Location selected in the Locations panel; drives the location inspector.
+    var selectedLocationId: String?
     var selectedFolderIds: Set<String> = []
     var pendingSwapClipId: String?
     var clipClipboard: [ClipClipboardEntry] = []
@@ -184,6 +190,9 @@ final class EditorViewModel {
     var mediaPanelNewFolderRequestTick: Int = 0
     var mediaPanelNavigateUpRequestTick: Int = 0
     var mediaPanelShowMediaTabTick: Int = 0
+    var mediaPanelShowProductionTabTick: Int = 0
+    var mediaPanelShowCastTabTick: Int = 0
+    var mediaPanelShowLocationsTabTick: Int = 0
     /// The editor-wide notice surface, shown at the window's bottom edge so
     /// results can't fire into a hidden panel.
     var editorToast: MediaPanelToast?
@@ -195,6 +204,18 @@ final class EditorViewModel {
         // Refresh offline status when the user opens the media tab, so missing
         // files show as offline even for assets not on the timeline.
         refreshMissingMediaCache()
+    }
+
+    func showMediaPanelProductionTab() {
+        mediaPanelShowProductionTabTick += 1
+    }
+
+    func showMediaPanelCastTab() {
+        mediaPanelShowCastTabTick += 1
+    }
+
+    func showMediaPanelLocationsTab() {
+        mediaPanelShowLocationsTabTick += 1
     }
 
     init() {
@@ -233,6 +254,23 @@ final class EditorViewModel {
     /// Marks the backing document dirty for changes that don't register undo
     /// (e.g. media generated into the library). Ensures `media.json` autosaves.
     @ObservationIgnored var onProjectContentChanged: (() -> Void)?
+
+    @ObservationIgnored private var checkpointDebounceTask: Task<Void, Never>?
+
+    /// Requests a project checkpoint (full package flush), coalescing a burst of
+    /// edits into a single write shortly after activity settles. Use for authored
+    /// content that must survive a crash — shot plans, documents — without writing
+    /// on every keystroke or status tick. Generation/import events checkpoint
+    /// immediately via `onProjectCheckpointRequired`.
+    func requestDebouncedCheckpoint() {
+        checkpointDebounceTask?.cancel()
+        checkpointDebounceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, let self else { return }
+            self.checkpointDebounceTask = nil
+            self.onProjectCheckpointRequired?()
+        }
+    }
 
     func telemetrySnapshot() -> [String: Any] {
         var mediaCounts: [String: Int] = [:]

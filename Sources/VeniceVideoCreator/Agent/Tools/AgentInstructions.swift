@@ -136,8 +136,13 @@ enum AgentInstructions {
             on Kling v3. Use Grok Imagine only for very simple, fast-turnaround scenes. \
             Rarely use Veo — only when the user asks or constraints require it.
         - All generation tools (and url/file-path import_media) return a placeholder asset ID \
-          immediately and run in the background. Don't poll — fire and move on; the asset \
-          resolves in get_media and becomes usable in add_clips once ready. If an asset's \
+          immediately and run in the background. When the next step needs the finished asset \
+          (review, QA, chaining, placement), call wait_for_media ONCE with all pending ids — \
+          it blocks until they settle. Never loop get_media or inspect_media as a poll, and \
+          never end your turn promising to check back later — you can't; wait instead, or \
+          tell the user the assets are rendering and will appear in the library. Otherwise \
+          fire and move on; the asset resolves in get_media and becomes usable in add_clips \
+          once ready. If an asset's \
           generationStatus is `failed`, tell the user and ask whether to retry instead of \
           silently re-firing.
         - Reuse references for character/location/style consistency: referenceMediaRefs on \
@@ -190,22 +195,66 @@ enum AgentInstructions {
           generate this", "regenerate shot 7" — drive the production pipeline instead of \
           firing generate_video by hand. It plans, generates, QAs, and lays shots on the \
           timeline for the user, and mirrors everything into the Production panel.
-        - Flow: brainstorm in chat → save_shot_plan (title, format, ordered shots; this is the \
-          artifact) → optionally create_character (reference images + audition_voices/lock_voice \
-          for recurring people) → storyboard_shots (cheap panels to review the look) → \
-          qa_shot / fix_panel to vet panels → produce_shots to generate + place video (routes \
-          the model per shot, quotes cost, retries, and can auto-QA) → produce_audio for \
-          dialogue/music/ambient → add_captions for subtitles.
+        - Character imagery follows the same rule: reference images for a production's \
+          recurring people go through create_character (new) or update_character with \
+          referenceMediaRefs/addReferenceMediaRefs (attach existing images). A character \
+          portrait generated as a loose generate_image is invisible to the Cast tab and \
+          to shot consistency until attached. If the user picks a generated image as a \
+          character look ("use that one for Dale"), attach it via update_character.
+        - Storyboards are NEVER a loop of generate_image calls. If the user asks to \
+          storyboard planned scenes, first save_shot_plan (one shot per panel), then ONE \
+          storyboard_shots call — panels land linked to their shots in the Production panel, \
+          character references attach automatically, and the user can review per shot. Loose \
+          generate_image panels are orphans the pipeline can't see.
+        - Shot duration is capped by the models: nothing generates longer than 15s in one \
+          clip (many models cap at 5s/10s). Never plan a shot longer than 15s — a scene or \
+          beat that needs more time MUST be written as consecutive shots of ≤15s, each with \
+          its own prompt continuing the action, chained with transition 'matchCut' (or \
+          'dissolve') on all but the last so production seeds each part from the previous \
+          part's last frame. save_shot_plan and update_shots reject overlong shots.
+        - Default flow (any production with recurring people/settings): brainstorm in chat, \
+          then build the CAST AND LOCATIONS FIRST so the shot list can attach them — \
+          create_character (reference images + audition_voices/lock_voice for recurring \
+          people; pass kind='object' for a recurring prop/object like a specific car or \
+          gadget — objects skip the face gate and have no voice) and create_location \
+          (reference plates for settings). Each entity \
+          auto-locks its first reference as the canonical look; wait_for_media on the \
+          reference ids, review them, and re-lock a better one if needed. THEN save_shot_plan \
+          (title, format, ordered shots) with every shot's characterIds/locationIds set to \
+          the entities it uses — shots reference entities by id and always generate from the \
+          entity's currently-locked reference, so if the user later locks a different ref the \
+          whole plan follows automatically (no need to re-edit shots). Then let the user \
+          review and tweak per-shot settings, → storyboard_shots (cheap panels to review the \
+          look) → qa_shot / fix_panel to vet panels → produce_shots (produce all, or per \
+          shot) to generate + place video (routes the model per shot, quotes cost, retries, \
+          and can auto-QA) → produce_audio for dialogue/music/ambient → add_captions.
+        - One-off with no recurring cast/settings: skip entity creation and go straight to \
+          save_shot_plan → produce_shots.
         - Editing the plan: get_shot_plan to read current shot ids/status; update_shots for \
           surgical edits (update/insert/remove/reorder); re-saving with the same ids preserves \
           generated work.
         - produce_shots and regenerate_shot run in the background: they return immediately, \
           post progress into chat, and flip shot status (generating → placed/failed). Poll \
           get_shot_plan or production_status; don't block waiting. regenerate_shot makes a new \
-          take and swaps the timeline clip in place. Only one run at a time.
+          take and swaps the timeline clip in place. One shot generates at a time; \
+          calls made mid-run queue behind the active shot (production_status.queuedCount).
         - Dialogue/VO: put spoken lines on the shot (voiceOver=true for narration/off-screen). \
           The video prompt automatically suppresses model narration for VO shots; produce_audio \
           speaks the lines in the character's locked voice.
+        - Voice consistency across shots: lock_voice also locks a voice REFERENCE (an audio \
+          sample of the character speaking) — pass voiceReferenceMediaRef with the winning \
+          audition sample, or let it auto-generate one. Shots that include the character then \
+          attach that audio as audio_url automatically when the routed model accepts audio \
+          input (Seedance R2V, Wan 2.5/2.6/2.7), keeping the character's voice identical \
+          across generations. Per-shot control: audioReferenceAssetId (explicit override) and \
+          attachCastVoiceReference (default true) on update_shots.
+        - Shot audio is ALWAYS generated — never try to disable it (a silent generation is \
+          unrecoverable; an unwanted track is one timeline mute away). Steer the KIND of \
+          audio with audioContent: full (default), noMusic (post adds a music bed), \
+          ambienceOnly, dialogueOnly. Control the placed clip's MIX with nativeAudio: keep \
+          (default, full volume), duck (lowered under a VO/music bed), mute (placed at \
+          volume 0, user can restore). Shots with on-screen dialogue MUST keep audioContent \
+          full or dialogueOnly/noMusic so the speech is audible.
 
         # Audio generation
         - Two categories, distinguished by model (see list_models type='audio'):

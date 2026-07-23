@@ -216,7 +216,30 @@ extension ToolExecutor {
             projectURL: editor.projectURL,
             editor: editor
         )
-        return .ok("Generation started. Placeholder asset ID: \(placeholderId). Model: \(model.displayName), aspect: \(aspectRatio)")
+        var reply = "Generation started. Placeholder asset ID: \(placeholderId). Model: \(model.displayName), aspect: \(aspectRatio)"
+        if let redirect = Self.storyboardRedirectHint(prompt: prompt, name: args.string("name"), editor: editor) {
+            reply += "\n\(redirect)"
+        }
+        return .ok(reply)
+    }
+
+    /// Storyboard- or character-reference-looking raw image generations get a
+    /// firm redirect to the pipeline path, so they don't land as loose Media
+    /// assets invisible to the Production/Cast tabs.
+    private static func storyboardRedirectHint(prompt: String, name: String?, editor: EditorViewModel) -> String? {
+        let haystack = (prompt + " " + (name ?? "")).lowercased()
+        if haystack.contains("storyboard") || haystack.contains("panel") {
+            if let plan = editor.shotPlan, !plan.shots.isEmpty {
+                return "WARNING: This looks like a storyboard panel generated outside the pipeline — it will NOT be linked to any shot or visible in the Production panel. Use storyboard_shots (one call, all shots) instead; pass shotIds to target specific shots."
+            }
+            return "WARNING: This looks like a storyboard panel, but no shot plan exists. save_shot_plan first (one shot per panel), then ONE storyboard_shots call — panels land linked to their shots in the Production panel instead of as loose Media assets."
+        }
+        let characterTerms = ["character reference", "reference sheet", "character design", "front view", "three-quarter view"]
+        if characterTerms.contains(where: haystack.contains)
+            || (editor.shotPlan?.characters.contains { !$0.name.isEmpty && haystack.contains($0.name.lowercased()) } ?? false) {
+            return "WARNING: This looks like a character reference image. Loose Media images are invisible to the Cast tab and shot consistency. Use create_character (generates linked references), or after this asset finishes, attach it with update_character addReferenceMediaRefs."
+        }
+        return nil
     }
 
     /// Lowest-resolution option a model offers, so chat-driven generations stay cheap.

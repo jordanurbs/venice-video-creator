@@ -628,7 +628,15 @@ final class AgentService {
         let model = availableModels.first { $0.id == effectiveModelId }
         let context = model?.availableContextTokens ?? 128_000
         let systemTokens = ContextBudget.estimateTokens(text: AgentInstructions.serverInstructions)
-        let budget = max(4_000, context - Self.reservedOutputTokens - systemTokens - ContextBudget.safetyMargin)
+        // Two ceilings: the model's token window AND the HTTP payload byte cap —
+        // Venice 413s an oversized request body regardless of the model's
+        // context size (bites on big-context models with inline images, whose
+        // token budget alone would let multi-MB payloads through).
+        let payloadTokenCeiling = ContextBudget.maxPayloadBytes / ContextBudget.charsPerToken
+        let budget = max(4_000, min(
+            context - Self.reservedOutputTokens - systemTokens - ContextBudget.safetyMargin,
+            payloadTokenCeiling
+        ))
 
         let used = full.reduce(0) { $0 + ContextBudget.estimateTokens($1) }
         guard used > budget else { return full }

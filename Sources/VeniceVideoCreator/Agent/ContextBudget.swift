@@ -11,6 +11,12 @@ enum ContextBudget {
     static let charsPerToken = 4
     /// Headroom for system prompt drift, tool schemas, and estimation error.
     static let safetyMargin = 8_000
+    /// Max request-body size worth shipping: Venice rejects oversized
+    /// chat/completions bodies with HTTP 413 no matter how large the model's
+    /// token window is. Inline base64 images are what get a payload here —
+    /// ~3 MB of message content leaves room for the system prompt and tool
+    /// schemas under a typical 4-5 MB server cap.
+    static let maxPayloadBytes = 3_000_000
 
     struct Result {
         var kept: [AnthropicMessage]
@@ -98,6 +104,22 @@ enum ContextBudget {
         // Never start the window with an orphan tool result (no preceding tool_use).
         while let first = kept.first, hasToolResult(first), kept.count > 1 {
             evicted.append(kept.removeFirst())
+        }
+
+        // Still over budget with only the recent window left: the recent turns
+        // themselves carry the weight (typically inline reference images during
+        // a production run). Strip their images too, oldest first — otherwise
+        // the request ships over budget and Venice rejects it (HTTP 413), and
+        // every retry re-sends the same oversized body.
+        if total() > budget {
+            for i in kept.indices {
+                guard total() > budget else { break }
+                let (newContent, removed) = stripImages(from: kept[i].content)
+                if removed > 0 {
+                    kept[i] = AnthropicMessage(role: kept[i].role, content: newContent)
+                    strippedImages = true
+                }
+            }
         }
 
         return Result(kept: kept, evicted: evicted, strippedImages: strippedImages)

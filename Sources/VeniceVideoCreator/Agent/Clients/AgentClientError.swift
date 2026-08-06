@@ -29,6 +29,11 @@ enum AgentClientError: LocalizedError {
             if status == 402 {
                 return .insufficientCredits(message.isEmpty ? "Venice account is out of credit. Top up at venice.ai." : message)
             }
+            if status == 413 {
+                // Retrying the same oversized payload can't succeed — say what
+                // actually helps (usually inline images blew the request body).
+                return .upstream("The request was too large for Venice (HTTP 413) — usually too many inline images in the conversation. Send your next message without image attachments, or start a new chat; the app now trims oversized turns automatically.")
+            }
             return .upstream(message.isEmpty ? "Venice error (HTTP \(status)). Try again." : message)
         }
     }

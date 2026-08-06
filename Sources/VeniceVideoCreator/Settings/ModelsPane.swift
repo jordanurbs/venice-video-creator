@@ -25,6 +25,7 @@ struct ModelsPane: View {
                 defaultsSection
                 transcriptionSection
                 seedanceConsentSection
+                multiShotSection
                 capabilityUpdatesSection
                 Divider().overlay(AppTheme.Border.subtleColor)
                 searchBar
@@ -194,6 +195,33 @@ struct ModelsPane: View {
                 Toggle("", isOn: Binding(
                     get: { prefs.seedanceConsentGranted },
                     set: { prefs.seedanceConsentGranted = $0 }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            }
+            .padding(.vertical, AppTheme.Spacing.xs)
+        }
+    }
+
+    // MARK: - Multi-shot grouping
+
+    private var multiShotSection: some View {
+        sectionContainer(title: "Production") {
+            HStack(spacing: AppTheme.Spacing.md) {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.xxs) {
+                    Text("Group consecutive shots into one generation")
+                        .font(.system(size: AppTheme.FontSize.md))
+                        .foregroundStyle(AppTheme.Text.primaryColor)
+                    Text("Consecutive shots in the same location with shared characters (up to 15 seconds / 6 shots) render as ONE multi-shot video with internal camera cuts, then split back into per-shot clips on the timeline. Characters, lighting, and geography can't drift between those cuts because the frames come from a single render. Needs a reference-to-video model and reference images on the cast.")
+                        .font(.system(size: AppTheme.FontSize.xs))
+                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: AppTheme.Spacing.lg)
+                Toggle("", isOn: Binding(
+                    get: { prefs.multiShotGroupingEnabled },
+                    set: { prefs.multiShotGroupingEnabled = $0 }
                 ))
                 .labelsHidden()
                 .toggleStyle(.switch)

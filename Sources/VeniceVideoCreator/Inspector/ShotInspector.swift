@@ -796,7 +796,7 @@ extension ShotInspector {
             HStack(spacing: AppTheme.Spacing.sm) {
                 let orchestrator = editor.productionOrchestrator
                 let isGenerating = orchestrator.currentShotId == shot.id
-                let isQueued = orchestrator.pendingQueue.contains(shot.id)
+                let isQueued = orchestrator.isQueued(shot.id)
                 Button {
                     orchestrator.produceShots(ids: [shot.id])
                 } label: {

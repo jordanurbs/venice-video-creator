@@ -135,7 +135,7 @@ struct ProductionPanel: View {
                         isCurrent: orchestrator.currentShotId == shot.id,
                         isSelected: editor.selectedShotId == shot.id,
                         isAssetInFlight: assetInFlight(for: shot),
-                        isQueued: orchestrator.pendingQueue.contains(shot.id),
+                        isQueued: orchestrator.isQueued(shot.id),
                         onSelect: { editor.selectShot(id: shot.id) },
                         onApprove: { editor.setShotStatus(id: shot.id, .approved) },
                         onRegenerate: { editor.productionOrchestrator.produceShots(ids: [shot.id]) }

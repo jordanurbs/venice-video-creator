@@ -29,15 +29,26 @@ final class ProductionOrchestrator {
 
     @ObservationIgnored private var runTask: Task<Void, Never>?
     @ObservationIgnored private var cancelRequested = false
-    /// Shots waiting to produce, drained in order by the run loop. New
-    /// `produceShots` calls append here instead of being refused, so requests made
-    /// mid-run queue behind the active shot. Observable so the UI can show a shot
-    /// as queued.
-    private(set) var pendingQueue: [String] = []
+    /// Generation units waiting to produce, drained in order by the run loop.
+    /// A unit is one shot (normal) or a grouped multi-shot window (opt-in).
+    /// New `produceShots` calls append here instead of being refused, so
+    /// requests made mid-run queue behind the active unit. Observable so the
+    /// UI can show a shot as queued.
+    private(set) var pendingQueue: [MultiShotPlanner.Unit] = []
+
+    /// Shot ids of the unit currently generating (one for singles).
+    @ObservationIgnored private var currentUnitShotIds: [String] = []
+
+    /// Whether a shot is waiting in the pending queue (not yet generating).
+    func isQueued(_ shotId: String) -> Bool {
+        pendingQueue.contains { $0.shotIds.contains(shotId) }
+    }
 
     /// Whether a shot is currently generating or waiting in the queue.
     func isActive(_ shotId: String) -> Bool {
-        currentShotId == shotId || pendingQueue.contains(shotId)
+        currentShotId == shotId
+            || currentUnitShotIds.contains(shotId)
+            || pendingQueue.contains(where: { $0.shotIds.contains(shotId) })
     }
     /// Resumes the continuation `submitAndAwait` is parked on — task cancellation
     /// can't reach it, so Stop must fire this or `isRunning` sticks true forever.
@@ -159,57 +170,257 @@ final class ProductionOrchestrator {
         guard let editor, let plan = editor.shotPlan else { return }
 
         // Resolve to plan order; if none requested, produce everything not yet placed.
-        let ordered = plan.shots.filter { shot in
+        let orderedShots = plan.shots.filter { shot in
             if requestedIds.isEmpty { return shot.status != .placed }
             return requestedIds.contains(shot.id)
-        }.map(\.id)
+        }
 
-        guard !ordered.isEmpty else {
+        guard !orderedShots.isEmpty else {
             postNotice("Nothing to produce — all requested shots are already placed.")
             return
         }
 
-        // Queue behind the active run. Skip the shot already generating and any
-        // already queued so double-clicks and overlapping requests coalesce rather
-        // than enqueue duplicate takes. Queued shots inherit the running options.
+        // Group consecutive same-scene shots into multi-shot units when the
+        // user opted in (Settings → Models). Single-shot regenerations
+        // (one requested id) never group — a retake must not re-render
+        // neighbors that are already placed.
+        let groupingEnabled = ModelPreferences.shared.multiShotGroupingEnabled && orderedShots.count > 1
+        let ordered = MultiShotPlanner.plan(shots: orderedShots, plan: plan, groupingEnabled: groupingEnabled)
+        let grouped = ordered.filter(\.isMultiShot)
+        if !grouped.isEmpty {
+            let shotsInGroups = grouped.reduce(0) { $0 + $1.shotIds.count }
+            postNotice("Multi-shot grouping: \(shotsInGroups) shots render as \(grouped.count) grouped generation\(grouped.count == 1 ? "" : "s") for continuity.")
+        }
+
+        // Queue behind the active run. Skip units whose shots are already
+        // generating or queued so double-clicks and overlapping requests
+        // coalesce rather than enqueue duplicate takes. Queued units inherit
+        // the running options.
         if isRunning {
-            let addable = ordered.filter { $0 != currentShotId && !pendingQueue.contains($0) }
+            let busy = Set([currentShotId].compactMap { $0 } + currentUnitShotIds
+                + pendingQueue.flatMap(\.shotIds))
+            let addable = ordered.filter { $0.shotIds.allSatisfy { !busy.contains($0) } }
             guard !addable.isEmpty else {
                 postNotice("Those shots are already generating or queued.")
                 return
             }
             pendingQueue.append(contentsOf: addable)
-            totalCount += addable.count
-            postNotice("Queued \(addable.count) shot\(addable.count == 1 ? "" : "s") behind the active run.")
+            let addedShots = addable.reduce(0) { $0 + $1.shotIds.count }
+            totalCount += addedShots
+            postNotice("Queued \(addedShots) shot\(addedShots == 1 ? "" : "s") behind the active run.")
             return
         }
 
+        let totalShots = ordered.reduce(0) { $0 + $1.shotIds.count }
         cancelRequested = false
         isRunning = true
         isPaused = false
         completedCount = 0
-        totalCount = ordered.count
+        totalCount = totalShots
         lastError = nil
         pendingQueue = ordered
-        postNotice("Starting production of \(ordered.count) shot\(ordered.count == 1 ? "" : "s").")
+        postNotice("Starting production of \(totalShots) shot\(totalShots == 1 ? "" : "s") (\(ordered.count) generation\(ordered.count == 1 ? "" : "s")).")
 
         runTask = Task { @MainActor in
             while !pendingQueue.isEmpty {
                 if cancelRequested || Task.isCancelled { break }
                 while isPaused && !cancelRequested { try? await Task.sleep(for: .milliseconds(300)) }
                 if cancelRequested { break }
-                let shotId = pendingQueue.removeFirst()
-                currentShotId = shotId
-                await produceOne(shotId: shotId, options: options)
-                completedCount += 1
+                let unit = pendingQueue.removeFirst()
+                if unit.isMultiShot {
+                    currentUnitShotIds = unit.shotIds
+                    currentShotId = unit.shotIds.first
+                    await produceUnit(unit, options: options)
+                    currentUnitShotIds = []
+                } else if let shotId = unit.shotIds.first {
+                    currentShotId = shotId
+                    await produceOne(shotId: shotId, options: options)
+                }
+                completedCount += unit.shotIds.count
             }
             pendingQueue.removeAll()
             currentShotId = nil
+            currentUnitShotIds = []
             isRunning = false
             if !cancelRequested {
                 postNotice("Production run finished (\(completedCount)/\(totalCount) shots).")
             }
         }
+    }
+
+    // MARK: - Multi-shot unit production
+
+    /// Generates a grouped window as ONE video (Seedance native multi-shot,
+    /// `Lens switch.` beats), then places one timeline clip PER SHOT, each
+    /// trimmed to its beat's slice of the single asset — the editor still
+    /// shows and manages individual shots.
+    private func produceUnit(_ unit: MultiShotPlanner.Unit, options: Options) async {
+        guard let editor, let plan = editor.shotPlan else { return }
+        let window = unit.shotIds.compactMap { plan.shot(id: $0) }
+        guard window.count == unit.shotIds.count, window.count >= 2 else {
+            // Plan changed since queuing — fall back to singles.
+            for id in unit.shotIds { await produceOne(shotId: id, options: options) }
+            return
+        }
+        let label = "\(window.first?.slug ?? "S?")–\(window.last?.slug ?? "S?")"
+
+        guard let route = routeUnit(window, plan: plan, editor: editor) else {
+            postNotice("\(label): no reference-capable model available for a grouped generation — rendering shots individually.")
+            for id in unit.shotIds { await produceOne(shotId: id, options: options) }
+            return
+        }
+
+        if route.model.id.lowercased().contains("seedance"),
+           !ModelPreferences.shared.seedanceConsentGranted {
+            postNotice("\(label): Seedance requires consent (Settings → Models) — rendering shots individually.")
+            for id in unit.shotIds { await produceOne(shotId: id, options: options) }
+            return
+        }
+
+        // Snap the summed duration to the model's ladder. Snapping DOWN would
+        // cut off the last beat, so require a rung >= the sum; bail to singles
+        // when the ladder can't hold the window.
+        let plannedSeconds = window.reduce(0.0) { $0 + $1.durationSeconds }
+        let requested = Int(plannedSeconds.rounded())
+        let duration: Int
+        if route.model.durations.isEmpty {
+            duration = max(1, requested)
+        } else if let rung = route.model.durations.sorted().first(where: { $0 >= requested }) {
+            duration = rung
+        } else {
+            postNotice("\(label): \(requested)s window exceeds \(route.model.displayName)'s ladder — rendering shots individually.")
+            for id in unit.shotIds { await produceOne(shotId: id, options: options) }
+            return
+        }
+
+        let aspect = plan.aspectRatio
+        let resolution = route.model.resolutions?.contains(plan.resolution) == true ? plan.resolution : route.model.resolutions?.first
+        if let err = route.model.validate(duration: duration, aspectRatio: aspect, resolution: resolution) {
+            postNotice("\(label): \(err) — rendering shots individually.")
+            for id in unit.shotIds { await produceOne(shotId: id, options: options) }
+            return
+        }
+
+        for shot in window { editor.setShotStatus(id: shot.id, .generating) }
+        let quoted = await VeniceAPI.fromKeychain()?.videoQuote(
+            model: route.model.id, duration: duration, resolution: resolution, aspectRatio: aspect
+        )
+        let costNote = quoted.map { String(format: " (~$%.2f)", $0) } ?? ""
+        postNotice("Generating \(label) as one multi-shot take: \(unit.reason), \(duration)s\(costNote).")
+
+        var genInput = GenerationInput(
+            prompt: MultiShotPlanner.multiShotPrompt(window: window, plan: plan),
+            model: route.model.id, duration: duration,
+            aspectRatio: aspect, resolution: resolution
+        )
+        genInput.createdAt = Date()
+
+        var lastFailure = "generation failed"
+        for attempt in 0...max(0, options.maxRetries) {
+            if cancelRequested { return }
+            let asset = await submitAndAwait(
+                genInput: genInput, model: route.model, inputAssets: route.inputAssets,
+                placeholderDuration: Double(duration), generateAudio: true, editor: editor
+            )
+            if cancelRequested { return }
+
+            guard let asset else {
+                lastFailure = "generation failed"
+                if attempt < options.maxRetries {
+                    let delay = options.retryBaseDelay * Double(attempt + 1)
+                    postNotice("\(label) failed — retrying in \(Int(delay))s (attempt \(attempt + 2)).")
+                    try? await Task.sleep(for: .seconds(delay))
+                    continue
+                }
+                break
+            }
+
+            // Record the shared take on every shot in the window.
+            for shot in window { recordTake(shotId: shot.id, asset: asset, model: route.model.id) }
+
+            if options.autoQA, let firstId = window.first?.id {
+                if let result = await runAutoQA(shotId: firstId, asset: asset, plan: plan) {
+                    if !result.pass && attempt < options.maxRetries {
+                        postNotice("\(label) failed QA (score \(String(format: "%.2f", result.score))) — regenerating.")
+                        try? await Task.sleep(for: .seconds(options.retryBaseDelay))
+                        continue
+                    }
+                }
+            }
+
+            placeUnitClips(window: window, asset: asset, editor: editor)
+            if let quoted { runningUSD += quoted }
+            postNotice("Placed \(label) on the timeline as \(window.count) clips from one take.")
+            return
+        }
+
+        for shot in window { failShot(shot.id, reason: lastFailure) }
+    }
+
+    /// Splits the unit's single video into per-shot timeline clips at the
+    /// planned beat boundaries. The last shot absorbs any surplus (ladder
+    /// snapping can make the render longer than the planned sum).
+    private func placeUnitClips(window: [Shot], asset: MediaAsset, editor: EditorViewModel) {
+        let plannedTotal = window.reduce(0.0) { $0 + $1.durationSeconds }
+        let actual = asset.duration > 0 ? asset.duration : plannedTotal
+        var cursor = 0.0
+        for (index, shot) in window.enumerated() {
+            let isLast = index == window.count - 1
+            let end = isLast ? actual : min(actual, cursor + shot.durationSeconds)
+            let segment = cursor...max(cursor + 0.1, end)
+            let clipId = editor.placeProductionUnitClip(
+                asset: asset,
+                sourceSegment: segment,
+                actionName: "Place Multi-Shot"
+            )
+            if let clipId, ShotPromptBuilder.placedClipVolume(for: shot) < 1.0,
+               let loc = editor.findClip(id: clipId) {
+                editor.timeline.tracks[loc.trackIndex].clips[loc.clipIndex].volume =
+                    ShotPromptBuilder.placedClipVolume(for: shot)
+                editor.notifyTimelineChanged()
+            }
+            editor.setShotStatus(id: shot.id, .placed)
+            cursor = end
+        }
+    }
+
+    /// Routes a grouped window: pure reference mode on a reference-capable
+    /// model (union of the window's character + location references, capped
+    /// to the model's budget), never frames. Voice refs are per-shot audio
+    /// and don't attach to grouped units.
+    private func routeUnit(_ window: [Shot], plan: ShotPlan, editor: EditorViewModel) -> Route? {
+        let enabled = VideoModelConfig.allModels.filter { ModelPreferences.shared.isEnabled($0.id) }
+        guard !enabled.isEmpty else { return nil }
+
+        var refs: [MediaAsset] = []
+        var seen = Set<String>()
+        func appendReady(_ assetIds: [String]) {
+            for aid in assetIds where !seen.contains(aid) {
+                if let a = editor.mediaAssets.first(where: { $0.id == aid }),
+                   a.type == .image, ToolExecutor.isReady(a, editor: editor) {
+                    refs.append(a); seen.insert(aid)
+                }
+            }
+        }
+        for cid in MultiShotPlanner.orderedUniqueCharacterIds(window) {
+            guard let c = plan.character(id: cid) else { continue }
+            appendReady(c.activeReferenceAssetIds)
+        }
+        if let lid = window.first?.locationIds.first, let l = plan.location(id: lid) {
+            appendReady(l.activeReferenceAssetIds)
+        }
+        guard !refs.isEmpty else { return nil }
+
+        let defaultModel = plan.defaultModel.flatMap { id in enabled.first { $0.id == id } }
+        let r2v = [defaultModel].compactMap { $0 }
+            .first { $0.requiresReferenceImage && !$0.requiresSourceVideo && $0.maxReferenceImages > 0 }
+            ?? enabled.first { $0.requiresReferenceImage && !$0.requiresSourceVideo && $0.maxReferenceImages > 0 }
+        guard let model = r2v else { return nil }
+
+        let capped = Array(refs.prefix(max(1, model.maxReferenceImages)))
+        let ia = VideoGenerationSubmission.InputAssets(imageRefs: capped)
+        guard ia.validate(for: model) == nil else { return nil }
+        return Route(model: model, inputAssets: ia, note: "multi-shot reference-to-video (\(capped.count) refs)")
     }
 
     // MARK: - Per-shot production

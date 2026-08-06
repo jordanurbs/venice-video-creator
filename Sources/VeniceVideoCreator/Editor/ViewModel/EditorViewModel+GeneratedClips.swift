@@ -86,14 +86,47 @@ extension EditorViewModel {
         return (clipId, startFrame)
     }
 
+    /// Appends one beat of a multi-shot unit's video at the end of the production
+    /// track: the clip shows only `sourceSegment` (source seconds) of the shared
+    /// asset, so one generated take fans out into per-shot clips. Undoable as
+    /// one swap per clip.
+    @discardableResult
+    func placeProductionUnitClip(
+        asset: MediaAsset,
+        sourceSegment: ClosedRange<Double>,
+        actionName: String
+    ) -> String? {
+        let trackIdx = productionVideoTrackIndex()
+        guard timeline.tracks.indices.contains(trackIdx) else { return nil }
+        let startFrame = timeline.tracks[trackIdx].endFrame
+        let visibleSeconds = max(0.1, sourceSegment.upperBound - sourceSegment.lowerBound)
+        let durationFrames = max(1, secondsToFrame(seconds: visibleSeconds, fps: timeline.fps))
+        let before = timeline
+        let ids = placeClip(
+            asset: asset,
+            trackIndex: trackIdx,
+            startFrame: startFrame,
+            durationFrames: durationFrames,
+            sourceSegment: sourceSegment
+        )
+        guard let clipId = ids.first else { return nil }
+        registerTimelineSwap(undoState: before, redoState: timeline, actionName: actionName)
+        notifyTimelineChanged()
+        return clipId
+    }
+
     /// Finds the timeline clip currently backed by `assetId` (a placed shot's video), if any.
-    func productionClipId(forAsset assetId: String) -> String? {
+    /// `occurrence` disambiguates when one asset backs several clips (a multi-shot
+    /// unit's video fans out into per-beat clips): 0 = first clip in track order.
+    func productionClipId(forAsset assetId: String, occurrence: Int = 0) -> String? {
+        var matches: [String] = []
         for track in timeline.tracks where track.type == .video {
-            if let clip = track.clips.first(where: { $0.mediaRef == assetId }) {
-                return clip.id
+            for clip in track.clips where clip.mediaRef == assetId {
+                matches.append(clip.id)
             }
         }
-        return nil
+        guard occurrence >= 0, occurrence < matches.count else { return matches.first }
+        return matches[occurrence]
     }
 
     private func findClipLocationByMediaRef(_ mediaRef: String) -> ClipLocation? {

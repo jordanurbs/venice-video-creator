@@ -37,6 +37,7 @@ final class ModelPreferences {
     private static let defaultsKey = "defaultModelIds"
     private static let characterSlugKey = "agentCharacterSlug"
     private static let seedanceConsentKey = "seedanceConsentGranted"
+    private static let multiShotGroupingKey = "multiShotGroupingEnabled"
 
     private(set) var disabledIds: Set<String>
     /// task.rawValue -> model id
@@ -53,6 +54,14 @@ final class ModelPreferences {
         didSet { UserDefaults.standard.set(seedanceConsentGranted, forKey: Self.seedanceConsentKey) }
     }
 
+    /// When true, production groups consecutive same-scene shots into one
+    /// multi-shot generation (`Lens switch.` beats — harness rule 21) instead
+    /// of one render per shot. Opt-in: it changes paid request bodies, so the
+    /// non-regression rule keeps it off by default.
+    var multiShotGroupingEnabled: Bool {
+        didSet { UserDefaults.standard.set(multiShotGroupingEnabled, forKey: Self.multiShotGroupingKey) }
+    }
+
     private init() {
         let stored = UserDefaults.standard.stringArray(forKey: Self.disabledKey) ?? []
         disabledIds = Set(stored)
@@ -60,6 +69,7 @@ final class ModelPreferences {
         agentCharacterSlug = UserDefaults.standard.string(forKey: Self.characterSlugKey)
         // Opt-in: off until granted in first-run setup or Settings → Models.
         seedanceConsentGranted = UserDefaults.standard.object(forKey: Self.seedanceConsentKey) as? Bool ?? false
+        multiShotGroupingEnabled = UserDefaults.standard.object(forKey: Self.multiShotGroupingKey) as? Bool ?? false
     }
 
     // MARK: - Enable / disable

@@ -100,6 +100,10 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
     /// generation instead of being re-inferred per take (side-swaps, teleporting
     /// props, and mirrored geography come from re-inference).
     var blocking: String?
+    /// Multi-shot grouping opt-out (harness `allowMultiShot`): set false to
+    /// force this shot to render as its own generation even when the planner
+    /// would group it into a multi-shot unit. nil/true = groupable.
+    var allowMultiShot: Bool?
     /// How to treat the video model's own audio track once the clip is placed.
     var nativeAudio: ShotNativeAudio
     /// What KIND of audio the model should generate (prompt steering). Audio is
@@ -131,6 +135,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         locationIds: [String] = [],
         dialogue: [ShotDialogue] = [],
         blocking: String? = nil,
+        allowMultiShot: Bool? = nil,
         nativeAudio: ShotNativeAudio = .keep,
         audioContent: ShotAudioContent = .full,
         audioReferenceAssetId: String? = nil,
@@ -154,6 +159,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         self.locationIds = locationIds
         self.dialogue = dialogue
         self.blocking = blocking
+        self.allowMultiShot = allowMultiShot
         self.nativeAudio = nativeAudio
         self.audioContent = audioContent
         self.audioReferenceAssetId = audioReferenceAssetId
@@ -168,7 +174,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, slug, summary, prompt, durationSeconds, motionLevel, transition
-        case modelOverride, characterIds, locationIds, dialogue, blocking, nativeAudio, audioContent, status
+        case modelOverride, characterIds, locationIds, dialogue, blocking, allowMultiShot, nativeAudio, audioContent, status
         case audioReferenceAssetId, attachCastVoiceReference
         case storyboardAssetId, videoAssetId, takes, qaSummary, failureReason
     }
@@ -187,6 +193,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         locationIds = try c.decodeIfPresent([String].self, forKey: .locationIds) ?? []
         dialogue = try c.decodeIfPresent([ShotDialogue].self, forKey: .dialogue) ?? []
         blocking = try c.decodeIfPresent(String.self, forKey: .blocking)
+        allowMultiShot = try c.decodeIfPresent(Bool.self, forKey: .allowMultiShot)
         nativeAudio = try c.decodeIfPresent(ShotNativeAudio.self, forKey: .nativeAudio) ?? .keep
         audioContent = try c.decodeIfPresent(ShotAudioContent.self, forKey: .audioContent) ?? .full
         audioReferenceAssetId = try c.decodeIfPresent(String.self, forKey: .audioReferenceAssetId)

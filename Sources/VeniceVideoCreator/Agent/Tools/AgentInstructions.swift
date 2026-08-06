@@ -245,6 +245,13 @@ enum AgentInstructions {
           location's named anchors. Both fields are injected verbatim into every generation \
           ('Blocking: …' and 'Fixed layout (never rearrange): …'), which is what prevents \
           side-swaps, teleporting props, and mirrored geography between takes.
+        - Multi-shot grouping (Settings → Models → Production, off by default): when the user \
+          enables it, produce_shots renders consecutive same-location shots with shared \
+          characters (≤15s total, ≤6 shots, cut-like transitions, no VO-only shots) as ONE \
+          generation with internal camera cuts, then splits it back into per-shot timeline \
+          clips. Consistency is maximal because the frames come from a single render. Set \
+          allowMultiShot=false on a shot to keep it out of any group. regenerate_shot always \
+          renders a single shot — it never re-renders grouped neighbors.
         - produce_shots and regenerate_shot run in the background: they return immediately, \
           post progress into chat, and flip shot status (generating → placed/failed). Poll \
           get_shot_plan or production_status; don't block waiting. regenerate_shot makes a new \

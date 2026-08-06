@@ -133,10 +133,17 @@ enum VisionQA {
     character consistency (if characters are named), visible artifacts or deformities, text \
     legibility, and overall usability for a finished video.
 
+    SPATIAL CONTINUITY (when the intent states blocking or a fixed layout): check each frame \
+    against the stated geometry — characters on their stated screen sides, landmarks in their \
+    stated positions, facing/eyelines as written. A spatial flip that breaks the scene (mirrored \
+    geography, swapped character sides) is a blocking problem; a wrong frame side or a relocated \
+    landmark is a moderate issue.
+
     Respond with ONLY a JSON object, no prose, in exactly this shape:
     {"score": 0.0-1.0, "pass": true|false, "issues": ["short issue", ...], "summary": "one or two sentences"}
     Set pass=false when the shot has a blocking problem (wrong subject/action, bad artifacts, \
-    off-model character). Keep issues concrete and actionable for a re-generation or edit.
+    off-model character, scene-breaking spatial flip). Keep issues concrete and actionable for a \
+    re-generation or edit.
     """
 
     private static func firstMessageText(_ obj: [String: Any]) -> String? {

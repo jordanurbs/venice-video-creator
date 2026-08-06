@@ -35,6 +35,7 @@ let package = Package(
                 .copy("Resources/MCPB/venice-video-creator.mcpb"),
                 .copy("Resources/Images"),
                 .copy("Resources/Changelog"),
+                .copy("Resources/Capabilities"),
             ],
             plugins: ["MetalCIKernelPlugin"]
         ),

@@ -3,7 +3,7 @@
 > Updated 2026-07-06. Branch `venice-integration`, CI green, full suite **886 tests**.
 > Read `PLAN.md` for the full open-work plan and `AGENTS.md` for the non-negotiable rules
 > (one-line comments, `AppTheme` for all UI values, AppKit-parent/SwiftUI-leaf drop architecture,
-> terse Apple-HIG voice). The harness at `~/Projects/video-proj/venice-video-harness/` is the
+> terse Apple-HIG voice). The harness at `~/projects/tools/venice-video-harness/` (path corrected 2026-08-06) is the
 > authoritative model reference — re-read `src/venice/models.ts` fresh each session (it drifts).
 
 ## Shipped this session (all pushed, CI-green)

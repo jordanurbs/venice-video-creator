@@ -452,6 +452,21 @@ extension ShotPlan {
             out += "\n"
         }
 
+        if !locations.isEmpty {
+            out += "## Locations\n\n"
+            for l in locations {
+                out += "- **\(l.name.isEmpty ? "(unnamed)" : l.name)**"
+                if let d = l.description, !d.isEmpty { out += " — \(d)" }
+                let refs = l.referenceImageAssetIds.count
+                if refs > 0 { out += " · \(refs) ref image\(refs == 1 ? "" : "s")" }
+                out += "\n"
+                if let anchors = l.spatialAnchors, !anchors.isEmpty {
+                    out += "  - **Fixed layout:** \(anchors)\n"
+                }
+            }
+            out += "\n"
+        }
+
         out += "## Shots\n\n"
         if shots.isEmpty {
             out += "_No shots yet._\n"
@@ -466,6 +481,11 @@ extension ShotPlan {
                 let names = shot.characterIds.map { id in character(id: id)?.name ?? id }
                 out += "- **Characters:** \(names.joined(separator: ", "))\n"
             }
+            if !shot.locationIds.isEmpty {
+                let names = shot.locationIds.map { id in location(id: id)?.name ?? id }
+                out += "- **Locations:** \(names.joined(separator: ", "))\n"
+            }
+            if let blocking = shot.blocking, !blocking.isEmpty { out += "- **Blocking:** \(blocking)\n" }
             if !shot.prompt.isEmpty { out += "- **Prompt:** \(shot.prompt)\n" }
             for line in shot.dialogue {
                 let who = line.characterId.flatMap { character(id: $0)?.name } ?? line.speaker ?? "Speaker"

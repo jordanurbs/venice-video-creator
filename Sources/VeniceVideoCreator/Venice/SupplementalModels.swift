@@ -72,13 +72,16 @@ enum SupplementalModels {
 
     // MARK: - Audio
 
-    /// Seed Audio 1.0's 25 named voices (harness registry, 2026-07-17). The default,
-    /// "Describe in prompt", lets the prompt steer delivery instead of picking a fixed voice.
+    /// Seed Audio 1.0's 25 named voices — synced verbatim from the harness
+    /// registry (`MUSIC_MODELS` in models.ts, 2026-08-06); the previous list
+    /// had drifted to invented names. The default, "Describe in prompt", lets
+    /// the prompt steer delivery instead of picking a fixed voice.
     private static let seedAudioVoices = [
         "Describe in prompt",
-        "Aria", "Nova", "Sol", "Ember", "Cove", "Vale", "Onyx", "Iris",
-        "Juno", "Atlas", "Wren", "Sage", "Rowan", "Lyra", "Orion", "Hazel",
-        "Milo", "Freya", "Reed", "Ada", "Cyrus", "Nora", "Felix", "Luna",
+        "Tim", "Stokie", "Dacey", "Vivi", "Mindy", "Kian",
+        "Jess", "Vienna", "Cedric", "Magnus", "Quentin", "Wukong", "Gigi",
+        "Celeste", "Esther", "Tracy", "Sven", "Felipe", "Usseau", "Enzo",
+        "Minimi", "Jihoon", "Martins", "Han",
     ]
 
     /// Audio models Venice accepts but a key's `/models` may omit. Seed Audio 1.0 is a premium

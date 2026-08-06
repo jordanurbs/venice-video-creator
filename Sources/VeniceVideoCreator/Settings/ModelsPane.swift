@@ -11,6 +11,7 @@ struct ModelsPane: View {
     private var prefs = ModelPreferences.shared
     private var catalog = ModelCatalog.shared
     private var traits = ModelTraitsCatalog.shared
+    private var manifestStore = CapabilityManifestStore.shared
     @Bindable private var transcription = TranscriptionPreferences.shared
 
     @State private var query = ""
@@ -24,6 +25,7 @@ struct ModelsPane: View {
                 defaultsSection
                 transcriptionSection
                 seedanceConsentSection
+                capabilityUpdatesSection
                 Divider().overlay(AppTheme.Border.subtleColor)
                 searchBar
                 toggleSections
@@ -192,6 +194,33 @@ struct ModelsPane: View {
                 Toggle("", isOn: Binding(
                     get: { prefs.seedanceConsentGranted },
                     set: { prefs.seedanceConsentGranted = $0 }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            }
+            .padding(.vertical, AppTheme.Spacing.xs)
+        }
+    }
+
+    // MARK: - Capability updates (harness manifest)
+
+    private var capabilityUpdatesSection: some View {
+        sectionContainer(title: "Model capabilities") {
+            HStack(spacing: AppTheme.Spacing.md) {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.xxs) {
+                    Text("Update model capabilities automatically")
+                        .font(.system(size: AppTheme.FontSize.md))
+                        .foregroundStyle(AppTheme.Text.primaryColor)
+                    Text("Venice's model list doesn't describe every capability (end frames, audio input, reference budgets). The app ships a verified snapshot and, with this on, refreshes it at launch from the venice-video-harness registry — so new model capabilities arrive without waiting for an app update. Currently: \(manifestStore.source.label).")
+                        .font(.system(size: AppTheme.FontSize.xs))
+                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: AppTheme.Spacing.lg)
+                Toggle("", isOn: Binding(
+                    get: { manifestStore.autoUpdateEnabled },
+                    set: { manifestStore.autoUpdateEnabled = $0 }
                 ))
                 .labelsHidden()
                 .toggleStyle(.switch)

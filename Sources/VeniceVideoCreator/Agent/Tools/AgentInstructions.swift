@@ -233,6 +233,18 @@ enum AgentInstructions {
         - Editing the plan: get_shot_plan to read current shot ids/status; update_shots for \
           surgical edits (update/insert/remove/reorder); re-saving with the same ids preserves \
           generated work.
+        - Spatial consistency is AUTHORED DATA, not something to hope the model infers. When \
+          creating a location used across multiple shots, ALWAYS set spatialAnchors: 3–5 named \
+          landmarks with fixed relative positions ('bar counter along the left wall; entrance \
+          door on the right; pool table center-back'). For every character-bearing shot at a \
+          location, ALWAYS set blocking: 1–2 sentences placing each character relative to those \
+          anchors, the frame (screen left/right, foreground/background), and their facing. \
+          Continuity rules: characters keep their screen sides and relative positions across \
+          consecutive shots in a scene unless a movement is written into the action; screen \
+          direction and eyelines obey the 180-degree rule; blocking always references the \
+          location's named anchors. Both fields are injected verbatim into every generation \
+          ('Blocking: …' and 'Fixed layout (never rearrange): …'), which is what prevents \
+          side-swaps, teleporting props, and mirrored geography between takes.
         - produce_shots and regenerate_shot run in the background: they return immediately, \
           post progress into chat, and flip shot status (generating → placed/failed). Poll \
           get_shot_plan or production_status; don't block waiting. regenerate_shot makes a new \

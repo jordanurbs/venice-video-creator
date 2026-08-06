@@ -4,6 +4,8 @@ Log.bootstrap()
 Telemetry.start()
 BundledFonts.register()
 AccountService.shared.configure()
+// Manifest before catalog: the catalog mapper reads capability lookups.
+CapabilityManifestStore.shared.configure()
 ModelCatalog.shared.configure()
 ModelTraitsCatalog.shared.configure()
 

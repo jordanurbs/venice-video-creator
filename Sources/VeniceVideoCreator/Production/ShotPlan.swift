@@ -90,6 +90,16 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
     var characterIds: [String]
     var locationIds: [String]
     var dialogue: [ShotDialogue]
+    /// Explicit spatial blocking for the shot (harness rule 49): where each
+    /// character/object is relative to the location's fixed anchors
+    /// (`LocationSpec.spatialAnchors`), to each other, and to the frame — plus
+    /// facing/eyeline. One or two sentences of concrete geometry, e.g. "MARA at
+    /// the bar counter, screen left, facing right toward the door; JAX enters
+    /// through the door in the background, screen right." Injected verbatim
+    /// into the video prompt so placement is stated identically on every
+    /// generation instead of being re-inferred per take (side-swaps, teleporting
+    /// props, and mirrored geography come from re-inference).
+    var blocking: String?
     /// How to treat the video model's own audio track once the clip is placed.
     var nativeAudio: ShotNativeAudio
     /// What KIND of audio the model should generate (prompt steering). Audio is
@@ -120,6 +130,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         characterIds: [String] = [],
         locationIds: [String] = [],
         dialogue: [ShotDialogue] = [],
+        blocking: String? = nil,
         nativeAudio: ShotNativeAudio = .keep,
         audioContent: ShotAudioContent = .full,
         audioReferenceAssetId: String? = nil,
@@ -142,6 +153,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         self.characterIds = characterIds
         self.locationIds = locationIds
         self.dialogue = dialogue
+        self.blocking = blocking
         self.nativeAudio = nativeAudio
         self.audioContent = audioContent
         self.audioReferenceAssetId = audioReferenceAssetId
@@ -156,7 +168,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, slug, summary, prompt, durationSeconds, motionLevel, transition
-        case modelOverride, characterIds, locationIds, dialogue, nativeAudio, audioContent, status
+        case modelOverride, characterIds, locationIds, dialogue, blocking, nativeAudio, audioContent, status
         case audioReferenceAssetId, attachCastVoiceReference
         case storyboardAssetId, videoAssetId, takes, qaSummary, failureReason
     }
@@ -174,6 +186,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         characterIds = try c.decodeIfPresent([String].self, forKey: .characterIds) ?? []
         locationIds = try c.decodeIfPresent([String].self, forKey: .locationIds) ?? []
         dialogue = try c.decodeIfPresent([ShotDialogue].self, forKey: .dialogue) ?? []
+        blocking = try c.decodeIfPresent(String.self, forKey: .blocking)
         nativeAudio = try c.decodeIfPresent(ShotNativeAudio.self, forKey: .nativeAudio) ?? .keep
         audioContent = try c.decodeIfPresent(ShotAudioContent.self, forKey: .audioContent) ?? .full
         audioReferenceAssetId = try c.decodeIfPresent(String.self, forKey: .audioReferenceAssetId)
@@ -442,6 +455,14 @@ struct LocationSpec: Codable, Sendable, Equatable, Identifiable {
     var referenceImageAssetIds: [String]
     /// When set, this single reference is the location's canonical look.
     var lockedReferenceAssetId: String?
+    /// The locked geography of the place (harness rule 49): 3-5 named landmarks
+    /// and their fixed relative positions, e.g. "bar counter along the left
+    /// wall; entrance door on the right; pool table center-back; neon sign
+    /// above the door." Injected as "Fixed layout (never rearrange): …" into
+    /// every video prompt for shots tagged with this location, so placement
+    /// language ("at the counter", "by the door") resolves to the same physical
+    /// layout in every generation.
+    var spatialAnchors: String?
     var createdAt: Date
 
     init(
@@ -451,6 +472,7 @@ struct LocationSpec: Codable, Sendable, Equatable, Identifiable {
         visualPrompt: String? = nil,
         referenceImageAssetIds: [String] = [],
         lockedReferenceAssetId: String? = nil,
+        spatialAnchors: String? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -459,6 +481,7 @@ struct LocationSpec: Codable, Sendable, Equatable, Identifiable {
         self.visualPrompt = visualPrompt
         self.referenceImageAssetIds = referenceImageAssetIds
         self.lockedReferenceAssetId = lockedReferenceAssetId
+        self.spatialAnchors = spatialAnchors
         self.createdAt = createdAt
     }
 
@@ -476,7 +499,7 @@ struct LocationSpec: Codable, Sendable, Equatable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, description, visualPrompt, referenceImageAssetIds, lockedReferenceAssetId, createdAt
+        case id, name, description, visualPrompt, referenceImageAssetIds, lockedReferenceAssetId, spatialAnchors, createdAt
     }
 
     init(from decoder: Decoder) throws {
@@ -487,6 +510,7 @@ struct LocationSpec: Codable, Sendable, Equatable, Identifiable {
         visualPrompt = try c.decodeIfPresent(String.self, forKey: .visualPrompt)
         referenceImageAssetIds = try c.decodeIfPresent([String].self, forKey: .referenceImageAssetIds) ?? []
         lockedReferenceAssetId = try c.decodeIfPresent(String.self, forKey: .lockedReferenceAssetId)
+        spatialAnchors = try c.decodeIfPresent(String.self, forKey: .spatialAnchors)
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     }
 }

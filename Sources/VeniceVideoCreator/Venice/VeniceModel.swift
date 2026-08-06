@@ -140,13 +140,16 @@ enum VeniceModelMapper {
         // input for the families the harness registry marks audio-capable. Short
         // clips are padded to the model's floor before upload (see VideoGenerationSubmission).
         let maxReferenceAudios = VideoModelCapabilities.audioInputCapable(id: id) ? 1 : 0
+        // Reference budget from the harness manifest (9 on Seedance R2V, HappyHorse
+        // 1.1 R2V, MiniMax H3 R2V, Wan 3.0 R2V), conservative 4 otherwise.
+        let maxReferenceImages = isReferenceToVideo ? VideoModelCapabilities.maxReferenceImages(id: id) : 0
         let caps = VideoCaps(
             durations: durations.isEmpty ? [5] : durations,
             resolutions: resolutions,
             aspectRatios: aspectRatios,
             supportsFirstFrame: isImageToVideo,
             supportsLastFrame: supportsLastFrame,
-            maxReferenceImages: isReferenceToVideo ? 4 : 0,
+            maxReferenceImages: maxReferenceImages,
             maxReferenceVideos: 0,
             maxReferenceAudios: maxReferenceAudios,
             maxTotalReferences: nil,

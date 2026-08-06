@@ -128,6 +128,7 @@ extension ToolExecutor {
         if op["modelOverride"] != nil { shot.modelOverride = op.string("modelOverride") }
         if op["characterIds"] != nil { shot.characterIds = op.stringArray("characterIds") }
         if op["locationIds"] != nil { shot.locationIds = op.stringArray("locationIds") }
+        if op["blocking"] != nil { shot.blocking = op.string("blocking") }
         if let v = op.string("nativeAudio") { shot.nativeAudio = try parseEnum(v, ShotNativeAudio.self, field: "\(path).nativeAudio") }
         if let v = op.string("audioContent") { shot.audioContent = try parseEnum(v, ShotAudioContent.self, field: "\(path).audioContent") }
         if op["audioReferenceAssetId"] != nil { shot.audioReferenceAssetId = op.string("audioReferenceAssetId") }

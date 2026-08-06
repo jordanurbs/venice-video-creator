@@ -14,7 +14,7 @@
   - **Phase 5.1** — `extract_last_frame` agent tool + continuity guidance.
   - **Phase 5.2** — `supportsLastFrame` via `VideoModelCapabilities.supportsEndImage` (i2v-gated family allowlist).
   - **Phase 5.3** — Wan `audio_url` (`audioInputCapable`) + native `AudioSilencePadder` trailing-silence pad, gated on `minAudioInputSeconds`.
-- **`VideoModelCapabilities` re-verified 2026-07-06** against the freshly-synced harness registry (`~/Projects/video-proj/venice-video-harness/src/venice/models.ts`) — still correct; new models (HappyHorse 1.0/1.1, Runway Gen-4.5, PixVerse C1, Seedance 2.0 Fast, Kling V3 4K, …) fall through the substring allowlists to safe defaults as designed.
+- **`VideoModelCapabilities` re-verified 2026-07-06** against the freshly-synced harness registry (`~/projects/tools/venice-video-harness/src/venice/models.ts` — NOTE: path corrected 2026-08-06, the old `~/Projects/video-proj/` location no longer exists) — still correct; new models (HappyHorse 1.0/1.1, Runway Gen-4.5, PixVerse C1, Seedance 2.0 Fast, Kling V3 4K, …) fall through the substring allowlists to safe defaults as designed.
 
 ## Ground rules
 

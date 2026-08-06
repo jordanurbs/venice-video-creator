@@ -123,7 +123,7 @@ Key decision: a native `ProductionOrchestrator` (per-editor, like `GenerationSer
 
 ## Sync obligations (workspace rule)
 
-- Any capability learned/changed while porting (e.g. new `perReferenceAudio`, `videoInput`, prompt-length caps from `models.ts`) must be reflected in BOTH `VideoModelCapabilities.swift` and the harness `~/Projects/video-proj/venice-video-harness/src/venice/models.ts`, with probe dates in comments
+- Any capability learned/changed while porting (e.g. new `perReferenceAudio`, `videoInput`, prompt-length caps from `models.ts`) must be reflected in BOTH `VideoModelCapabilities.swift` and the harness `~/projects/tools/venice-video-harness/src/venice/models.ts` (path corrected 2026-08-06), with probe dates in comments
 - Extend `VideoModelCapabilities` with the harness fields the app lacks: `supportsElements`, `supportsSceneImages`, `perReferenceAudio` — conservative defaults off
 - Quote-before-queue becomes standard in the orchestrator (harness underuses it; the app should not)
 

@@ -260,7 +260,7 @@ final class ProductionOrchestrator {
         postNotice("Generating \(label): \(route.note), \(duration)s\(costNote).")
 
         var genInput = GenerationInput(
-            prompt: ShotPromptBuilder.videoPrompt(for: shot),
+            prompt: ShotPromptBuilder.videoPrompt(for: shot, plan: plan),
             model: route.model.id, duration: duration,
             aspectRatio: aspect, resolution: resolution
         )
@@ -555,6 +555,16 @@ final class ProductionOrchestrator {
         if !shot.prompt.isEmpty { lines.append("- Prompt: \(shot.prompt)") }
         let names = shot.characterIds.compactMap { plan.character(id: $0)?.name }
         if !names.isEmpty { lines.append("- Characters that must be on-model: \(names.joined(separator: ", "))") }
+        // Spatial continuity (harness rule 49): give the reviewer the authored
+        // geometry so side-swaps and mirrored geography are caught against the
+        // stated layout instead of prose alone.
+        if let blocking = shot.blocking, !blocking.isEmpty {
+            lines.append("- Blocking (stated geometry, must hold): \(blocking)")
+        }
+        let anchors = shot.locationIds.compactMap { plan.location(id: $0)?.spatialAnchors }.filter { !$0.isEmpty }
+        if let layout = anchors.first {
+            lines.append("- Fixed location layout (landmarks must not move or mirror): \(layout)")
+        }
         lines.append("Judge the frames against this intent and return the JSON verdict.")
         return lines.joined(separator: "\n")
     }

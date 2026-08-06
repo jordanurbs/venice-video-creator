@@ -9,7 +9,12 @@ enum ShotPromptBuilder {
     /// VO rule: voice-over / narration lines are never put into the video prompt — the video
     /// model would synthesize a competing narrator. Instead, when a shot is VO-only we append
     /// an explicit suppression line. On-screen dialogue may be described in the prompt.
-    static func videoPrompt(for shot: Shot) -> String {
+    ///
+    /// Spatial rule (harness rule 49, 2.12.0): when the shot carries authored
+    /// `blocking` and/or its location carries `spatialAnchors`, both are restated
+    /// verbatim in every generation so geometry is stated identically per take
+    /// instead of re-inferred (the source of side-swaps and mirrored geography).
+    static func videoPrompt(for shot: Shot, plan: ShotPlan? = nil) -> String {
         var parts: [String] = []
         let base = shot.prompt.isEmpty ? shot.summary : shot.prompt
         if !base.isEmpty { parts.append(base) }
@@ -19,6 +24,27 @@ enum ShotPromptBuilder {
         case .subtle: parts.append("subtle, gentle motion")
         case .moderate: break
         case .dynamic: parts.append("dynamic camera movement, energetic motion")
+        }
+
+        // Authored shot geometry: who stands where, relative to the location's
+        // named anchors, the frame, and each other — restated verbatim per take.
+        if let blocking = shot.blocking, !blocking.isEmpty {
+            parts.append("Blocking: \(blocking)")
+        }
+
+        // Locked location geography: named landmarks and their fixed relative
+        // positions, plus an explicit no-mirroring clause when the shot also
+        // places characters (mirrored/reshuffled geography is the failure mode).
+        if let plan {
+            let anchors = shot.locationIds
+                .compactMap { plan.location(id: $0)?.spatialAnchors }
+                .filter { !$0.isEmpty }
+            if let first = anchors.first {
+                parts.append("Fixed layout (never rearrange): \(first)")
+                if shot.blocking != nil || !shot.characterIds.isEmpty {
+                    parts.append("Each character stays on the same side of the scene and keeps the same position relative to these landmarks; do not mirror, swap, or rearrange who stands where")
+                }
+            }
         }
 
         // On-screen spoken lines can be described; voice-over lines must not reach the prompt.

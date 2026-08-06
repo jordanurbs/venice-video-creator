@@ -9,8 +9,12 @@ extension ToolExecutor {
         let name = try args.requireString("name")
         let description = args.string("description")
         let visualPrompt = args.string("prompt") ?? description ?? name
+        let spatialAnchors = args.string("spatialAnchors")
 
-        var location = LocationSpec(name: name, description: description, visualPrompt: visualPrompt)
+        var location = LocationSpec(
+            name: name, description: description, visualPrompt: visualPrompt,
+            spatialAnchors: spatialAnchors
+        )
 
         var attachedRefs: [MediaAsset] = []
         for id in args.stringArray("referenceMediaRefs") {
@@ -95,6 +99,7 @@ extension ToolExecutor {
         if let name = args.string("name") { location.name = name }
         if let description = args.string("description") { location.description = description }
         if let prompt = args.string("prompt") { location.visualPrompt = prompt }
+        if args.keys.contains("spatialAnchors") { location.spatialAnchors = args.string("spatialAnchors") }
 
         func validatedImageIds(_ key: String) throws -> [String]? {
             guard args[key] != nil else { return nil }

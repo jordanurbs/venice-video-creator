@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import VeniceVideoCreator
 
@@ -124,6 +125,21 @@ struct VideoModelReferenceCapabilityTests {
         #expect(VideoModelCapabilities.maxReferenceImages(id: "kling-o3-pro-reference-to-video") == 4)
     }
 
+    @Test func seedance25R2VCarriesTheFullReferenceFirstCapabilitySet() {
+        // Phase 0.3: mirror the harness coverage test — Seedance 2.5 R2V (the
+        // default video family) must resolve as a 30-ref, image-tag,
+        // audio-input, reference-audio pure-reference lane whether or not the
+        // manifest is loaded (these hold via the hardcode + family fallbacks).
+        let id = "seedance-2-5-reference-to-video"
+        #expect(VideoModelCapabilities.maxReferenceImages(id: id) == 30, "2.5 R2V must keep the 30-ref budget")
+        #expect(VideoModelCapabilities.usesImageTags(id: id), "2.5 R2V must honor @ImageN tags")
+        #expect(VideoModelCapabilities.audioInputCapable(id: id), "2.5 R2V must accept audio_url")
+        #expect(VideoModelCapabilities.supportsReferenceAudio(id: id), "2.5 R2V must accept reference_audio_urls")
+        // t2v/i2v lanes are NOT reference lanes.
+        #expect(!VideoModelCapabilities.audioInputCapable(id: "seedance-2-5-text-to-video"))
+        #expect(!VideoModelCapabilities.audioInputCapable(id: "seedance-2-5-image-to-video"))
+    }
+
     @Test func pureReferenceModelsUseImageTags() {
         // These reject image_url alongside reference media (hard 400) and honor
         // @ImageN prompt tags; probe dates in the harness registry.
@@ -152,5 +168,44 @@ struct VideoModelReferenceCapabilityTests {
         }
         #expect(!VideoModelCapabilities.supportsReferenceAudio(id: "seedance-2-0-image-to-video"))
         #expect(!VideoModelCapabilities.supportsReferenceAudio(id: "wan-2-7-image-to-video"))
+    }
+
+    @Test func negativePromptFamilies() {
+        for id in ["seedance-2-0-reference-to-video", "wan-2-7-image-to-video",
+                   "kling-2.6-pro-image-to-video", "pixverse-v5.6-transition", "ltx-video", "ovi-1-0"] {
+            #expect(VideoModelCapabilities.supportsNegativePrompt(id: id), "expected negative for \(id)")
+        }
+        #expect(!VideoModelCapabilities.supportsNegativePrompt(id: "some-unknown-family-v1"))
+    }
+
+    @Test func seedStaysOffUntilProbed() {
+        // Non-regression: no family is seed-verified yet, so no seed reaches a paid
+        // request. Flipping any of these on requires a live /video/quote probe.
+        for id in ["seedance-2-0-reference-to-video", "wan-2-7-image-to-video", "kling-o3-pro-image-to-video"] {
+            #expect(!VideoModelCapabilities.supportsSeed(id: id))
+        }
+    }
+
+    @Test func takeRecipeAndSeedRoundTripThroughCodable() throws {
+        var recipe = GenerationInput(prompt: "a wave", model: "seedance-2-0-reference-to-video",
+                                     duration: 5, aspectRatio: "16:9", resolution: "1080p")
+        recipe.negativePrompt = "background music"
+        recipe.seed = 4242
+        recipe.referenceImageAssetIds = ["ref-a", "ref-b"]
+        let take = ShotTake(videoAssetId: "vid1", model: recipe.model, recipe: recipe, seed: recipe.seed)
+        let data = try JSONEncoder().encode(take)
+        let decoded = try JSONDecoder().decode(ShotTake.self, from: data)
+        #expect(decoded.seed == 4242)
+        #expect(decoded.recipe?.prompt == "a wave")
+        #expect(decoded.recipe?.seed == 4242)
+        #expect(decoded.recipe?.referenceImageAssetIds == ["ref-a", "ref-b"])
+    }
+
+    @Test func planSeedRoundTripsThroughCodable() throws {
+        var plan = ShotPlan(title: "Test")
+        plan.seed = 99
+        let data = try JSONEncoder().encode(plan)
+        let decoded = try JSONDecoder().decode(ShotPlan.self, from: data)
+        #expect(decoded.seed == 99)
     }
 }

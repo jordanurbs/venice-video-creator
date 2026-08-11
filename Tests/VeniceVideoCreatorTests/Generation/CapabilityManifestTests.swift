@@ -88,6 +88,7 @@ struct CapabilityManifestTests {
         #expect(m.schemaVersion == 1)
         #expect(m.videoModels.count > 50)
         for id in [
+            "seedance-2-5-reference-to-video",
             "seedance-2-0-enhanced-reference-to-video",
             "minimax-h3-reference-to-video",
             "wan-3-0-reference-to-video",
@@ -100,5 +101,20 @@ struct CapabilityManifestTests {
         #expect(m.capabilitySets.imageTags.contains("minimax-h3-reference-to-video"))
         #expect(m.budgets.maxReferenceImagesByModel["seedance-2-0-enhanced-reference-to-video"] == 9)
         #expect(!m.capabilitySets.endImage.contains("wan-2-7-image-to-video"))
+
+        // Phase 0.3: the regenerated snapshot must carry Seedance 2.5 (the
+        // default family) in every set the reference-first lane depends on, and
+        // the routing defaults must point at it — a future regen that drops any
+        // of these fails here instead of silently reverting the app to 2.0.
+        let seedance25 = "seedance-2-5-reference-to-video"
+        #expect(m.capabilitySets.referenceImages.contains(seedance25))
+        #expect(m.capabilitySets.imageTags.contains(seedance25))
+        #expect(m.capabilitySets.audioInput.contains(seedance25))
+        #expect(m.capabilitySets.referenceAudio.contains(seedance25))
+        #expect(m.budgets.maxReferenceImagesByModel[seedance25] == 30)
+        #expect(m.defaults.characterConsistencyModel == seedance25)
+        #expect(m.defaults.multiShotModel == seedance25)
+        #expect(m.defaults.actionModel == seedance25)
+        #expect(m.defaults.atmosphereModel == seedance25)
     }
 }

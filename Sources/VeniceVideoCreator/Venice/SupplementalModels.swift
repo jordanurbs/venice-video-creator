@@ -11,10 +11,11 @@ import Foundation
 /// omits them (de-duplicated by id), so this self-heals the moment Venice starts
 /// returning them again.
 ///
-/// The Seedance 2.0 family — regular + Fast (each t2v/i2v/r2v), Mini (t2v/i2v/r2v),
+/// The Seedance 2.5 family (t2v/i2v/r2v, the default video family since 2026-08-07)
+/// and the Seedance 2.0 family — regular + Fast (each t2v/i2v/r2v), Mini (t2v/i2v/r2v),
 /// Enhanced and Mini Enhanced (t2v/r2v only; neither has an image-to-video variant)
-/// — is absent from this key's `/models` response yet accepted by the generation
-/// API. Every slug below was verified via `/video/quote` (free, no generation) on
+/// — are absent from this key's `/models` response yet accepted by the generation
+/// API. Every 2.0 slug below was verified via `/video/quote` (free, no generation) on
 /// 2026-07-13 & 2026-07-17: regular & Enhanced $0.95, Fast $0.76,
 /// Mini/Mini Enhanced $0.47 per 5s @ 720p. Regular 2.0 and Enhanced also reach
 /// 1080p ($2.34) and 4k ($4.86); Fast/Mini/Mini Enhanced cap at 720p. The
@@ -46,8 +47,30 @@ enum SupplementalModels {
     private static let seedanceResolutionsHD = ["480p", "720p", "1080p", "4k"]
     private static let seedanceAspectRatios = ["16:9", "9:16", "4:3", "3:4", "1:1"]
 
+    // Seedance 2.5 constraints (harness registry `seedance-2-5`, 2026-08-07,
+    // capabilities.json). Single-pass 4-30s at EVERY integer second, 480p/720p
+    // only (no 1080p — 2.0 Enhanced stays for a 1080p finish), and a wider aspect
+    // set that adds 21:9. The 30-image reference budget lives in
+    // `VideoModelCapabilities.maxReferenceImages` (belt-and-suspenders hardcode)
+    // + the regenerated manifest's `maxReferenceImagesByModel`.
+    private static let seedance25Durations =
+        (4...30).map { "\($0)s" }
+    private static let seedance25AspectRatios = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]
+
     private static var videoEntries: [[String: Any]] {
         [
+            // Seedance 2.5 first (the default video family since 2026-08-07 —
+            // ProductionOrchestrator.preferredAutoFamily). Delisted from GET
+            // /models yet accepted on /video/queue + /video/quote, so a
+            // supplemental entry is the only way it appears in the catalog.
+            // R2V is the production lane; t2v/i2v ride along for manual use.
+            // video_input stays false so the slug's "reference-to-video" routes
+            // it to reference_image_urls (R2V), not the video-to-video slot —
+            // the harness marks videoInput true only for its reference_video_urls
+            // capability, which the app doesn't send.
+            videoEntry(id: "seedance-2-5-text-to-video", name: "Seedance 2.5", modelType: "text-to-video", durations: seedance25Durations, resolutions: seedanceResolutions, aspectRatios: seedance25AspectRatios),
+            videoEntry(id: "seedance-2-5-image-to-video", name: "Seedance 2.5", modelType: "image-to-video", durations: seedance25Durations, resolutions: seedanceResolutions, aspectRatios: seedance25AspectRatios),
+            videoEntry(id: "seedance-2-5-reference-to-video", name: "Seedance 2.5 R2V", modelType: "image-to-video", durations: seedance25Durations, resolutions: seedanceResolutions, aspectRatios: seedance25AspectRatios),
             // Enhanced Text→Video is listed first so it becomes the default
             // selection (the picker defaults to the first enabled model).
             // Enhanced (non-Mini): full 1080p+4k ladder, t2v + r2v only (i2v 404s). Prices match regular 2.0.
@@ -120,14 +143,18 @@ enum SupplementalModels {
         return ["id": id, "type": type, "model_spec": spec]
     }
 
-    private static func videoEntry(id: String, name: String, modelType: String, durations: [String], resolutions: [String]) -> [String: Any] {
+    private static func videoEntry(
+        id: String, name: String, modelType: String,
+        durations: [String], resolutions: [String],
+        aspectRatios: [String] = seedanceAspectRatios
+    ) -> [String: Any] {
         [
             "id": id,
             "type": "video",
             "model_spec": [
                 "name": name,
                 "constraints": [
-                    "aspect_ratios": seedanceAspectRatios,
+                    "aspect_ratios": aspectRatios,
                     "resolutions": resolutions,
                     "durations": durations,
                     "model_type": modelType,

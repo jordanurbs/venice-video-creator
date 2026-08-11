@@ -15,12 +15,33 @@ extension ToolExecutor {
         plan.shots = Self.mergeRuntimeState(newShots: plan.shots, existing: editor.shotPlan?.shots ?? [])
         if args["characters"] == nil, let existing = editor.shotPlan?.characters {
             plan.characters = existing
+        } else if let existing = editor.shotPlan?.characters {
+            // A re-sent characters array must not wipe generated state: agents
+            // routinely round-trip plan JSON without reference/voice fields,
+            // which silently emptied the Cast pane (2026-08-06).
+            plan.characters = Self.mergeCharacterRuntimeState(new: plan.characters, existing: existing)
         }
         if args["locations"] == nil, let existing = editor.shotPlan?.locations {
             plan.locations = existing
+        } else if let existing = editor.shotPlan?.locations {
+            plan.locations = Self.mergeLocationRuntimeState(new: plan.locations, existing: existing)
         }
+        // Lock a series seed once (harness seed-locking): keep an explicit or
+        // previously-locked seed across re-saves, generate one when the project
+        // has none, so seed-capable reference/panel/video generations can replay
+        // a run. Emission stays gated per family (VideoModelCapabilities.supportsSeed
+        // / imageModelSupportsSeed) — recording the seed here is harmless.
+        if plan.seed == nil { plan.seed = editor.shotPlan?.seed }
+        if plan.seed == nil { plan.seed = Int.random(in: 1...1_000_000_000) }
         let saved = editor.saveShotPlan(plan)
-        return .ok(Self.jsonString(Self.summary(of: saved)) ?? "{}")
+        var body = Self.summary(of: saved)
+        if let warning = Self.stillPromptWarning(saved.shots) {
+            body["promptWarning"] = warning
+        }
+        if let warning = Self.missingReferenceWarning(plan: saved, editor: editor) {
+            body["referenceWarning"] = warning
+        }
+        return .ok(Self.jsonString(body) ?? "{}")
     }
 
     // MARK: - get_shot_plan
@@ -53,6 +74,38 @@ extension ToolExecutor {
             }
         }
         return .ok(Self.jsonString(Self.summary(of: updated)) ?? "{}")
+    }
+
+    // MARK: - reset_shots
+
+    /// Start-over: wipes produced state (placed clips, takes, storyboards, QA)
+    /// back to `planned`. Pass shotIds for specific shots; omit for the whole
+    /// plan. Prompts and summaries are untouched; generated media stays in the
+    /// library. The recovery path after a bad run — reset, fix prompts via
+    /// update_shots, re-produce.
+    func resetShots(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
+        guard let plan = editor.shotPlan, !plan.shots.isEmpty else {
+            throw ToolError("No shot plan yet.")
+        }
+        guard !editor.productionOrchestrator.isRunning else {
+            throw ToolError("A production run is active — stop it first (the user can press Stop in the Production panel).")
+        }
+        let shotIds = args.stringArray("shotIds")
+        for id in shotIds where plan.shot(id: id) == nil {
+            throw ToolError("Shot not found: \(id)")
+        }
+        if shotIds.isEmpty {
+            editor.resetAllShots()
+        } else {
+            withUndoGroup(editor, actionName: "Start Shots Over") {
+                for id in shotIds { editor.resetShot(id: id) }
+            }
+        }
+        let count = shotIds.isEmpty ? plan.shots.count : shotIds.count
+        return .ok(Self.jsonString([
+            "reset": count,
+            "hint": "Shots reset to planned; placed clips removed from the timeline; generated media kept in the library. Now fix what caused the bad run (usually prompts — rewrite them as VIDEO prompts via update_shots) before re-running produce_shots.",
+        ] as [String: Any]) ?? "{}")
     }
 
     // MARK: - Operation application
@@ -122,6 +175,7 @@ extension ToolExecutor {
         if let v = op.string("slug") { shot.slug = v }
         if let v = op.string("summary") { shot.summary = v }
         if let v = op.string("prompt") { shot.prompt = v }
+        if op["storyboardPrompt"] != nil { shot.storyboardPrompt = op.string("storyboardPrompt") }
         if let v = op.double("durationSeconds") { shot.durationSeconds = max(0.1, v) }
         if let v = op.string("motionLevel") { shot.motionLevel = try parseEnum(v, ShotMotionLevel.self, field: "\(path).motionLevel") }
         if let v = op.string("transition") { shot.transition = try parseEnum(v, ShotTransition.self, field: "\(path).transition") }
@@ -173,6 +227,67 @@ extension ToolExecutor {
         return s
     }
 
+    /// Flags shot prompts written like storyboard panels ("film still",
+    /// "static camera" on every shot) — they render motionless, near-identical
+    /// video takes. Warns rather than rejects: a deliberate locked-off shot is
+    /// legitimate; a whole plan of them is a prompting mistake.
+    static func stillPromptWarning(_ shots: [Shot]) -> String? {
+        let stillMarkers = ["film still", "still frame", "still image"]
+        let flagged = shots.filter { shot in
+            let p = shot.prompt.lowercased()
+            return stillMarkers.contains { p.contains($0) }
+        }
+        let staticCount = shots.filter { $0.prompt.lowercased().contains("static camera") }.count
+        var warnings: [String] = []
+        if !flagged.isEmpty {
+            let labels = flagged.map { $0.slug ?? $0.id }.joined(separator: ", ")
+            warnings.append("Shots [\(labels)] say 'film still' in their VIDEO prompt — a video model reads that as a motionless frame. Move still-image language into storyboardPrompt and rewrite prompt as a film SCENE: camera framing, what moves, the action.")
+        }
+        if shots.count >= 3, staticCount == shots.count {
+            warnings.append("Every shot says 'static camera' — consecutive takes will look near-identical. Vary framing and angle across shots (wide → medium → close-up) and describe motion within each shot.")
+        }
+        return warnings.isEmpty ? nil : warnings.joined(separator: " ")
+    }
+
+    /// Camera/motion vocabulary a real VIDEO prompt carries. A prompt with none
+    /// of these reads as an image caption and renders near-static footage.
+    private static let motionVocabulary: [String] = [
+        // camera
+        "camera", "push-in", "push in", "pull back", "dolly", "pan", "pans", "tilt",
+        "tracking", "handheld", "crane", "zoom", "orbit", "steadicam", "locked-off",
+        "whip", "rack focus", "aerial", "drone",
+        // subject/world motion
+        "walks", "walking", "runs", "running", "drives", "driving", "speeds", "races",
+        "turns", "turning", "moves", "moving", "motion", "leaps", "jumps", "slides",
+        "drifts", "swerves", "accelerates", "brakes", "crashes", "explodes", "collapses",
+        "rises", "falls", "flies", "flying", "spins", "sprints", "crosses", "approaches",
+        "enters", "exits", "reaches", "grabs", "throws", "swings", "kicks", "punches",
+        "blows", "billows", "flickers", "sways", "ripples", "flows", "pours", "sweeps",
+        "gestures", "nods", "shakes", "breathes", "reacts", "looks up", "looks over",
+    ]
+
+    /// Per-shot production pre-flight: nil when the prompt reads as a video
+    /// prompt, else what's wrong. Money gate — used by produce_shots.
+    static func videoPromptIssue(_ shot: Shot) -> String? {
+        let p = shot.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if p.isEmpty {
+            return "prompt is EMPTY (generation would fall back to the one-line summary)"
+        }
+        let lower = p.lowercased()
+        for marker in ["film still", "still frame", "still image", "storyboard"] where lower.contains(marker) {
+            return "prompt says '\(marker)' — that's a storyboard-panel prompt, not a video prompt"
+        }
+        let wordCount = p.split(whereSeparator: \.isWhitespace).count
+        let hasMotion = motionVocabulary.contains { lower.contains($0) }
+        if !hasMotion {
+            return "prompt has no camera or motion language — a video model renders it as \(Int(shot.durationSeconds))s of nothing moving"
+        }
+        if wordCount < 12 {
+            return "prompt is only \(wordCount) words — too thin to direct \(Int(shot.durationSeconds))s of footage"
+        }
+        return nil
+    }
+
     /// Longest duration any enabled video model can generate (fallback 15s).
     static func maxGenerableShotSeconds() -> Double {
         let maxDuration = VideoModelConfig.allModels
@@ -193,6 +308,50 @@ extension ToolExecutor {
 
     /// Carries production state (status, assets, takes, QA) from `existing` shots onto
     /// re-saved shots with the same id; new ids keep their planned defaults.
+    /// Warns when a plan's shots reference characters whose reference images
+    /// don't exist yet — the cast-first workflow (refs generated, reviewed,
+    /// locked BEFORE the shot list) is what keeps likenesses consistent.
+    static func missingReferenceWarning(plan: ShotPlan, editor: EditorViewModel) -> String? {
+        let usedCharacterIds = Set(plan.shots.flatMap(\.characterIds))
+        let noRefs = plan.characters
+            .filter { usedCharacterIds.contains($0.id) && $0.referenceImageAssetIds.isEmpty }
+            .map(\.name)
+        guard !noRefs.isEmpty else { return nil }
+        return "Characters in this plan have NO reference images yet: \(noRefs.joined(separator: ", ")). "
+            + "Cast comes first: generate their references (create_character/update_character), wait_for_media, and let the user approve the locked look BEFORE storyboarding — storyboard_shots will refuse character shots whose refs aren't ready."
+    }
+
+    /// Carries reference images, locks, and voice state from existing characters
+    /// onto re-saved ones with the same id when the incoming spec omits them —
+    /// generated assets must never be lost to a plan round-trip.
+    static func mergeCharacterRuntimeState(new: [CharacterSpec], existing: [CharacterSpec]) -> [CharacterSpec] {
+        let byId = Dictionary(existing.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return new.map { incoming in
+            guard let old = byId[incoming.id] else { return incoming }
+            var merged = incoming
+            if merged.referenceImageAssetIds.isEmpty { merged.referenceImageAssetIds = old.referenceImageAssetIds }
+            if merged.lockedReferenceAssetId == nil { merged.lockedReferenceAssetId = old.lockedReferenceAssetId }
+            if merged.lockedVoiceId == nil { merged.lockedVoiceId = old.lockedVoiceId }
+            if merged.voiceModel == nil { merged.voiceModel = old.voiceModel }
+            if merged.voiceReferenceAssetId == nil { merged.voiceReferenceAssetId = old.voiceReferenceAssetId }
+            if merged.voiceSampleAssetIds.isEmpty { merged.voiceSampleAssetIds = old.voiceSampleAssetIds }
+            return merged
+        }
+    }
+
+    /// Location counterpart of `mergeCharacterRuntimeState`.
+    static func mergeLocationRuntimeState(new: [LocationSpec], existing: [LocationSpec]) -> [LocationSpec] {
+        let byId = Dictionary(existing.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return new.map { incoming in
+            guard let old = byId[incoming.id] else { return incoming }
+            var merged = incoming
+            if merged.referenceImageAssetIds.isEmpty { merged.referenceImageAssetIds = old.referenceImageAssetIds }
+            if merged.lockedReferenceAssetId == nil { merged.lockedReferenceAssetId = old.lockedReferenceAssetId }
+            if merged.spatialAnchors == nil { merged.spatialAnchors = old.spatialAnchors }
+            return merged
+        }
+    }
+
     private static func mergeRuntimeState(newShots: [Shot], existing: [Shot]) -> [Shot] {
         let byId = Dictionary(existing.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return newShots.map { incoming in

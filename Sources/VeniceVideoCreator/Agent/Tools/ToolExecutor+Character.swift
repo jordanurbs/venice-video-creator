@@ -100,8 +100,9 @@ extension ToolExecutor {
 
     // MARK: - create_character
 
-    /// Creates a recurring character and (optionally) generates front / three-quarter
-    /// reference images for it via the existing image path. Generated references are tagged
+    /// Creates a recurring character and (optionally) generates a 4-view reference
+    /// sheet (front / three-quarter / profile / full-body) via the existing image
+    /// path. Generated references are tagged
     /// with face provenance so the Seedance R2V face gate can be satisfied later. Reference
     /// generation is async — poll get_media until the returned asset ids finish.
     func createCharacter(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
@@ -122,8 +123,10 @@ extension ToolExecutor {
             attachedRefs.append(a)
         }
 
-        // Default to generating 2 references only when none were supplied.
-        let defaultCount = attachedRefs.isEmpty ? 2 : 0
+        // Default to the full 4-view reference sheet (front / three-quarter /
+        // profile / full-body) when none were supplied — two cheap views were a
+        // weak identity anchor for R2V (harness character-consistency ladder).
+        let defaultCount = attachedRefs.isEmpty ? 4 : 0
         let count = min(4, max(0, args.int("count") ?? defaultCount))
 
         var generatedIds: [String] = []
@@ -157,6 +160,7 @@ extension ToolExecutor {
                     aspectRatio: aspectRatio, resolution: resolution, quality: quality
                 )
                 genInput.hasFace = (kind == .person)
+                Self.applyReferenceSeed(&genInput, model: model, plan: editor.shotPlan)
                 let pid = ImageGenerationSubmission.make(
                     genInput: genInput, model: model, references: [],
                     name: "\(name) · ref \(i + 1)", folderId: folderId

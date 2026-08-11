@@ -235,6 +235,7 @@ extension EditorViewModel {
                 aspectRatio: aspectRatio, resolution: resolution, quality: quality
             )
             genInput.hasFace = !isObject
+            ToolExecutor.applyReferenceSeed(&genInput, model: model, plan: shotPlan)
             let pid = ImageGenerationSubmission.make(
                 genInput: genInput, model: model, references: [],
                 name: "\(character.name) · ref \(i + 1)", folderId: folderId
@@ -589,6 +590,7 @@ extension EditorViewModel {
                 aspectRatio: aspectRatio, resolution: resolution, quality: quality
             )
             genInput.hasFace = false
+            ToolExecutor.applyReferenceSeed(&genInput, model: model, plan: shotPlan)
             let pid = ImageGenerationSubmission.make(
                 genInput: genInput, model: model, references: [],
                 name: "\(location.name) · ref \(i + 1)", folderId: folderId

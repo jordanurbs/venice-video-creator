@@ -59,7 +59,8 @@ struct ImageGenerationSubmission {
                     quality: genInput.quality,
                     uploaded: uploaded,
                     numImages: numImages,
-                    stylePreset: genInput.stylePreset
+                    stylePreset: genInput.stylePreset,
+                    seed: genInput.seed
                 )
             }
         )
@@ -76,7 +77,8 @@ struct ImageGenerationSubmission {
         quality: String?,
         uploaded: [String],
         numImages: Int,
-        stylePreset: String?
+        stylePreset: String?,
+        seed: Int? = nil
     ) -> BackendGenerationParams {
         if uploaded.count >= 2 {
             return .imageMultiEdit(ImageMultiEditParams(
@@ -99,7 +101,8 @@ struct ImageGenerationSubmission {
             quality: quality,
             imageURLs: uploaded,
             numImages: numImages,
-            stylePreset: stylePreset
+            stylePreset: stylePreset,
+            seed: seed
         ))
     }
 }

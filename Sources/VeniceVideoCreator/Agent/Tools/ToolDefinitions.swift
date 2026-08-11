@@ -1128,7 +1128,7 @@ enum ToolDefinitions {
                     "kind": ["type": "string", "enum": ["person", "object"], "description": "'person' (default — face gate + lockable voice) or 'object' for a recurring prop/object (no face, no voice)."],
                     "description": ["type": "string", "description": "Persona/appearance notes (also used as the image prompt if 'prompt' is omitted)."],
                     "prompt": ["type": "string", "description": "Visual prompt for the reference images (appearance, wardrobe, style)."],
-                    "count": ["type": "integer", "description": "Number of reference views to generate (0–4). Default 2, or 0 when referenceMediaRefs are supplied."],
+                    "count": ["type": "integer", "description": "Number of reference views to generate (0–4). Default 4 — front / three-quarter / profile / full-body, the identity ladder R2V anchors on — or 0 when referenceMediaRefs are supplied."],
                     "poses": ["type": "array", "items": ["type": "string"], "description": "Optional pose/angle descriptors, one per view (e.g. 'front view', 'three-quarter view')."],
                     "referenceMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Existing image asset ids to attach as references instead of (or in addition to) generating."],
                     "model": ["type": "string", "description": "Image model slug (defaults to an enabled image model)."],

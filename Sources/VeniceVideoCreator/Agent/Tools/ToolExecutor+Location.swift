@@ -63,6 +63,7 @@ extension ToolExecutor {
                     aspectRatio: aspectRatio, resolution: resolution, quality: quality
                 )
                 genInput.hasFace = false
+                Self.applyReferenceSeed(&genInput, model: model, plan: editor.shotPlan)
                 let pid = ImageGenerationSubmission.make(
                     genInput: genInput, model: model, references: [],
                     name: "\(name) · ref \(i + 1)", folderId: folderId

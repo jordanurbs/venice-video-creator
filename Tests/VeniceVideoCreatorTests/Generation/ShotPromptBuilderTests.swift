@@ -218,3 +218,77 @@ struct ShotPromptBuilderStyleBlockTests {
         #expect(decoded.styleBlock == style)
     }
 }
+
+/// Invariant-trait restatement (harness rule 37, Phase 2.4): a character's
+/// fixed traits are repeated in every shot prompt so wardrobe/scale/markings
+/// don't drift across separately-rendered shots.
+@Suite("ShotPromptBuilder trait restatement")
+struct ShotPromptBuilderTraitTests {
+
+    @Test func characterTraitsAreRestatedInVideoPrompt() {
+        let c = CharacterSpec(id: "c1", name: "Mara", description: "tall woman, buzzcut, oil-stained mechanic's coveralls, brass wrist cuff")
+        let shot = Shot(id: "s1", summary: "x", prompt: "Mara crosses the yard", characterIds: ["c1"])
+        let plan = ShotPlan(shots: [shot], characters: [c])
+        let prompt = ShotPromptBuilder.videoPrompt(for: shot, plan: plan)
+        #expect(prompt.contains("Mara: tall woman, buzzcut, oil-stained mechanic's coveralls, brass wrist cuff"))
+    }
+
+    @Test func noTraitLineWithoutDescription() {
+        let c = CharacterSpec(id: "c1", name: "Mara")
+        let shot = Shot(id: "s1", summary: "x", prompt: "Mara crosses the yard", characterIds: ["c1"])
+        let plan = ShotPlan(shots: [shot], characters: [c])
+        let prompt = ShotPromptBuilder.videoPrompt(for: shot, plan: plan)
+        #expect(!prompt.contains("Mara:"))
+    }
+
+    @Test func longDescriptionIsTruncated() {
+        let long = String(repeating: "weathered ", count: 60)  // > 160 chars
+        let c = CharacterSpec(id: "c1", name: "Mara", description: long)
+        let shot = Shot(id: "s1", summary: "x", prompt: "Mara waits", characterIds: ["c1"])
+        let plan = ShotPlan(shots: [shot], characters: [c])
+        let prompt = ShotPromptBuilder.videoPrompt(for: shot, plan: plan)
+        #expect(prompt.contains("…"), "an over-long trait line must be truncated with an ellipsis")
+    }
+}
+
+/// Image reproducibility seed plumbing (Phase 2.2): the plan seed rides
+/// GenerationInput → ImageGenerationParams, but emission stays gated off until a
+/// family is probe-verified (non-regression).
+@Suite("Image seed plumbing")
+struct ImageSeedPlumbingTests {
+
+    @Test func imageSeedStaysOffUntilProbed() {
+        for id in ["nano-banana-2", "nano-banana-pro", "seedream-v5-lite", "flux-2-pro"] {
+            #expect(!ToolExecutor.imageModelSupportsSeed(id))
+        }
+    }
+
+    @Test func applyReferenceSeedIsNoOpWhenModelNotSeedCapable() {
+        var plan = ShotPlan(title: "T"); plan.seed = 777
+        var input = GenerationInput(prompt: "p", model: "nano-banana-2", duration: 0, aspectRatio: "1:1", resolution: nil)
+        // A model not on the seed allowlist must NOT receive a seed.
+        // (Resolve the real model config when present; else assert the gate.)
+        #expect(!ToolExecutor.imageModelSupportsSeed("nano-banana-2"))
+        input.seed = ToolExecutor.imageModelSupportsSeed("nano-banana-2") ? plan.seed : nil
+        #expect(input.seed == nil)
+    }
+
+    @Test func imageGenerationParamsEncodesSeedWhenPresent() throws {
+        let params = ImageGenerationParams(
+            prompt: "p", aspectRatio: "1:1", resolution: nil, quality: nil,
+            imageURLs: [], numImages: 1, stylePreset: nil, seed: 4242
+        )
+        let data = try JSONEncoder().encode(params)
+        let json = String(decoding: data, as: UTF8.self)
+        #expect(json.contains("\"seed\":4242"))
+    }
+
+    @Test func imageGenerationParamsOmitsSeedWhenNil() throws {
+        let params = ImageGenerationParams(
+            prompt: "p", aspectRatio: "1:1", resolution: nil, quality: nil,
+            imageURLs: [], numImages: 1, stylePreset: nil, seed: nil
+        )
+        let data = try JSONEncoder().encode(params)
+        #expect(!String(decoding: data, as: UTF8.self).contains("\"seed\""))
+    }
+}

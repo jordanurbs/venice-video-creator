@@ -137,6 +137,7 @@ extension ToolExecutor {
                 aspectRatio: aspectRatio, resolution: resolution, quality: quality
             )
             genInput.hasFace = !refs.isEmpty
+            Self.applyReferenceSeed(&genInput, model: model, plan: plan)
             let folderId = folderArg ?? refs.last?.folderId
             let placeholderId = ImageGenerationSubmission.make(
                 genInput: genInput, model: model, references: refs,

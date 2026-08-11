@@ -8,9 +8,14 @@ struct ImageGenerationParams: Encodable, Sendable {
     let imageURLs: [String]
     let numImages: Int
     var stylePreset: String? = nil
+    /// Reproducible-generation seed for `/image/generate`. Only emitted for
+    /// probe-verified families (`ToolExecutor.imageModelSupportsSeed`); nil lets
+    /// the backend pick one. Pairs with the plan's locked series seed so a
+    /// reference sheet can be regenerated near-identically.
+    var seed: Int? = nil
 
     enum CodingKeys: String, CodingKey {
-        case kind, prompt, aspectRatio, resolution, quality, imageURLs, numImages, stylePreset
+        case kind, prompt, aspectRatio, resolution, quality, imageURLs, numImages, stylePreset, seed
     }
 
     func encode(to encoder: Encoder) throws {
@@ -23,6 +28,7 @@ struct ImageGenerationParams: Encodable, Sendable {
         if !imageURLs.isEmpty { try c.encode(imageURLs, forKey: .imageURLs) }
         try c.encode(numImages, forKey: .numImages)
         try c.encodeIfPresent(stylePreset, forKey: .stylePreset)
+        try c.encodeIfPresent(seed, forKey: .seed)
     }
 }
 

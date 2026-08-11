@@ -70,6 +70,21 @@ enum ShotPromptBuilder {
             }
         }
 
+        // Restate each character's invariant traits in prose (harness rule 37):
+        // @Image tags anchor the FACE, but wardrobe, markings, and relative scale
+        // drift across separately-rendered shots unless repeated every time. Kept
+        // even when slots are bound; truncated so a long bio can't blow the cap.
+        if let plan, !shot.characterIds.isEmpty {
+            for cid in shot.characterIds {
+                guard let c = plan.character(id: cid),
+                      let desc = c.description?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !desc.isEmpty else { continue }
+                let trait = desc.count > 160 ? String(desc.prefix(160)) + "…" : desc
+                let name = c.name.isEmpty ? "Character" : c.name
+                parts.append(tagged("\(name): \(trait)"))
+            }
+        }
+
         // On-screen spoken lines can be described; voice-over lines must not reach the prompt.
         let onScreen = shot.onScreenDialogue.map(\.text).filter { !$0.isEmpty }
         if !onScreen.isEmpty {

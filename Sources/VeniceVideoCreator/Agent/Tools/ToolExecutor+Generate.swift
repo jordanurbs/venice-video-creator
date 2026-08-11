@@ -269,6 +269,26 @@ extension ToolExecutor {
         model.qualities?.last
     }
 
+    /// Whether an image model's `/image/generate` accepts a reproducible `seed`.
+    /// Mirrors `VideoModelCapabilities.supportsSeed`: the plumbing (plan seed,
+    /// GenerationInput.seed, request-body emit) is in place, but NO image family
+    /// emits a seed to a paid request until it has been probe-verified — a
+    /// rejected seed field can 400 the whole job (capability-sync non-regression
+    /// rule). Fill the allowlist after probing /image/generate; then the plan's
+    /// locked series seed reproduces reference sheets near-identically.
+    nonisolated static func imageModelSupportsSeed(_ id: String) -> Bool {
+        let probeVerifiedSeedFamilies: [String] = []   // e.g. "flux", "seedream" once probed
+        let lower = id.lowercased()
+        return probeVerifiedSeedFamilies.contains { lower.contains($0) }
+    }
+
+    /// Stamps the plan's locked series seed onto a reference/panel generation when
+    /// the image model is seed-capable — the image counterpart of the video
+    /// path's `if let seed = plan.seed, supportsSeed { genInput.seed = seed }`.
+    nonisolated static func applyReferenceSeed(_ genInput: inout GenerationInput, model: ImageModelConfig, plan: ShotPlan?) {
+        if let seed = plan?.seed, imageModelSupportsSeed(model.id) { genInput.seed = seed }
+    }
+
     private static func resolutionRank(_ id: String) -> Int {
         if let (w, h) = ImageModelConfig.parseWxH(id) { return max(w, h) }
         let lower = id.lowercased()

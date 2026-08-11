@@ -5,6 +5,8 @@ import SwiftUI
 /// on the same `ShotPlan` + `ProductionOrchestrator` the agent drives, so both stay in sync.
 struct ProductionPanel: View {
     @Environment(EditorViewModel.self) private var editor
+    @State private var confirmingStartOver = false
+    @State private var confirmingShotReset: String?
 
     private var plan: ShotPlan? { editor.shotPlan }
     private var orchestrator: ProductionOrchestrator { editor.productionOrchestrator }
@@ -73,9 +75,19 @@ struct ProductionPanel: View {
                             .buttonStyle(.plain)
                     }
                 } else {
-                    Button { orchestrator.produceShots(ids: []) } label: { controlLabel("Produce all", "play.fill") }
-                        .buttonStyle(.plain)
-                        .disabled(!canProduce(plan))
+                    // produceShots(ids: []) only generates shots not yet placed —
+                    // say so on the button so "all" can't read as "regenerate all".
+                    let remaining = remainingCount(plan)
+                    Button { orchestrator.produceShots(ids: []) } label: {
+                        controlLabel(remaining == plan.shots.count
+                            ? "Produce all (\(remaining))"
+                            : "Produce remaining (\(remaining))", "play.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canProduce(plan))
+                    .help(remaining == plan.shots.count
+                        ? "Generate all \(remaining) shots and place them on the timeline"
+                        : "Generate the \(remaining) shots not yet placed — already-placed shots are kept, not regenerated")
                 }
                 Spacer(minLength: 0)
                 if orchestrator.runningUSD > 0 {
@@ -84,6 +96,33 @@ struct ProductionPanel: View {
                         .foregroundStyle(AppTheme.Text.secondaryColor)
                         .help("Approximate spend this run")
                 }
+            }
+            // Default video model + start-over, always visible so a bad run is
+            // recoverable without the agent.
+            HStack(spacing: AppTheme.Spacing.sm) {
+                modelPicker(plan)
+                Spacer(minLength: 0)
+                if !orchestrator.isRunning, plan.shots.contains(where: { $0.status != .planned }) {
+                    Button { confirmingStartOver = true } label: {
+                        HStack(spacing: AppTheme.Spacing.xxs) {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.system(size: AppTheme.FontSize.xxs))
+                            Text("Start over")
+                                .font(.system(size: AppTheme.FontSize.xs, weight: AppTheme.FontWeight.medium))
+                        }
+                        .foregroundStyle(AppTheme.Status.errorColor)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Reset every shot to planned: placed clips come off the timeline, takes and storyboards are unlinked. Generated media stays in the library. Undoable.")
+                }
+            }
+            .confirmationDialog(
+                "Start the whole production over? Every shot resets to planned, placed clips come off the timeline, and take history is cleared. Generated media stays in the library. You can undo this.",
+                isPresented: $confirmingStartOver,
+                titleVisibility: .visible
+            ) {
+                Button("Start over", role: .destructive) { editor.resetAllShots() }
+                Button("Cancel", role: .cancel) {}
             }
             if orchestrator.isRunning {
                 ProgressView(value: Double(orchestrator.completedCount), total: Double(max(1, orchestrator.totalCount)))
@@ -104,8 +143,58 @@ struct ProductionPanel: View {
         .padding(.vertical, AppTheme.Spacing.sm)
     }
 
+    /// Default video model for shots without a per-shot override. Backed by
+    /// plan.defaultModel — the same field the agent and router read, so what
+    /// the picker shows is what production uses.
+    private func modelPicker(_ plan: ShotPlan) -> some View {
+        let enabled = VideoModelConfig.allModels.filter { ModelPreferences.shared.isEnabled($0.id) }
+        let current = plan.defaultModel.flatMap { id in enabled.first { $0.id == id } }
+        return Menu {
+            Button("Auto (router picks per shot)") {
+                setDefaultModel(nil)
+            }
+            Divider()
+            ForEach(enabled, id: \.id) { model in
+                Button {
+                    setDefaultModel(model.id)
+                } label: {
+                    if model.id == plan.defaultModel {
+                        Label(model.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(model.displayName)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: AppTheme.Spacing.xxs) {
+                Image(systemName: "cpu")
+                    .font(.system(size: AppTheme.FontSize.xxs))
+                Text(current?.displayName ?? "Auto model")
+                    .font(.system(size: AppTheme.FontSize.xs, weight: AppTheme.FontWeight.medium))
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: AppTheme.FontSize.micro))
+            }
+            .foregroundStyle(AppTheme.Text.secondaryColor)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .disabled(orchestrator.isRunning)
+        .help("Default video model for every shot without its own override. Aspect/duration snap to what the model supports — a mismatch is announced before generating.")
+    }
+
+    private func setDefaultModel(_ id: String?) {
+        editor.mutateShotPlan(actionName: "Set Default Model") { plan in
+            plan.defaultModel = id
+        }
+    }
+
     private func canProduce(_ plan: ShotPlan) -> Bool {
         plan.shots.contains { $0.status != .placed }
+    }
+
+    private func remainingCount(_ plan: ShotPlan) -> Int {
+        plan.shots.filter { $0.status != .placed }.count
     }
 
     private func controlLabel(_ text: String, _ icon: String) -> some View {
@@ -138,7 +227,8 @@ struct ProductionPanel: View {
                         isQueued: orchestrator.isQueued(shot.id),
                         onSelect: { editor.selectShot(id: shot.id) },
                         onApprove: { editor.setShotStatus(id: shot.id, .approved) },
-                        onRegenerate: { editor.productionOrchestrator.produceShots(ids: [shot.id]) }
+                        onRegenerate: { editor.productionOrchestrator.produceShots(ids: [shot.id]) },
+                        onStartOver: { confirmingShotReset = shot.id }
                     )
                 }
             }
@@ -146,6 +236,18 @@ struct ProductionPanel: View {
             .padding(.vertical, AppTheme.Spacing.xs)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .confirmationDialog(
+            "Start this shot over? Its placed clip comes off the timeline and its takes, storyboard link, and QA notes are cleared. Generated media stays in the library. You can undo this.",
+            isPresented: Binding(
+                get: { confirmingShotReset != nil },
+                set: { if !$0 { confirmingShotReset = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: confirmingShotReset
+        ) { shotId in
+            Button("Start shot over", role: .destructive) { editor.resetShot(id: shotId) }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 
     private func thumbnail(for shot: Shot) -> NSImage? {
@@ -179,6 +281,7 @@ private struct ShotRow: View {
     let onSelect: () -> Void
     let onApprove: () -> Void
     let onRegenerate: () -> Void
+    let onStartOver: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: AppTheme.Spacing.sm) {
@@ -270,6 +373,15 @@ private struct ShotRow: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isCurrent || isQueued)
+            }
+            // Start over: anything produced (takes, storyboard, placement) can
+            // be wiped back to planned without touching prompt or summary.
+            if shot.status != .planned, !isCurrent, !isQueued {
+                Button(action: onStartOver) {
+                    rowAction("Start over", "arrow.counterclockwise")
+                }
+                .buttonStyle(.plain)
+                .help("Reset to planned: clip off the timeline, takes and storyboard unlinked. Media stays in the library. Undoable.")
             }
         }
         .padding(.top, AppTheme.Spacing.xxs)

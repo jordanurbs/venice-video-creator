@@ -102,8 +102,13 @@ extension ToolExecutor {
                 throw ToolError("Media asset not found: \(id)")
             }
         }
+        let affected = Self.planEntitiesReferencing(assetIds: Set(assetIds), editor: editor)
         editor.deleteMediaAssets(ids: Set(assetIds))
-        return .ok("Deleted \(assetIds.count) asset(s). Any clips referencing them were removed from the timeline.")
+        var msg = "Deleted \(assetIds.count) asset(s). Any clips referencing them were removed from the timeline."
+        if !affected.isEmpty {
+            msg += " Detached from: \(affected.joined(separator: ", ")). Those entities may need new references (update_character/update_location or regenerate) before storyboarding/production."
+        }
+        return .ok(msg)
     }
 
     func deleteFolder(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
@@ -112,8 +117,35 @@ extension ToolExecutor {
         for id in folderIds {
             guard editor.folder(id: id) != nil else { throw ToolError("folderId not found: \(id)") }
         }
+        let doomedAssets = editor.deletionImpactAssetIds(forFolderIds: Set(folderIds))
+        let affected = Self.planEntitiesReferencing(assetIds: doomedAssets, editor: editor)
         editor.deleteFolders(ids: Set(folderIds))
-        return .ok("Deleted \(folderIds.count) folder(s) with their contents. Any clips referencing deleted assets were removed from the timeline.")
+        var msg = "Deleted \(folderIds.count) folder(s) with their contents. Any clips referencing deleted assets were removed from the timeline."
+        if !affected.isEmpty {
+            msg += " Detached from: \(affected.joined(separator: ", ")). Those entities may need new references before storyboarding/production."
+        }
+        return .ok(msg)
+    }
+
+    /// Names of shot-plan entities that reference any of these asset ids —
+    /// surfaced in delete results so a deletion never silently orphans an entity.
+    private static func planEntitiesReferencing(assetIds: Set<String>, editor: EditorViewModel) -> [String] {
+        guard !assetIds.isEmpty, let plan = editor.shotPlan else { return [] }
+        var names: [String] = []
+        for c in plan.characters where c.referenceImageAssetIds.contains(where: assetIds.contains)
+            || c.voiceSampleAssetIds.contains(where: assetIds.contains)
+            || (c.voiceReferenceAssetId.map(assetIds.contains) ?? false) {
+            names.append("character '\(c.name)'")
+        }
+        for l in plan.locations where l.referenceImageAssetIds.contains(where: assetIds.contains) {
+            names.append("location '\(l.name)'")
+        }
+        for s in plan.shots where (s.storyboardAssetId.map(assetIds.contains) ?? false)
+            || (s.videoAssetId.map(assetIds.contains) ?? false)
+            || (s.audioReferenceAssetId.map(assetIds.contains) ?? false) {
+            names.append("shot \(s.slug ?? String(s.id.prefix(6)))")
+        }
+        return names
     }
 
     private func parseCreateFolderSpecs(

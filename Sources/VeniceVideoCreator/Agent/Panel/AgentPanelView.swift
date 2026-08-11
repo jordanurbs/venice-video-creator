@@ -278,6 +278,7 @@ struct AgentPanelView: View {
                 .id(layoutPass)
             }
             .scrollIndicators(.never)
+            .defaultScrollAnchor(.bottom)
             .scrollEdgeEffectStyle(.soft, for: .bottom)
             .onScrollGeometryChange(for: Bool.self) { geo in
                 let distance = geo.contentSize.height - geo.contentOffset.y - geo.containerSize.height
@@ -285,8 +286,19 @@ struct AgentPanelView: View {
             } action: { _, newValue in
                 withAnimation(.easeOut(duration: 0.15)) { isScrolledFromBottom = newValue }
             }
-            .onChange(of: service.messages.count) { _, _ in scrollToBottom(proxy) }
-            .onChange(of: service.isStreaming) { _, _ in scrollToBottom(proxy) }
+            .onChange(of: service.messages.count) { _, _ in
+                // Always jump to the newest row on the user's own send; when a NEW
+                // assistant message arrives, only follow if they're already at the
+                // bottom (don't yank them out of scrolled-up history). Re-pin across
+                // a few frames — the LazyVStack lays out top-down, so the new row
+                // isn't positioned on the first pass and a single scrollTo under-shoots.
+                if service.messages.last?.role == .user || !isScrolledFromBottom {
+                    pinToBottom(proxy)
+                }
+            }
+            .onChange(of: service.isStreaming) { _, _ in
+                if !isScrolledFromBottom { scrollToBottom(proxy) }
+            }
             .onChange(of: service.currentSessionId) { _, _ in
                 pinToBottom(proxy)
             }
@@ -361,6 +373,10 @@ struct AgentPanelView: View {
         case .insufficientCredits:
             return ErrorCTA(title: "Check balance") {
                 SettingsWindowController.shared.show(tab: .account)
+            }
+        case .payloadTooLarge:
+            return ErrorCTA(title: "New chat") {
+                service.newChat()
             }
         case .upstream:
             return nil

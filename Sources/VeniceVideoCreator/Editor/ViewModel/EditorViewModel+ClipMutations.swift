@@ -699,6 +699,9 @@ extension EditorViewModel {
 
         mediaAssets.removeAll { ids.contains($0.id) }
         mediaManifest.entries.removeAll { ids.contains($0.id) }
+        // Keep the shot plan honest: cast/location/shot references to the
+        // deleted assets are detached in the same undo group.
+        detachAssetsFromShotPlan(ids: ids)
 
         for id in ids { closePreviewTab(id: PreviewTab.mediaAssetTabId(for: id)) }
         selectedMediaAssetIds.removeAll()

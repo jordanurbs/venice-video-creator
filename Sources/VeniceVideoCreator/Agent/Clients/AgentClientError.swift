@@ -6,12 +6,18 @@ import Foundation
 enum AgentClientError: LocalizedError {
     case unauthenticated
     case insufficientCredits(String)
+    /// The serialized request body exceeded the client-side byte gate even
+    /// after stripping every inline image — the remaining text/tool history
+    /// alone is too heavy. Thrown BEFORE the request is sent.
+    case payloadTooLarge(bytes: Int)
     case upstream(String)
 
     var errorDescription: String? {
         switch self {
         case .unauthenticated: "Add your Venice API key in Settings to use the AI agent."
         case .insufficientCredits(let m): m
+        case .payloadTooLarge(let bytes):
+            "This conversation is too large to send (\(bytes / 1_000_000) MB) even after removing inline images. Start a new chat to continue — the project, media, and shot plan carry over."
         case .upstream(let m): m
         }
     }

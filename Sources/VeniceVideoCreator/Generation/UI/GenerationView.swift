@@ -1482,46 +1482,77 @@ struct GenerationView: View {
         iconName: String = "photo.badge.plus",
         onDrop: @escaping (MediaAsset) -> Void
     ) -> some View {
-        Image(systemName: iconName)
-            .font(.system(size: AppTheme.FontSize.smMd))
-            .foregroundStyle(isTargeted.wrappedValue ? AppTheme.Accent.primary : AppTheme.Text.mutedColor)
-            .frame(width: AppTheme.GenerationPanel.referenceTileWidth, height: AppTheme.GenerationPanel.referenceTileHeight)
-            .background(
-                RoundedRectangle(cornerRadius: AppTheme.Radius.sm)
-                    .fill(isTargeted.wrappedValue ? AppTheme.Accent.primary.opacity(AppTheme.Opacity.faint) : Color.white.opacity(AppTheme.Opacity.subtle))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: AppTheme.Radius.sm)
-                    .strokeBorder(
-                        isTargeted.wrappedValue ? AppTheme.Accent.primary.opacity(AppTheme.Opacity.strong) : AppTheme.Border.primaryColor,
-                        style: StrokeStyle(lineWidth: AppTheme.BorderWidth.thin, dash: [4, 3])
-                    )
-            )
-            .overlay {
-                DropTargetOverlay(
-                    isTargeted: isTargeted,
-                    onDrop: { payload in
-                        let assets = editor.assetsFromDragPayload(payload)
-                        if assets.isEmpty, payload.contains(MediaTab.folderDragScheme) {
-                            flashDropError("Drop media, not a folder.")
-                            return
-                        }
-                        var accepted = false
-                        for asset in assets where acceptedTypes.contains(asset.type) {
-                            onDrop(asset)
-                            accepted = true
-                        }
-                        if !accepted, !assets.isEmpty {
-                            let kinds = acceptedTypes.map(\.rawValue).sorted().joined(separator: " or ")
-                            flashDropError("Drop \(kinds) here.")
-                        }
-                    },
-                    onFileDrop: { urls in importReferenceURLs(urls, accepting: acceptedTypes, onImport: onDrop) }
+        // Clicking opens a picker: attach straight from the media library or
+        // import from Finder — so slots don't depend on drags or the agent.
+        Menu {
+            Section("From library") {
+                LibraryReferenceMenuItems(
+                    excludedAssetIds: Set(currentReferenceAssetIds),
+                    acceptedTypes: acceptedTypes,
+                    onPick: onDrop
                 )
             }
-            .onTapGesture { openReferenceImportPanel(accepting: acceptedTypes, onImport: onDrop) }
-            .pointerStyle(.link)
-            .help("Click to import a file, or drop one here")
+            Divider()
+            Button("Import from Finder…") {
+                openReferenceImportPanel(accepting: acceptedTypes, onImport: onDrop)
+            }
+        } label: {
+            Image(systemName: iconName)
+                .font(.system(size: AppTheme.FontSize.smMd))
+                .foregroundStyle(isTargeted.wrappedValue ? AppTheme.Accent.primary : AppTheme.Text.mutedColor)
+                .frame(width: AppTheme.GenerationPanel.referenceTileWidth, height: AppTheme.GenerationPanel.referenceTileHeight)
+                .background(
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.sm)
+                        .fill(isTargeted.wrappedValue ? AppTheme.Accent.primary.opacity(AppTheme.Opacity.faint) : Color.white.opacity(AppTheme.Opacity.subtle))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.sm)
+                        .strokeBorder(
+                            isTargeted.wrappedValue ? AppTheme.Accent.primary.opacity(AppTheme.Opacity.strong) : AppTheme.Border.primaryColor,
+                            style: StrokeStyle(lineWidth: AppTheme.BorderWidth.thin, dash: [4, 3])
+                        )
+                )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .overlay {
+            DropTargetOverlay(
+                isTargeted: isTargeted,
+                onDrop: { payload in
+                    let assets = editor.assetsFromDragPayload(payload)
+                    if assets.isEmpty, payload.contains(MediaTab.folderDragScheme) {
+                        flashDropError("Drop media, not a folder.")
+                        return
+                    }
+                    var accepted = false
+                    for asset in assets where acceptedTypes.contains(asset.type) {
+                        onDrop(asset)
+                        accepted = true
+                    }
+                    if !accepted, !assets.isEmpty {
+                        let kinds = acceptedTypes.map(\.rawValue).sorted().joined(separator: " or ")
+                        flashDropError("Drop \(kinds) here.")
+                    }
+                },
+                onFileDrop: { urls in importReferenceURLs(urls, accepting: acceptedTypes, onImport: onDrop) }
+            )
+        }
+        .pointerStyle(.link)
+        .help("Click to pick from the library or import a file, or drop one here")
+    }
+
+    /// Every asset currently occupying a reference slot in the panel — kept
+    /// out of the library picker so a slot can't be filled twice over.
+    private var currentReferenceAssetIds: [String] {
+        var ids: [String] = []
+        ids += imageReferences.map(\.id)
+        ids += allRefs.map(\.id)
+        if let firstFrame { ids.append(firstFrame.id) }
+        if let lastFrame { ids.append(lastFrame.id) }
+        if let sourceVideo { ids.append(sourceVideo.id) }
+        if let audioVideoSource { ids.append(audioVideoSource.id) }
+        return ids
     }
 
     private func importReferenceURLs(

@@ -60,13 +60,98 @@ enum ContextBudget {
         m.content.contains { $0["type"] as? String == "tool_use" }
     }
 
-    /// Replaces inline image blocks with a short placeholder.
-    private static func stripImages(from content: [[String: Any]]) -> (content: [[String: Any]], removed: Int) {
+    /// Replaces inline image blocks with a short placeholder — including images
+    /// nested inside `tool_result` content arrays (inspect_media, qa_shot,
+    /// frame grabs, color scopes all deliver their images there; a top-level-only
+    /// walk misses the bulk of a production run's payload).
+    static func stripImages(from content: [[String: Any]]) -> (content: [[String: Any]], removed: Int) {
         var removed = 0
         let out: [[String: Any]] = content.map { block in
-            guard block["type"] as? String == "image" else { return block }
-            removed += 1
-            return ["type": "text", "text": "[image omitted to fit context]"]
+            switch block["type"] as? String {
+            case "image":
+                removed += 1
+                return ["type": "text", "text": "[image omitted to fit context — use inspect_media to re-view]"]
+            case "tool_result":
+                guard let nested = block["content"] as? [[String: Any]] else { return block }
+                let (newNested, nestedRemoved) = stripImages(from: nested)
+                guard nestedRemoved > 0 else { return block }
+                removed += nestedRemoved
+                var updated = block
+                updated["content"] = newNested
+                return updated
+            default:
+                return block
+            }
+        }
+        return (out, removed)
+    }
+
+    /// Per-block ceiling applied when truncating oversized text. ~8k chars
+    /// (~2k tokens) keeps the useful head of a tool result while capping the
+    /// worst case: 6 recent turns × a few blocks each stays well under 1 MB.
+    static let maxTextBlockChars = 8_000
+
+    /// Truncates oversized text blocks — top-level, nested in `tool_result`
+    /// content, and giant `tool_use` inputs (e.g. base64 passed as a tool
+    /// argument). Images can't be the only strippable weight: a 63 MB body of
+    /// tool-result text sails past an image-only strip and dead-ends the chat.
+    static func truncateOversizedText(
+        in content: [[String: Any]], maxChars: Int = maxTextBlockChars
+    ) -> (content: [[String: Any]], truncated: Int) {
+        var truncated = 0
+        func clip(_ s: String) -> String {
+            "\(s.prefix(maxChars))\n[…truncated \(s.count - maxChars) chars to fit context — re-run the tool for full output]"
+        }
+        let out: [[String: Any]] = content.map { block in
+            switch block["type"] as? String {
+            case "text":
+                guard let s = block["text"] as? String, s.count > maxChars else { return block }
+                truncated += 1
+                return ["type": "text", "text": clip(s)]
+            case "tool_use":
+                let inputBytes = (try? JSONSerialization.data(withJSONObject: block["input"] ?? [:]).count) ?? 0
+                guard inputBytes > maxChars else { return block }
+                truncated += 1
+                var updated = block
+                updated["input"] = ["_omitted": "input truncated to fit context (\(inputBytes) bytes)"]
+                return updated
+            case "tool_result":
+                guard let nested = block["content"] as? [[String: Any]] else { return block }
+                let (newNested, n) = truncateOversizedText(in: nested, maxChars: maxChars)
+                guard n > 0 else { return block }
+                truncated += n
+                var updated = block
+                updated["content"] = newNested
+                return updated
+            default:
+                return block
+            }
+        }
+        return (out, truncated)
+    }
+
+    /// Applies `truncateOversizedText` to every message.
+    static func truncateAllOversizedText(
+        from messages: [AnthropicMessage], maxChars: Int = maxTextBlockChars
+    ) -> (messages: [AnthropicMessage], truncated: Int) {
+        var truncated = 0
+        let out = messages.map { m -> AnthropicMessage in
+            let (content, n) = truncateOversizedText(in: m.content, maxChars: maxChars)
+            truncated += n
+            return n > 0 ? AnthropicMessage(role: m.role, content: content) : m
+        }
+        return (out, truncated)
+    }
+
+    /// Strips every inline image from every message. Used as the final
+    /// escape hatch when a serialized request body is still over the byte cap.
+    /// Placeholders are text blocks, so tool_use/tool_result pairing survives.
+    static func stripAllImages(from messages: [AnthropicMessage]) -> (messages: [AnthropicMessage], removed: Int) {
+        var removed = 0
+        let out = messages.map { m -> AnthropicMessage in
+            let (content, r) = stripImages(from: m.content)
+            removed += r
+            return r > 0 ? AnthropicMessage(role: m.role, content: content) : m
         }
         return (out, removed)
     }
@@ -118,6 +203,21 @@ enum ContextBudget {
                 if removed > 0 {
                     kept[i] = AnthropicMessage(role: kept[i].role, content: newContent)
                     strippedImages = true
+                }
+            }
+        }
+
+        // Final pass: images are gone and the window is still over budget —
+        // the weight is oversized TEXT (giant tool results, base64 riding in
+        // tool_use inputs). Truncate those blocks; otherwise `fit` returns an
+        // over-budget list with no failure signal and the request dead-ends
+        // at the byte gate ("conversation too large, start a new chat").
+        if total() > budget {
+            for i in kept.indices {
+                guard total() > budget else { break }
+                let (newContent, truncated) = truncateOversizedText(in: kept[i].content)
+                if truncated > 0 {
+                    kept[i] = AnthropicMessage(role: kept[i].role, content: newContent)
                 }
             }
         }

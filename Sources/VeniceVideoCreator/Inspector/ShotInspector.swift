@@ -11,6 +11,7 @@ struct ShotInspector: View {
 
     @State private var draftSummary: String = ""
     @State private var draftPrompt: String = ""
+    @State private var draftStoryboardPrompt: String = ""
     @State private var isEnhancing = false
 
     private var plan: ShotPlan? { editor.shotPlan }
@@ -23,6 +24,7 @@ struct ShotInspector: View {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
                 header
                 promptSection
+                storyboardPromptSection
                 generationSection
                 referencesSection
                 audioSection
@@ -39,6 +41,7 @@ struct ShotInspector: View {
     private func syncDrafts() {
         draftSummary = shot.summary
         draftPrompt = shot.prompt
+        draftStoryboardPrompt = shot.storyboardPrompt ?? ""
     }
 
     // MARK: - Mutation
@@ -120,7 +123,11 @@ struct ShotInspector: View {
     // MARK: - Prompt
 
     private var promptSection: some View {
-        section("Prompt") {
+        section("Video prompt") {
+            Text("Directs the paid video generation: camera move, subject action, what moves. Motionless prompts are refused at production.")
+                .font(.system(size: AppTheme.FontSize.xxs))
+                .foregroundStyle(AppTheme.Text.mutedColor)
+                .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: AppTheme.Spacing.sm) {
                 Spacer(minLength: 0)
                 MagicWandButton(isWorking: isEnhancing, isEmpty: draftPrompt.isEmpty) {
@@ -148,6 +155,78 @@ struct ShotInspector: View {
                     onRevert: { draftPrompt = shot.prompt }
                 )
             }
+            composedVideoPromptPreview
+        }
+    }
+
+    /// Separate storyboard-panel prompt (2026-08-10 split). Empty = panels
+    /// compose from the video prompt, shown via the placeholder.
+    private var storyboardPromptSection: some View {
+        section("Storyboard prompt") {
+            Text("Describes the still panel: composition, framing, look. Leave empty to derive panels from the video prompt.")
+                .font(.system(size: AppTheme.FontSize.xxs))
+                .foregroundStyle(AppTheme.Text.mutedColor)
+                .fixedSize(horizontal: false, vertical: true)
+            ZStack(alignment: .topLeading) {
+                if draftStoryboardPrompt.isEmpty {
+                    Text("Derived from the video prompt")
+                        .font(.system(size: AppTheme.FontSize.sm))
+                        .foregroundStyle(AppTheme.Text.mutedColor)
+                        .padding(AppTheme.Spacing.xs)
+                        .padding(.top, 2)
+                        .allowsHitTesting(false)
+                }
+                TextEditor(text: $draftStoryboardPrompt)
+                    .font(.system(size: AppTheme.FontSize.sm))
+                    .foregroundStyle(AppTheme.Text.primaryColor)
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 48, maxHeight: 140)
+                    .padding(AppTheme.Spacing.xs)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.sm)
+                    .fill(Color.white.opacity(AppTheme.Opacity.subtle))
+            )
+            if draftStoryboardPrompt != (shot.storyboardPrompt ?? "") {
+                commitBar(
+                    onSave: {
+                        update("Edit Storyboard Prompt") {
+                            $0.storyboardPrompt = draftStoryboardPrompt.isEmpty ? nil : draftStoryboardPrompt
+                        }
+                    },
+                    onRevert: { draftStoryboardPrompt = shot.storyboardPrompt ?? "" }
+                )
+            }
+        }
+    }
+
+    /// What the VIDEO model actually receives: the composed prompt with the
+    /// motion clause, blocking, fixed-layout anchors, and dialogue/audio
+    /// steering appended. The editable field above is the base only — without
+    /// this preview a storyboard-style base is indistinguishable from a real
+    /// video prompt (the 2026-08-07 static-footage run).
+    @ViewBuilder
+    private var composedVideoPromptPreview: some View {
+        let composed = ShotPromptBuilder.videoPrompt(for: shot, plan: editor.shotPlan)
+        if composed != shot.prompt, !composed.isEmpty {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.xxs) {
+                Text("SENT TO VIDEO MODEL")
+                    .font(.system(size: AppTheme.FontSize.micro, weight: .semibold))
+                    .tracking(AppTheme.Tracking.wide)
+                    .foregroundStyle(AppTheme.Text.mutedColor)
+                Text(composed)
+                    .font(.system(size: AppTheme.FontSize.xs))
+                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(AppTheme.Spacing.xs)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.sm)
+                            .fill(Color.black.opacity(AppTheme.Opacity.medium))
+                    )
+            }
+            .help("The final composed prompt: your prompt plus motion level, blocking, location anchors, and audio steering. Storyboard panels use their own composition — this is the video one.")
         }
     }
 

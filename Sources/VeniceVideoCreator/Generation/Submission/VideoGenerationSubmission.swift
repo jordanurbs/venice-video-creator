@@ -75,7 +75,9 @@ struct VideoGenerationSubmission {
                         startFrameURL: nil,
                         endFrameURL: nil,
                         referenceImageURLs: Array(uploaded.dropFirst()),
-                        generateAudio: generateAudio
+                        generateAudio: generateAudio,
+                        negativePrompt: genInput.negativePrompt,
+                        seed: genInput.seed
                     ))
                 },
                 snapshotRefs: nil,
@@ -138,7 +140,9 @@ struct VideoGenerationSubmission {
                     duration: genInput.duration,
                     aspectRatio: genInput.aspectRatio,
                     resolution: genInput.resolution,
-                    generateAudio: generateAudio
+                    generateAudio: generateAudio,
+                    negativePrompt: genInput.negativePrompt,
+                    seed: genInput.seed
                 )
                 return .video(params)
             },
@@ -285,7 +289,9 @@ struct VideoGenerationSubmission {
             duration: Int,
             aspectRatio: String,
             resolution: String?,
-            generateAudio: Bool
+            generateAudio: Bool,
+            negativePrompt: String? = nil,
+            seed: Int? = nil
         ) -> VideoGenerationParams {
             VideoGenerationParams(
                 prompt: prompt,
@@ -298,7 +304,9 @@ struct VideoGenerationSubmission {
                 referenceImageURLs: imageRefs,
                 referenceVideoURLs: videoRefs,
                 referenceAudioURLs: audioRefs,
-                generateAudio: generateAudio
+                generateAudio: generateAudio,
+                negativePrompt: negativePrompt,
+                seed: seed
             )
         }
     }

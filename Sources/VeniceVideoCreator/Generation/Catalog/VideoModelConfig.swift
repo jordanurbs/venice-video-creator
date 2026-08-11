@@ -110,6 +110,11 @@ struct VideoGenerationParams: Encodable, Sendable {
     let referenceVideoURLs: [String]
     let referenceAudioURLs: [String]
     let generateAudio: Bool
+    /// Suppression terms sent as `negative_prompt` on models that accept it.
+    let negativePrompt: String?
+    /// Reproducibility seed sent as `seed` on models that accept it
+    /// (`VideoModelCapabilities.supportsSeed`); nil lets the queue pick one.
+    let seed: Int?
 
     init(
         prompt: String, duration: Int, aspectRatio: String, resolution: String?,
@@ -118,7 +123,9 @@ struct VideoGenerationParams: Encodable, Sendable {
         referenceImageURLs: [String] = [],
         referenceVideoURLs: [String] = [],
         referenceAudioURLs: [String] = [],
-        generateAudio: Bool = true
+        generateAudio: Bool = true,
+        negativePrompt: String? = nil,
+        seed: Int? = nil
     ) {
         self.prompt = prompt; self.duration = duration
         self.aspectRatio = aspectRatio; self.resolution = resolution
@@ -128,6 +135,8 @@ struct VideoGenerationParams: Encodable, Sendable {
         self.referenceVideoURLs = referenceVideoURLs
         self.referenceAudioURLs = referenceAudioURLs
         self.generateAudio = generateAudio
+        self.negativePrompt = negativePrompt
+        self.seed = seed
     }
 
     var hasAnyReferences: Bool {
@@ -137,7 +146,7 @@ struct VideoGenerationParams: Encodable, Sendable {
     enum CodingKeys: String, CodingKey {
         case kind, prompt, duration, aspectRatio, resolution, sourceVideoURL
         case startFrameURL, endFrameURL, referenceImageURLs, referenceVideoURLs
-        case referenceAudioURLs, generateAudio
+        case referenceAudioURLs, generateAudio, negativePrompt, seed
     }
 
     func encode(to encoder: Encoder) throws {
@@ -154,5 +163,7 @@ struct VideoGenerationParams: Encodable, Sendable {
         if !referenceVideoURLs.isEmpty { try c.encode(referenceVideoURLs, forKey: .referenceVideoURLs) }
         if !referenceAudioURLs.isEmpty { try c.encode(referenceAudioURLs, forKey: .referenceAudioURLs) }
         try c.encode(generateAudio, forKey: .generateAudio)
+        try c.encodeIfPresent(negativePrompt, forKey: .negativePrompt)
+        try c.encodeIfPresent(seed, forKey: .seed)
     }
 }

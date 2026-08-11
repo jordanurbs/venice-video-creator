@@ -7,14 +7,34 @@ extension ToolExecutor {
     /// cancelled) or the timeout elapses. The chat turn stays alive, so the
     /// agent can truthfully report results instead of promising to "check later".
     func waitForMedia(_ editor: EditorViewModel, _ args: [String: Any]) async throws -> ToolResult {
-        let refs = args.stringArray("mediaRefs")
+        var refs = args.stringArray("mediaRefs")
         guard !refs.isEmpty else { throw ToolError("wait_for_media requires at least one mediaRef.") }
-        for ref in refs {
-            _ = try asset(ref, editor: editor, label: "Asset to wait for")
-        }
 
         let timeout = Double(clampInt(Double(args.int("timeoutSeconds") ?? 120), min: 5, max: 300))
         let deadline = ContinuousClock.now + .seconds(timeout)
+
+        // Two tolerances before declaring an id missing:
+        // 1. Prefix resolution — models sometimes pass a truncated id (e.g. the
+        //    8-char prefix that appears in generated filenames). A unique
+        //    case-insensitive prefix match resolves to the full asset id.
+        // 2. Grace window — an id handed out by a generation tool may race its
+        //    placeholder registration; poll briefly instead of failing up front.
+        func resolve(_ id: String) -> String? {
+            if editor.mediaAssets.contains(where: { $0.id == id }) { return id }
+            let matches = editor.mediaAssets.filter { $0.id.lowercased().hasPrefix(id.lowercased()) }
+            return matches.count == 1 ? matches[0].id : nil
+        }
+        let graceDeadline = ContinuousClock.now + .seconds(min(10, timeout))
+        var unresolved = refs.filter { resolve($0) == nil }
+        while !unresolved.isEmpty, ContinuousClock.now < graceDeadline {
+            try Task.checkCancellation()
+            try await Task.sleep(for: .milliseconds(250))
+            unresolved = refs.filter { resolve($0) == nil }
+        }
+        if !unresolved.isEmpty {
+            throw ToolError("Asset to wait for not found: \(unresolved.joined(separator: ", ")). The id may be wrong or truncated — call get_media to list registered assets.")
+        }
+        refs = refs.compactMap(resolve)
 
         while ContinuousClock.now < deadline {
             try Task.checkCancellation()

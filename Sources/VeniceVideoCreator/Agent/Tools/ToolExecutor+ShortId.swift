@@ -12,11 +12,19 @@ extension ToolExecutor {
         "mediaRef", "startFrameMediaRef", "endFrameMediaRef",
         "sourceVideoMediaRef", "videoSourceMediaRef",
         "folderId", "parentFolderId", "captionGroupId",
+        // Production entities + their reference locks. These were missing,
+        // which made update_character/update_location reject shortened ids
+        // the agent had just been shown (e.g. lockedReferenceMediaRef).
+        "characterId", "locationId", "shotId", "afterId", "id",
+        "lockedReferenceMediaRef", "voiceReferenceMediaRef",
+        "audioReferenceAssetId",
     ]
     private static let arrayIdKeys: Set<String> = [
         "clipIds", "targetClipIds", "assetIds", "folderIds",
         "referenceMediaRefs", "referenceImageMediaRefs",
         "referenceVideoMediaRefs", "referenceAudioMediaRefs",
+        "addReferenceMediaRefs", "removeReferenceMediaRefs",
+        "mediaRefs", "shotIds", "characterIds", "locationIds", "orderedIds",
     ]
 
     /// Every entity id the agent can see or name back. One set serves both directions: a min-unique
@@ -33,6 +41,14 @@ extension ToolExecutor {
         }
         for asset in editor.mediaAssets { ids.insert(asset.id) }
         for folder in editor.folders { ids.insert(folder.id) }
+        // Shot-plan entities: their ids appear in get_shot_plan output and come
+        // back as characterId/locationId/shotId arguments. Excluding them meant
+        // shortened entity ids couldn't round-trip.
+        if let plan = editor.shotPlan {
+            for shot in plan.shots { ids.insert(shot.id) }
+            for character in plan.characters { ids.insert(character.id) }
+            for location in plan.locations { ids.insert(location.id) }
+        }
         return ids
     }
 

@@ -139,6 +139,11 @@ enum VideoModelCapabilities {
     /// registry: Seedance 2.0 R2V ×3, HappyHorse 1.1 R2V, MiniMax H3 R2V, and
     /// Wan 3.0 R2V (standard + enhanced) all take 9.
     static func maxReferenceImages(id: String) -> Int {
+        let lowerId = id.lowercased()
+        // Seedance 2.5 R2V: 30-image reference budget (harness probe 2026-08-07,
+        // venice-video-harness seedance-2-5 registry). Checked before the
+        // manifest so a stale manifest can't clamp it back to 9.
+        if lowerId.contains("seedance-2-5") && lowerId.contains("reference-to-video") { return 30 }
         if let m = manifest {
             if let exact = m.budgets.maxReferenceImagesByModel[id] { return exact }
             if m.knownIds.contains(id) { return m.budgets.defaultMaxReferenceImages }
@@ -154,5 +159,33 @@ enum VideoModelCapabilities {
     /// Venice's video prompt cap (2500 chars on the Seedance family and MiniMax H3).
     static var videoPromptCharLimit: Int {
         manifest?.budgets.videoPromptCharLimit ?? 2500
+    }
+
+    /// Whether the model accepts a top-level `negative_prompt`. Venice's
+    /// `/video/queue` schema declares it as a general string field with a
+    /// per-model default (clones/outerface
+    /// `api/v1/video/queue/api-video-queue-schema.ts`), and the fal-hosted
+    /// families below ship a `negative_prompt` default in the model registry
+    /// (wan / kling / pixverse / ltx / longcat / ovi). Seedance is the
+    /// production path the harness relies on for rule-33 audio suppression.
+    /// Conservative default OFF for ids we can't place — a wrong "on" wastes a
+    /// paid generation; enable a new family only after a live probe.
+    static func supportsNegativePrompt(id: String) -> Bool {
+        let lower = id.lowercased()
+        let families = ["seedance", "wan-", "wan2", "wan-2", "kling", "pixverse", "ltx", "longcat", "ovi"]
+        return families.contains { lower.contains($0) }
+    }
+
+    /// Whether the model's queue accepts a top-level `seed` for reproducible
+    /// generation (harness seed-locking / recipe replay). No family has been
+    /// live-probed for seed acceptance yet, so this returns FALSE for everything:
+    /// the plumbing (GenerationInput.seed, ShotTake recipe, request-body emit) is
+    /// in place, but no seed reaches a paid request until a family is probe-verified
+    /// and added here — per the non-regression rule (a rejected seed field can hard
+    /// 400 the whole job). Fill the allowlist below after probing via /video/quote.
+    static func supportsSeed(id: String) -> Bool {
+        let probeVerifiedSeedFamilies: [String] = []   // e.g. "seedance" once probed
+        let lower = id.lowercased()
+        return probeVerifiedSeedFamilies.contains { lower.contains($0) }
     }
 }

@@ -10,6 +10,11 @@ struct VeniceAgentClient: AgentClient {
     let apiKey: String
     /// Venice text model id (e.g. a Qwen/Llama variant with function calling).
     let model: String
+    /// Output-token ceiling. Reasoning models (e.g. Kimi K3) spend their
+    /// thinking INSIDE this budget before any visible text or tool call — a
+    /// small cap truncates them mid-reasoning ("increase max_tokens" errors
+    /// from the backend). Callers should pass the model spec's
+    /// `maxCompletionTokens`; this default is only a floor for unknown models.
     var maxTokens: Int = 8192
     /// Optional Venice character persona slug (applied via venice_parameters).
     var characterSlug: String? = nil
@@ -32,6 +37,13 @@ struct VeniceAgentClient: AgentClient {
         }
     }
 
+    /// Hard client-side cap on the serialized request body. Venice 413s
+    /// oversized `chat/completions` bodies at the HTTP layer; the threshold is
+    /// undocumented, so this stays conservatively under the observed reject
+    /// point. Unlike the token-estimate budget upstream, this measures the
+    /// REAL byte count the server judges.
+    static let maxRequestBodyBytes = 4_000_000
+
     private func run(
         system: String,
         tools: [AnthropicToolSchema],
@@ -40,15 +52,15 @@ struct VeniceAgentClient: AgentClient {
     ) async throws {
         guard !apiKey.isEmpty else { throw AgentClientError.unauthenticated }
 
-        let body = VeniceChatRequest.build(
-            model: model, maxTokens: maxTokens, system: system, tools: tools, messages: messages,
-            characterSlug: characterSlug
+        let bodyData = try Self.serializedBody(
+            model: model, maxTokens: maxTokens, system: system, tools: tools,
+            messages: messages, characterSlug: characterSlug
         )
         let api = VeniceAPI(apiKey: apiKey)
         var request = api.makeRequest(
             path: "chat/completions",
             accept: "text/event-stream",
-            body: try JSONSerialization.data(withJSONObject: body, options: [])
+            body: bodyData
         )
         // timeoutInterval is an idle (between-bytes) timeout for streams, not a
         // total cap — 90s of silence means the stream is dead, fail it visibly
@@ -63,6 +75,50 @@ struct VeniceAgentClient: AgentClient {
         }
 
         try await OpenAISSE.parse(bytes: bytes, continuation: continuation)
+    }
+
+    /// Serializes the request body, enforcing the byte gate. If the first
+    /// serialization is over the cap, retries once with EVERY inline image
+    /// stripped (the budgeter should have prevented this; this is the
+    /// backstop that makes a 413 structurally impossible for image weight).
+    /// Still over after that → typed `payloadTooLarge`, thrown before send.
+    static func serializedBody(
+        model: String,
+        maxTokens: Int,
+        system: String,
+        tools: [AnthropicToolSchema],
+        messages: [AnthropicMessage],
+        characterSlug: String?
+    ) throws -> Data {
+        func serialize(_ msgs: [AnthropicMessage]) throws -> Data {
+            try JSONSerialization.data(
+                withJSONObject: VeniceChatRequest.build(
+                    model: model, maxTokens: maxTokens, system: system,
+                    tools: tools, messages: msgs, characterSlug: characterSlug
+                ),
+                options: []
+            )
+        }
+
+        let first = try serialize(messages)
+        guard first.count > maxRequestBodyBytes else { return first }
+
+        // Escape hatch 1: strip every inline image.
+        let (stripped, removed) = ContextBudget.stripAllImages(from: messages)
+        let afterImages = removed > 0 ? try serialize(stripped) : first
+        guard afterImages.count > maxRequestBodyBytes else { return afterImages }
+
+        // Escape hatch 2: truncate oversized text blocks (giant tool results,
+        // base64 in tool_use inputs). Without this, a text-heavy session hits
+        // a permanent dead end ("start a new chat") even though the budgeter
+        // upstream could never have fixed it by removing images alone.
+        let (truncated, count) = ContextBudget.truncateAllOversizedText(from: stripped)
+        if count > 0 {
+            let third = try serialize(truncated)
+            guard third.count > maxRequestBodyBytes else { return third }
+            throw AgentClientError.payloadTooLarge(bytes: third.count)
+        }
+        throw AgentClientError.payloadTooLarge(bytes: afterImages.count)
     }
 }
 
@@ -175,7 +231,8 @@ enum VeniceChatRequest {
 
         var body: [String: Any] = [
             "model": model,
-            "max_tokens": maxTokens,
+            // Venice deprecates `max_tokens` in favor of `max_completion_tokens`.
+            "max_completion_tokens": maxTokens,
             "stream": true,
             "messages": openAIMessages,
         ]
@@ -191,12 +248,17 @@ enum VeniceChatRequest {
                 ]
             }
         }
+        // Reasoning models wrap thinking in <think>…</think> inside the
+        // content stream; strip it server-side so it never lands in the chat
+        // history (where it would bloat every later request) or the UI.
+        var veniceParameters: [String: Any] = [
+            "strip_thinking_response": true,
+        ]
         if let slug = characterSlug, !slug.isEmpty {
-            body["venice_parameters"] = [
-                "character_slug": slug,
-                "include_venice_system_prompt": false,
-            ]
+            veniceParameters["character_slug"] = slug
+            veniceParameters["include_venice_system_prompt"] = false
         }
+        body["venice_parameters"] = veniceParameters
         return body
     }
 

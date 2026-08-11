@@ -23,56 +23,116 @@ extension ToolExecutor {
         let requestedIds = Set(args.stringArray("shotIds"))
         let targets = plan.shots.filter { requestedIds.isEmpty || requestedIds.contains($0.id) }
 
+        let fps = editor.timeline.fps
+        // A single global cursor schedules every spoken line: small gap between
+        // lines, no lead into the shot. Dialogue only lands where a shot's video
+        // is already placed (harness order: produce_shots THEN produce_audio) —
+        // an unplaced shot has no timeline position, so its lines would pile at
+        // frame 0 (the exact anti-pattern-19 bug).
+        let gapFrames = max(1, secondsToFrame(seconds: 0.12, fps: fps))
+        let leadFrames = 0
+
         var dialogueClips: [[String: Any]] = []
         var beds: [[String: Any]] = []
+        var skippedUnplaced: [String] = []
 
         // MARK: Dialogue
         if wantDialogue {
             let fallbackModel = try defaultTTSModel()
+
+            // Resolve every placeable line first (model/voice/estimate + the
+            // shot's timeline start), in plan → dialogue order, skipping unplaced
+            // shots and blank lines.
+            struct PlannedLine {
+                let shot: Shot
+                let line: ShotDialogue
+                let model: AudioModelConfig
+                let voice: String?
+                let estSeconds: Double
+                let shotStartFrame: Int
+            }
+            var planned: [PlannedLine] = []
             for shot in targets {
                 guard !shot.dialogue.isEmpty else { continue }
-                let startFrame = shotStartFrame(shot, editor: editor)
-                var offsetFrames = 0
+                guard let startFrame = shotStartFrame(shot, editor: editor) else {
+                    skippedUnplaced.append(shot.slug ?? shot.id)
+                    continue
+                }
                 for line in shot.dialogue where !line.text.trimmingCharacters(in: .whitespaces).isEmpty {
                     let character = line.characterId.flatMap { plan.character(id: $0) }
                     let model = try dialogueModel(for: character, fallback: fallbackModel)
                     let voice = character?.lockedVoiceId ?? model.defaultVoice
-                    let estSeconds = Self.estimateSpeechSeconds(line.text)
-                    let params = AudioGenerationParams(
-                        prompt: line.text, voice: voice, lyrics: nil, styleInstructions: nil,
-                        instrumental: false, durationSeconds: model.reconciledDuration(nil)
-                    )
-                    if let err = model.validate(params: params) {
-                        throw ToolError("Dialogue for shot \(shot.slug ?? shot.id): \(err)")
-                    }
-                    var genInput = GenerationInput(
-                        prompt: line.text, model: model.id, duration: 0,
-                        aspectRatio: "", resolution: nil, voice: voice
-                    )
-                    genInput.createdAt = Date()
-                    let placeStart = startFrame + offsetFrames
-                    let placeholderId = AudioGenerationSubmission.make(
-                        genInput: genInput, model: model, params: params,
-                        name: "Dialogue · \(shot.slug ?? "shot")"
-                    ).submit(
-                        service: editor.generationService, projectURL: editor.projectURL, editor: editor,
-                        onComplete: { asset in editor.finalizeGeneratingClip(placeholderId: asset.id, asset: asset) }
-                    )
-                    editor.placeGeneratingAudioClip(
-                        placeholderId: placeholderId, startFrame: placeStart,
-                        spanSeconds: estSeconds, actionName: "Add Dialogue"
-                    )
-                    offsetFrames += max(1, secondsToFrame(seconds: estSeconds, fps: editor.timeline.fps))
-                    dialogueClips.append(["shotId": shot.id, "assetId": placeholderId, "voice": voice as Any])
+                    planned.append(PlannedLine(
+                        shot: shot, line: line, model: model, voice: voice,
+                        estSeconds: Self.estimateSpeechSeconds(line.text), shotStartFrame: startFrame
+                    ))
                 }
             }
+
+            let placements = DialogueScheduler.schedule(
+                lines: planned.map {
+                    DialogueScheduler.Line(
+                        shotStartFrame: $0.shotStartFrame,
+                        estimatedFrames: max(1, secondsToFrame(seconds: $0.estSeconds, fps: fps))
+                    )
+                },
+                leadFrames: leadFrames, gapFrames: gapFrames
+            )
+
+            // Ordered lane so a clip that renders longer than its estimate
+            // ripples the later lines instead of overlapping them, once the real
+            // duration lands (reflowProductionDialogueLane on each completion).
+            var laneEntries: [(clipId: String, desiredStart: Int)] = []
+            let lane = DialogueLaneBox()
+            for (planLine, placement) in zip(planned, placements) {
+                let model = planLine.model
+                let params = AudioGenerationParams(
+                    prompt: planLine.line.text, voice: planLine.voice, lyrics: nil, styleInstructions: nil,
+                    instrumental: false, durationSeconds: model.reconciledDuration(nil)
+                )
+                if let err = model.validate(params: params) {
+                    throw ToolError("Dialogue for shot \(planLine.shot.slug ?? planLine.shot.id): \(err)")
+                }
+                var genInput = GenerationInput(
+                    prompt: planLine.line.text, model: model.id, duration: 0,
+                    aspectRatio: "", resolution: nil, voice: planLine.voice
+                )
+                genInput.createdAt = Date()
+                let placeholderId = AudioGenerationSubmission.make(
+                    genInput: genInput, model: model, params: params,
+                    name: "Dialogue · \(planLine.shot.slug ?? "shot")"
+                ).submit(
+                    service: editor.generationService, projectURL: editor.projectURL, editor: editor,
+                    onComplete: { asset in
+                        editor.finalizeGeneratingClip(placeholderId: asset.id, asset: asset)
+                        editor.reflowProductionDialogueLane(lane.entries, gapFrames: gapFrames)
+                    }
+                )
+                if let clipId = editor.placeGeneratingAudioClip(
+                    placeholderId: placeholderId, startFrame: placement.startFrame,
+                    spanSeconds: Double(placement.estimatedFrames) / Double(max(1, fps)),
+                    actionName: "Add Dialogue"
+                ) {
+                    laneEntries.append((clipId: clipId, desiredStart: placement.startFrame))
+                    lane.entries = laneEntries
+                }
+                dialogueClips.append([
+                    "shotId": planLine.shot.id, "assetId": placeholderId,
+                    "voice": planLine.voice as Any, "startFrame": placement.startFrame,
+                ])
+            }
         }
+
+        // Dialogue duck windows (absolute frames) for any bed placed below —
+        // computed from the SAME schedule so beds duck exactly where lines sit,
+        // whether or not dialogue was (re)generated in this call.
+        let duckWindows = dialogueDuckWindows(plan: plan, editor: editor, leadFrames: leadFrames, gapFrames: gapFrames)
 
         // MARK: Music bed
         if wantMusic {
             let model = try defaultMusicModel(args.string("musicModel"))
             let prompt = args.string("musicPrompt") ?? plan.logline ?? "Cinematic score for \(plan.title)"
-            if let bed = try submitBed(prompt: prompt, model: model, plan: plan, editor: editor, actionName: "Add Music") {
+            if let bed = try submitBed(prompt: prompt, model: model, plan: plan, editor: editor, actionName: "Add Music", duckWindows: duckWindows) {
                 beds.append(["kind": "music", "assetId": bed])
             }
         }
@@ -81,23 +141,51 @@ extension ToolExecutor {
         if wantAmbient {
             let model = try defaultMusicModel(args.string("ambientModel"))
             let prompt = args.string("ambientPrompt") ?? "Subtle ambient background bed for \(plan.title)"
-            if let bed = try submitBed(prompt: prompt, model: model, plan: plan, editor: editor, actionName: "Add Ambient") {
+            if let bed = try submitBed(prompt: prompt, model: model, plan: plan, editor: editor, actionName: "Add Ambient", duckWindows: duckWindows) {
                 beds.append(["kind": "ambient", "assetId": bed])
             }
         }
 
+        var hint = "Audio is generating and placed on the timeline; clips resolve as each finishes (poll get_media). For subtitles, run add_captions over the timeline."
+        if !skippedUnplaced.isEmpty {
+            hint = "Skipped dialogue for unplaced shot(s) \(skippedUnplaced.joined(separator: ", ")) — run produce_shots first so each shot has a timeline position, then produce_audio. " + hint
+        }
         let body: [String: Any] = [
             "dialogueClips": dialogueClips,
             "beds": beds,
-            "hint": "Audio is generating and placed on the timeline; clips resolve as each finishes (poll get_media). For subtitles, run add_captions over the timeline.",
+            "skippedUnplacedShots": skippedUnplaced,
+            "hint": hint,
         ]
         return .ok(Self.jsonString(body) ?? "{}")
+    }
+
+    /// Absolute-frame windows where dialogue sits, for ducking a bed beneath it.
+    /// Uses the same global scheduler as placement so the envelope matches the
+    /// lines regardless of whether they were generated this call.
+    private func dialogueDuckWindows(
+        plan: ShotPlan, editor: EditorViewModel, leadFrames: Int, gapFrames: Int
+    ) -> [ClosedRange<Int>] {
+        let fps = editor.timeline.fps
+        var lines: [DialogueScheduler.Line] = []
+        for shot in plan.shots {
+            guard let start = shotStartFrame(shot, editor: editor) else { continue }
+            for line in shot.dialogue where !line.text.trimmingCharacters(in: .whitespaces).isEmpty {
+                lines.append(DialogueScheduler.Line(
+                    shotStartFrame: start,
+                    estimatedFrames: max(1, secondsToFrame(seconds: Self.estimateSpeechSeconds(line.text), fps: fps))
+                ))
+            }
+        }
+        guard !lines.isEmpty else { return [] }
+        return DialogueScheduler.schedule(lines: lines, leadFrames: leadFrames, gapFrames: gapFrames)
+            .map { $0.startFrame...($0.startFrame + $0.estimatedFrames) }
     }
 
     // MARK: - Bed placement
 
     private func submitBed(
-        prompt: String, model: AudioModelConfig, plan: ShotPlan, editor: EditorViewModel, actionName: String
+        prompt: String, model: AudioModelConfig, plan: ShotPlan, editor: EditorViewModel,
+        actionName: String, duckWindows: [ClosedRange<Int>] = []
     ) throws -> String? {
         let totalFrames = editor.timeline.totalFrames
         let spanSeconds = totalFrames > 0
@@ -119,23 +207,28 @@ extension ToolExecutor {
             service: editor.generationService, projectURL: editor.projectURL, editor: editor,
             onComplete: { asset in editor.finalizeGeneratingClip(placeholderId: asset.id, asset: asset) }
         )
-        editor.placeGeneratingAudioClip(
+        let clipId = editor.placeGeneratingAudioClip(
             placeholderId: placeholderId, startFrame: 0, spanSeconds: spanSeconds, actionName: actionName
         )
+        // Duck the bed under every dialogue window (harness auto-duck) rather
+        // than leaving a static full-volume bed over speech.
+        if let clipId, !duckWindows.isEmpty {
+            editor.duckBedUnderDialogue(bedClipId: clipId, windows: duckWindows)
+        }
         return placeholderId
     }
 
     // MARK: - Helpers
 
-    /// Timeline start frame for a shot: its placed video clip position, else end of the
-    /// production video track (append), else 0.
-    private func shotStartFrame(_ shot: Shot, editor: EditorViewModel) -> Int {
-        if let assetId = shot.videoAssetId,
-           let clipId = editor.productionClipId(forAsset: assetId),
-           let clip = editor.clipFor(id: clipId) {
-            return clip.startFrame
-        }
-        return 0
+    /// Timeline start frame for a shot: its placed video clip position, or nil
+    /// when the shot has no placed clip yet. A shot without a position must NOT
+    /// default to frame 0 — that piles every unplaced shot's dialogue at the
+    /// head of the timeline (anti-pattern 19).
+    private func shotStartFrame(_ shot: Shot, editor: EditorViewModel) -> Int? {
+        guard let assetId = shot.videoAssetId,
+              let clipId = editor.productionClipId(forAsset: assetId),
+              let clip = editor.clipFor(id: clipId) else { return nil }
+        return clip.startFrame
     }
 
     private func defaultTTSModel() throws -> AudioModelConfig {
@@ -176,4 +269,12 @@ extension ToolExecutor {
         let words = text.split { $0 == " " || $0 == "\n" }.count
         return max(1.0, Double(words) / 2.7)
     }
+}
+
+/// Shared, mutable ordered dialogue lane captured by each line's completion
+/// closure so the last-completing clip re-flows the whole lane against the
+/// final set of measured durations. @MainActor because the closures run there.
+@MainActor
+private final class DialogueLaneBox {
+    var entries: [(clipId: String, desiredStart: Int)] = []
 }

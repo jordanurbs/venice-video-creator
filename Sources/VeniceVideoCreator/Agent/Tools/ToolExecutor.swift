@@ -75,8 +75,14 @@ final class ToolExecutor {
             "timelineChanged": editor.timeline != before
         ]
         if result.isError {
+            let reason: String = {
+                if case let .text(message)? = result.content.first {
+                    return String(message.replacingOccurrences(of: "\n", with: " ").prefix(300))
+                }
+                return "unknown"
+            }()
             Log.agent.warning(
-                "tool failed name=\(tool.rawValue) duration=\(elapsed)",
+                "tool failed name=\(tool.rawValue) duration=\(elapsed) reason=\(reason)",
                 telemetry: telemetry,
                 data: payload
             )
@@ -148,10 +154,14 @@ final class ToolExecutor {
         case .saveShotPlan:  return try saveShotPlan(editor, args)
         case .getShotPlan:   return try getShotPlan(editor)
         case .updateShots:   return try updateShots(editor, args)
+        case .resetShots:    return try resetShots(editor, args)
+        case .referenceBakeoff: return try referenceBakeoff(editor, args)
         case .createCharacter: return try createCharacter(editor, args)
         case .updateCharacter: return try updateCharacter(editor, args)
+        case .removeCharacter: return try removeCharacter(editor, args)
         case .createLocation: return try createLocation(editor, args)
         case .updateLocation: return try updateLocation(editor, args)
+        case .removeLocation: return try removeLocation(editor, args)
         case .auditionVoices:  return try auditionVoices(editor, args)
         case .lockVoice:       return try lockVoice(editor, args)
         case .storyboardShots: return try storyboardShots(editor, args)

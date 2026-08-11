@@ -7,6 +7,7 @@ final class AgentService {
 
     private var apiKey: String = ""
     private var apiKeyObserver: NSObjectProtocol?
+    private var deprecationObserver: NSObjectProtocol?
 
     init() {
         reloadAPIKey()
@@ -17,6 +18,20 @@ final class AgentService {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.reloadAPIKey()
+            }
+        }
+        // Model-deprecation headers (harness rule 34): the transport layer detects
+        // them and broadcasts; turn each into a one-time system notice in the chat.
+        deprecationObserver = NotificationCenter.default.addObserver(
+            forName: DeprecationMonitor.didDetect,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            let info = note.userInfo as? [String: String]
+            MainActor.assumeIsolated {
+                guard let info, let model = info["model"] else { return }
+                let message = DeprecationMonitor.message(model: model, warning: info["warning"], sunset: info["sunset"])
+                self?.postSystemNotice("Heads up: \(message)")
             }
         }
     }
@@ -32,6 +47,9 @@ final class AgentService {
 
     isolated deinit {
         if let token = apiKeyObserver {
+            NotificationCenter.default.removeObserver(token)
+        }
+        if let token = deprecationObserver {
             NotificationCenter.default.removeObserver(token)
         }
     }
@@ -53,7 +71,24 @@ final class AgentService {
         guard hasApiKey else { return nil }
         let key = apiKey.isEmpty ? (VeniceKeychain.load() ?? "") : apiKey
         guard !key.isEmpty else { return nil }
-        return VeniceAgentClient(apiKey: key, model: effectiveModelId, characterSlug: selectedCharacterSlug)
+        return VeniceAgentClient(
+            apiKey: key,
+            model: effectiveModelId,
+            maxTokens: effectiveMaxOutputTokens,
+            characterSlug: selectedCharacterSlug
+        )
+    }
+
+    /// Output-token budget for the active model. Reasoning models (Kimi K3,
+    /// GLM, …) burn thinking tokens inside this budget before emitting text or
+    /// tool calls, so the old fixed 8192 truncated them mid-reasoning (the
+    /// backend then errors with "response was truncated … increase max_tokens").
+    /// Use the model spec's own output ceiling, clamped: floor 8192 so small
+    /// specs still work, cap 32768 so the context-budget reservation and
+    /// worst-case latency stay sane.
+    var effectiveMaxOutputTokens: Int {
+        let spec = availableModels.first { $0.id == effectiveModelId }?.maxCompletionTokens
+        return min(max(spec ?? 8_192, 8_192), 32_768)
     }
 
     /// User-selected Venice character persona slug, persisted via `ModelPreferences`.
@@ -595,18 +630,25 @@ final class AgentService {
 
     private func apiMessages() async -> [AnthropicMessage] {
         let vision = modelSupportsVision
+        // Mention images are inlined ONLY for the newest user message. Re-inlining
+        // them into every historical user message re-paid ~1MB of base64 per
+        // image per turn forever — the main driver of runaway payloads (413s).
+        // Older mentions stay addressable via inspect_media.
+        let newestMentionUserId = messages.last(where: { $0.role == .user && !$0.mentions.isEmpty })?.id
         var result: [AnthropicMessage] = []
         for msg in messages {
             if msg.role == .system { continue }
             var content = msg.blocks.compactMap(Self.contentBlockJSON)
             if msg.role == .user, !msg.mentions.isEmpty {
                 var hint = msg.contextHint ?? AgentMentionContext.hint(msg.mentions, editor: editor)
-                if vision {
+                if vision, msg.id == newestMentionUserId {
                     let inlined = await inlineImageBlocks(for: msg.mentions)
                     if let note = AgentMentionContext.inlineNote(for: inlined) { hint += " " + note }
                     content.insert(contentsOf: inlined.blocks, at: 0)
                 } else if msg.mentions.contains(where: { $0.type == .image }) {
-                    hint += " (Image attachments not inlined — the current model has no vision. Use inspect_media if needed, or the user can switch to a vision model.)"
+                    hint += vision
+                        ? " (Mentioned images from this earlier message are no longer attached inline — call inspect_media with the mediaRef to re-view one.)"
+                        : " (Image attachments not inlined — the current model has no vision. Use inspect_media if needed, or the user can switch to a vision model.)"
                 }
                 content.insert(["type": "text", "text": hint], at: 0)
             }
@@ -621,7 +663,6 @@ final class AgentService {
     /// Trims the conversation to fit the active model's context window, folding
     /// evicted turns into an AI-written recap (summarized by a cheap/fast model).
     private static let keepRecentTurns = 6
-    private static let reservedOutputTokens = 8192  // matches VeniceAgentClient.maxTokens
     @ObservationIgnored private var recapCache: [UUID: (evictedCount: Int, recap: String)] = [:]
 
     private func fitToContextBudget(_ full: [AnthropicMessage]) async -> [AnthropicMessage] {
@@ -634,7 +675,7 @@ final class AgentService {
         // token budget alone would let multi-MB payloads through).
         let payloadTokenCeiling = ContextBudget.maxPayloadBytes / ContextBudget.charsPerToken
         let budget = max(4_000, min(
-            context - Self.reservedOutputTokens - systemTokens - ContextBudget.safetyMargin,
+            context - effectiveMaxOutputTokens - systemTokens - ContextBudget.safetyMargin,
             payloadTokenCeiling
         ))
 
@@ -729,7 +770,7 @@ final class AgentService {
         let jobs = pending
         let encoded = await Task.detached(priority: .userInitiated) {
             jobs.map { job in
-                (job.mediaRef, ImageEncoder.encode(url: job.url).map { ($0.mime, $0.data.base64EncodedString()) })
+                (job.mediaRef, ImageEncoder.encodeForAgentContext(url: job.url).map { ($0.mime, $0.data.base64EncodedString()) })
             }
         }.value
         for (mediaRef, result) in encoded {

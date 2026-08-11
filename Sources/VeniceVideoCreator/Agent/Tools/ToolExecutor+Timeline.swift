@@ -349,8 +349,10 @@ extension ToolExecutor {
 
     private func readImage(asset: MediaAsset, args: [String: Any]) async throws -> ToolResult {
         let url = asset.url
+        // Agent-context profile: these bytes ride every subsequent request
+        // body until the budgeter strips them, so keep them small.
         let encoded = await Task.detached(priority: .userInitiated) {
-            ImageEncoder.encode(url: url).map {
+            ImageEncoder.encodeForAgentContext(url: url).map {
                 (base64: $0.data.base64EncodedString(), mime: $0.mime, encodedByteSize: $0.data.count)
             }
         }.value

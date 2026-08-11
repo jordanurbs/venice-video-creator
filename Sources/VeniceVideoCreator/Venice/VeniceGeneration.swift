@@ -43,11 +43,28 @@ enum VeniceGenerationRunner {
 
     // MARK: - Image edit / multi-edit / background-remove
 
+    /// `/image/edit` and `/image/multi-edit` only accept edit-capable models
+    /// (`/models?type=inpaint`, e.g. qwen-edit). Reference-bearing requests are
+    /// routed here carrying whatever GENERATION model the caller picked
+    /// (krea-2-turbo, …) — Venice rejects those ids outright ("Invalid model
+    /// id"; every storyboard panel with character refs failed this way
+    /// 2026-08-06). Map non-edit ids to an edit-capable model instead.
+    private static func editCapableModel(_ id: String) -> String {
+        guard !id.isEmpty else { return VeniceBuiltInModel.defaultEdit }
+        let editModels = ModelCatalog.shared.editModels
+        if editModels.contains(where: { $0.id == id }) { return id }
+        let fallback = editModels.first(where: { $0.id == VeniceBuiltInModel.defaultEdit })?.id
+            ?? editModels.first?.id
+            ?? VeniceBuiltInModel.defaultEdit
+        Log.generation.notice("image edit: model \(id) is not edit-capable; using \(fallback)")
+        return fallback
+    }
+
     /// Venice `/image/edit` — prompt-driven single-image transform. Returns PNG.
     private static func runImageEdit(
         model: String, params: ImageEditParams, api: VeniceAPI
     ) async throws -> [String] {
-        let resolvedModel = model.isEmpty ? VeniceBuiltInModel.defaultEdit : model
+        let resolvedModel = editCapableModel(model)
         var body: [String: Any] = [
             "model": resolvedModel,
             "prompt": params.prompt,
@@ -68,7 +85,7 @@ enum VeniceGenerationRunner {
         model: String, params: ImageMultiEditParams, api: VeniceAPI
     ) async throws -> [String] {
         let body: [String: Any] = [
-            "modelId": model.isEmpty ? VeniceBuiltInModel.defaultEdit : model,
+            "modelId": editCapableModel(model),
             "prompt": params.prompt,
             // multi-edit accepts base64 or data: URLs; pass them through as-is.
             "images": params.sourceURLs,
@@ -177,6 +194,17 @@ enum VeniceGenerationRunner {
             body["audio_url"] = audioURL
         }
         if catalogModel?.audioConfigurable == true { body["audio"] = params.generateAudio }
+        // Negative prompt (e.g. the rule-33 audio suppression on dialogue shots),
+        // only on families the API accepts it on — never risk a queue rejection.
+        if let negative = params.negativePrompt, !negative.isEmpty,
+           VideoModelCapabilities.supportsNegativePrompt(id: model) {
+            body["negative_prompt"] = negative
+        }
+        // Reproducibility seed, only on families probe-verified to accept it — a
+        // rejected seed hard-fails the queue, so the gate stays conservative.
+        if let seed = params.seed, VideoModelCapabilities.supportsSeed(id: model) {
+            body["seed"] = seed
+        }
         // Seedance requires an explicit consent object for face-bearing media.
         // The user grants this once in Settings → Models; attach it for every Seedance job.
         if isSeedance(model: model), ModelPreferences.shared.seedanceConsentGranted {
@@ -189,7 +217,7 @@ enum VeniceGenerationRunner {
             ]
         }
 
-        let queued = try await api.postJSON(path: "video/queue", body: body)
+        let queued = try await api.postJSON(path: "video/queue", body: body, forModel: model)
         guard let queueId = queued["queue_id"] as? String else {
             throw VeniceAPI.VeniceError.decode("missing queue_id")
         }

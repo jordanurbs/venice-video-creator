@@ -66,8 +66,14 @@ extension EditorViewModel {
 
     /// Assets that deleting these folders would take with them (descendants included).
     func deletionImpactCount(forFolderIds ids: Set<String>) -> Int {
+        deletionImpactAssetIds(forFolderIds: ids).count
+    }
+
+    /// The asset ids deleting these folders would remove (descendants included) —
+    /// lets callers warn about shot-plan entities that reference them first.
+    func deletionImpactAssetIds(forFolderIds ids: Set<String>) -> Set<String> {
         let all = MediaFolderIndex(mediaManifest.folders).idsIncludingDescendants(ids)
-        return assetIds(inFolderIds: all).count
+        return assetIds(inFolderIds: all)
     }
 
     func deleteFolders(ids: Set<String>) {
@@ -93,6 +99,9 @@ extension EditorViewModel {
         mediaAssets.removeAll { assetIdsToDelete.contains($0.id) }
         mediaManifest.entries.removeAll { assetIdsToDelete.contains($0.id) }
         mediaManifest.folders.removeAll { allFolderIds.contains($0.id) }
+        // Keep the shot plan honest: cast/location/shot references to the
+        // deleted assets are detached in the same undo group.
+        detachAssetsFromShotPlan(ids: assetIdsToDelete)
         selectedFolderIds.subtract(allFolderIds)
         selectedMediaAssetIds.subtract(assetIdsToDelete)
         for id in assetIdsToDelete { closePreviewTab(id: PreviewTab.mediaAssetTabId(for: id)) }

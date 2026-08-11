@@ -82,6 +82,14 @@ struct GenerationInput: Codable, Sendable, Equatable {
     var instrumental: Bool?
     /// Video-only
     var generateAudio: Bool?
+    /// Negative prompt (video): terms to suppress, e.g. the rule-33 audio
+    /// suppression negative on dialogue shots. Only emitted to models that
+    /// accept it (`VideoModelCapabilities.supportsNegativePrompt`).
+    var negativePrompt: String?
+    /// Video/image seed for reproducible generation. Only emitted to families
+    /// that accept it (`VideoModelCapabilities.supportsSeed`); recorded on the
+    /// take recipe so a specific take can be replayed (harness rule 39/seeds).
+    var seed: Int?
     var referenceImageURLs: [String]?
     var referenceVideoURLs: [String]?
     var referenceAudioURLs: [String]?

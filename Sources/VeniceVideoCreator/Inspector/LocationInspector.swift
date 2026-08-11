@@ -170,14 +170,20 @@ extension LocationInspector {
         }
     }
 
+    /// Only ids that resolve to a live asset — ghost ids (asset deleted
+    /// out-of-band) must not render as permanent blank plates.
+    private var resolvedReferenceIds: [String] {
+        location.referenceImageAssetIds.filter { editor.mediaAssetsById[$0] != nil }
+    }
+
     var referencesSection: some View {
         inspectorSection("Reference plates") {
-            if location.referenceImageAssetIds.isEmpty {
+            if resolvedReferenceIds.isEmpty {
                 Text("No reference plates yet.")
                     .font(.system(size: AppTheme.FontSize.xs))
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
             } else {
-                if location.referenceImageAssetIds.count > 1 {
+                if resolvedReferenceIds.count > 1 {
                     Text(location.lockedReferenceAssetId == nil
                         ? "Generation uses ALL references — if the plates show different environments, lock the best one."
                         : "Locked — generation uses only this reference.")
@@ -187,7 +193,7 @@ extension LocationInspector {
                 }
                 let columns = [GridItem(.adaptive(minimum: 84), spacing: AppTheme.Spacing.xs)]
                 LazyVGrid(columns: columns, alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                    ForEach(location.referenceImageAssetIds, id: \.self) { aid in
+                    ForEach(resolvedReferenceIds, id: \.self) { aid in
                         referenceCell(aid)
                     }
                 }
@@ -214,6 +220,9 @@ extension LocationInspector {
                 .buttonStyle(.capsule(.prominent))
                 .controlSize(.small)
                 .disabled(anyInFlight)
+                // Attach an existing library image as a plate — recovers a
+                // detached ref (or reuses any render) without regenerating.
+                libraryPickerMenu
                 Spacer(minLength: 0)
             }
             .confirmationDialog(
@@ -225,6 +234,21 @@ extension LocationInspector {
                     editor.regenerateLocationReferences(locationId: location.id)
                 }
                 Button("Cancel", role: .cancel) {}
+            }
+        }
+    }
+
+    /// Menu of library images not already attached — shared picker, so the
+    /// user can populate plates without relying on the agent.
+    private var libraryPickerMenu: some View {
+        LibraryReferencePicker(excludedAssetIds: Set(location.referenceImageAssetIds)) { asset in
+            update("Attach Reference") { l in
+                if !l.referenceImageAssetIds.contains(asset.id) {
+                    l.referenceImageAssetIds.append(asset.id)
+                }
+                if l.lockedReferenceAssetId == nil {
+                    l.lockedReferenceAssetId = asset.id
+                }
             }
         }
     }

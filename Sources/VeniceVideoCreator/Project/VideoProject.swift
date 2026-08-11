@@ -690,6 +690,9 @@ final class VideoProject: NSDocument {
         }
 
         editorViewModel.missingMediaRefs = missingRefs
+        // Heal plans saved before deletions detached their references —
+        // ghost ids otherwise render as permanent blank tiles in the panes.
+        editorViewModel.reconcileShotPlanWithMediaLibrary()
         editorViewModel.generationService.resumePendingGenerations(editor: editorViewModel)
         editorViewModel.productionOrchestrator.resume(editor: editorViewModel)
         Log.project.notice(

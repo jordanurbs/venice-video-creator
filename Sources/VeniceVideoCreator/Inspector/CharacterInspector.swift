@@ -14,6 +14,8 @@ struct CharacterInspector: View {
     @State private var draftPrompt: String = ""
     @State private var confirmingRegenerate = false
     @State private var isEnhancing = false
+    /// Voice id picked in the audition picker (not yet locked).
+    @State private var auditionVoice: String = ""
 
     var body: some View {
         ScrollView {
@@ -31,7 +33,11 @@ struct CharacterInspector: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { syncDrafts() }
-        .onChange(of: character.id) { _, _ in syncDrafts() }
+        .onChange(of: character.id) { _, _ in
+            syncDrafts()
+            InspectorAudioPlayer.shared.stop()
+        }
+        .onDisappear { InspectorAudioPlayer.shared.stop() }
     }
 
     private func syncDrafts() {
@@ -174,14 +180,20 @@ extension CharacterInspector {
         }
     }
 
+    /// Only ids that resolve to a live asset — ghost ids (asset deleted
+    /// out-of-band) must not render as permanent blank tiles.
+    private var resolvedReferenceIds: [String] {
+        character.referenceImageAssetIds.filter { editor.mediaAssetsById[$0] != nil }
+    }
+
     var referencesSection: some View {
         inspectorSection("Reference images") {
-            if character.referenceImageAssetIds.isEmpty {
+            if resolvedReferenceIds.isEmpty {
                 Text("No reference images yet.")
                     .font(.system(size: AppTheme.FontSize.xs))
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
             } else {
-                if character.referenceImageAssetIds.count > 1 {
+                if resolvedReferenceIds.count > 1 {
                     Text(character.lockedReferenceAssetId == nil
                         ? "Generation uses ALL references — if the takes look different, lock the best one so models aren't fed divergent looks."
                         : "Locked — generation uses only this reference.")
@@ -191,7 +203,7 @@ extension CharacterInspector {
                 }
                 let columns = [GridItem(.adaptive(minimum: 84), spacing: AppTheme.Spacing.xs)]
                 LazyVGrid(columns: columns, alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                    ForEach(character.referenceImageAssetIds, id: \.self) { aid in
+                    ForEach(resolvedReferenceIds, id: \.self) { aid in
                         referenceCell(aid)
                     }
                 }
@@ -218,6 +230,10 @@ extension CharacterInspector {
                 .buttonStyle(.capsule(.prominent))
                 .controlSize(.small)
                 .disabled(anyInFlight)
+                // Attach an existing library image as a reference — recovers a
+                // detached ref (or reuses any generated portrait) without
+                // regenerating from scratch.
+                libraryPickerMenu
                 Spacer(minLength: 0)
             }
             .confirmationDialog(
@@ -294,6 +310,21 @@ extension CharacterInspector {
         }
     }
 
+    /// Menu of library images not already attached — shared picker, so the
+    /// user can populate references without relying on the agent.
+    private var libraryPickerMenu: some View {
+        LibraryReferencePicker(excludedAssetIds: Set(character.referenceImageAssetIds)) { asset in
+            update("Attach Reference") { c in
+                if !c.referenceImageAssetIds.contains(asset.id) {
+                    c.referenceImageAssetIds.append(asset.id)
+                }
+                if c.lockedReferenceAssetId == nil {
+                    c.lockedReferenceAssetId = asset.id
+                }
+            }
+        }
+    }
+
     private var anyVoiceSampleInFlight: Bool {
         character.voiceSampleAssetIds.contains { id in
             guard let a = editor.mediaAssets.first(where: { $0.id == id }) else { return false }
@@ -302,6 +333,16 @@ extension CharacterInspector {
             case .none, .failed, .cancelled: return false
             }
         }
+    }
+
+    /// The TTS model whose voices the picker offers: the character's locked
+    /// model when set and enabled, else the first enabled TTS model with voices.
+    private var voicePickerModel: AudioModelConfig? {
+        character.voiceModel
+            .flatMap { vm in AudioModelConfig.allModels.first { $0.id == vm && ModelPreferences.shared.isEnabled($0.id) } }
+            ?? AudioModelConfig.allModels.first {
+                $0.category == .tts && $0.voices?.isEmpty == false && ModelPreferences.shared.isEnabled($0.id)
+            }
     }
 
     var voiceSection: some View {
@@ -319,12 +360,57 @@ extension CharacterInspector {
                             .font(.system(size: AppTheme.FontSize.xxs))
                             .foregroundStyle(AppTheme.Text.mutedColor)
                     }
+                    Spacer(minLength: 0)
+                    Button("Unlock") {
+                        update("Unlock Voice") { $0.lockedVoiceId = nil }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: AppTheme.FontSize.xxs, weight: AppTheme.FontWeight.medium))
+                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+                    .help("Clear the locked voice to audition a different one")
                 }
             } else {
-                Text("No voice locked. Ask the agent to audition voices, or generate a sample below.")
+                Text("No voice locked. Pick a voice below and audition it — new samples are generated in the selected voice.")
                     .font(.system(size: AppTheme.FontSize.xs))
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // Voice picker + audition: browse the TTS model's voices, generate
+            // a sample in a chosen voice, then lock the winner from its row.
+            if let model = voicePickerModel, let voices = model.voices, !voices.isEmpty {
+                HStack(spacing: AppTheme.Spacing.sm) {
+                    Picker("Voice", selection: $auditionVoice) {
+                        Text("Choose a voice…").tag("")
+                        ForEach(voices, id: \.self) { v in
+                            Text(v).tag(v)
+                        }
+                    }
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .frame(maxWidth: 180, alignment: .leading)
+                    Button {
+                        editor.generateCharacterVoiceSample(
+                            characterId: character.id,
+                            voice: auditionVoice.isEmpty ? nil : auditionVoice,
+                            lockIfUnset: false
+                        )
+                    } label: {
+                        HStack(spacing: AppTheme.Spacing.xxs) {
+                            Image(systemName: "waveform.badge.plus")
+                                .font(.system(size: AppTheme.FontSize.xxs))
+                            Text("Audition")
+                                .font(.system(size: AppTheme.FontSize.xs, weight: AppTheme.FontWeight.medium))
+                        }
+                    }
+                    .buttonStyle(.capsule(.secondary))
+                    .controlSize(.small)
+                    .disabled(auditionVoice.isEmpty || anyVoiceSampleInFlight)
+                    .help(auditionVoice.isEmpty
+                        ? "Pick a voice to audition"
+                        : "Generate a spoken sample in '\(auditionVoice)' (\(model.displayName))")
+                    Spacer(minLength: 0)
+                }
             }
 
             if !character.voiceSampleAssetIds.isEmpty {
@@ -367,29 +453,62 @@ extension CharacterInspector {
     private func voiceSampleRow(_ assetId: String) -> some View {
         let isLocked = character.voiceReferenceAssetId == assetId
         let asset = editor.mediaAssets.first(where: { $0.id == assetId })
+        let isPlayable = asset != nil && asset?.isGenerating != true
+            && FileManager.default.fileExists(atPath: asset?.url.path ?? "")
+        let isPlaying = InspectorAudioPlayer.shared.isPlaying(assetId)
+        let sampleVoice = asset?.generationInput?.voice
+        let isLockedVoice = sampleVoice != nil && sampleVoice == character.lockedVoiceId
         HStack(spacing: AppTheme.Spacing.sm) {
             Button {
-                guard let asset else { return }
-                editor.openPreviewTab(for: asset)
+                guard let asset, isPlayable else { return }
+                InspectorAudioPlayer.shared.toggle(assetId: assetId, url: asset.url)
             } label: {
                 HStack(spacing: AppTheme.Spacing.xs) {
                     if let asset, asset.isGenerating {
                         ProgressView().controlSize(.mini)
                     } else {
-                        Image(systemName: "play.circle")
+                        Image(systemName: isPlaying ? "stop.circle.fill" : "play.circle")
                             .font(.system(size: AppTheme.FontSize.sm))
-                            .foregroundStyle(AppTheme.Text.tertiaryColor)
+                            .foregroundStyle(isPlaying ? AppTheme.Accent.primary : AppTheme.Text.tertiaryColor)
                     }
                     Text(asset?.name ?? String(assetId.prefix(8)))
                         .font(.system(size: AppTheme.FontSize.xs))
                         .foregroundStyle(asset == nil ? AppTheme.Status.errorColor : AppTheme.Text.secondaryColor)
                         .lineLimit(1)
+                    if isPlaying {
+                        Image(systemName: "waveform")
+                            .font(.system(size: AppTheme.FontSize.xxs))
+                            .foregroundStyle(AppTheme.Accent.primary)
+                            .symbolEffect(.variableColor.iterative, options: .repeating)
+                    }
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Click to listen")
+            .disabled(!isPlayable)
+            .help(isPlayable ? (isPlaying ? "Stop" : "Play sample") : "Sample not ready yet")
             Spacer(minLength: 0)
+            // Lock the sample's VOICE as the character's voice (dialogue TTS).
+            // Distinct from the reference lock on the right, which pins this
+            // audio file as the shot-generation voice reference.
+            if let sampleVoice, !isLockedVoice {
+                Button("Use voice") {
+                    update("Lock Voice") { c in
+                        c.lockedVoiceId = sampleVoice
+                        if c.voiceModel == nil { c.voiceModel = asset?.generationInput?.model }
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: AppTheme.FontSize.xxs, weight: AppTheme.FontWeight.medium))
+                .foregroundStyle(AppTheme.Accent.primary)
+                .disabled(asset?.isGenerating == true)
+                .help("Lock '\(sampleVoice)' as \(character.name.isEmpty ? "this character" : character.name)'s voice for dialogue")
+            } else if isLockedVoice {
+                Text(sampleVoice ?? "")
+                    .font(.system(size: AppTheme.FontSize.xxs, design: .monospaced))
+                    .foregroundStyle(AppTheme.Text.mutedColor)
+                    .help("This sample's voice is the locked voice")
+            }
             Button {
                 update(isLocked ? "Unlock Voice Reference" : "Lock Voice Reference") {
                     $0.voiceReferenceAssetId = isLocked ? nil : assetId

@@ -74,7 +74,14 @@ private struct CastRow: View {
     let onSelect: () -> Void
     @State private var confirmingRegenerate = false
 
-    private var hasReferences: Bool { !character.referenceImageAssetIds.isEmpty }
+    /// Only ids that resolve to a live asset — a ghost id (asset deleted
+    /// out-of-band) must not render as a permanent blank tile. Generating
+    /// placeholders ARE in mediaAssets, so in-flight refs still show.
+    private var resolvedReferenceIds: [String] {
+        character.referenceImageAssetIds.filter { editor.mediaAssetsById[$0] != nil }
+    }
+
+    private var hasReferences: Bool { !resolvedReferenceIds.isEmpty }
 
     private var anyInFlight: Bool {
         character.referenceImageAssetIds.contains { id in
@@ -109,6 +116,7 @@ private struct CastRow: View {
                         .help("Voice locked")
                 }
                 Spacer(minLength: 0)
+                libraryPicker
                 regenerateButton
             }
             if let description = character.description, !description.isEmpty {
@@ -119,7 +127,7 @@ private struct CastRow: View {
             }
             if hasReferences {
                 HStack(spacing: AppTheme.Spacing.xs) {
-                    ForEach(character.referenceImageAssetIds, id: \.self) { aid in
+                    ForEach(resolvedReferenceIds, id: \.self) { aid in
                         referenceThumb(aid)
                     }
                     Spacer(minLength: 0)
@@ -153,6 +161,24 @@ private struct CastRow: View {
                 editor.regenerateCharacterReferences(characterId: character.id)
             }
             Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    /// Compact "from library" picker so references can be attached here
+    /// directly, without the agent or a trip to the inspector.
+    private var libraryPicker: some View {
+        LibraryReferencePicker(
+            excludedAssetIds: Set(character.referenceImageAssetIds),
+            compact: true
+        ) { asset in
+            guard var updated = editor.character(id: character.id) else { return }
+            if !updated.referenceImageAssetIds.contains(asset.id) {
+                updated.referenceImageAssetIds.append(asset.id)
+            }
+            if updated.lockedReferenceAssetId == nil {
+                updated.lockedReferenceAssetId = asset.id
+            }
+            editor.upsertCharacter(updated)
         }
     }
 

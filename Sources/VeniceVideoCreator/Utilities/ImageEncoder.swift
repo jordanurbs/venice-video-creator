@@ -14,6 +14,15 @@ enum ImageEncoder {
     /// Internal downsample target.
     static let maxLongestEdge = 1024
 
+    /// Encoding profile for images inlined into the AGENT chat context.
+    /// Vision models don't need 1024px/1MB to judge composition or likeness,
+    /// and every inlined byte rides the request body as base64 (×4/3) — the
+    /// smaller profile cuts steady-state agent payloads ~5-8x.
+    enum AgentContextProfile {
+        static let maxBytes = 300_000
+        static let maxLongestEdge = 768
+    }
+
     struct Output: Sendable {
         let data: Data
         let mime: String
@@ -29,6 +38,19 @@ enum ImageEncoder {
         let stamp = fileStamp(url: url)
         if let stamp, let hit = cachedOutput(stamp) { return hit }
         let output = passthrough(url: url, stamp: stamp) ?? downscaled(url: url)
+        if let output, let stamp { store(output, for: stamp) }
+        return output
+    }
+
+    /// Encode for the agent chat context: tighter size/edge targets than
+    /// `encode(url:)`. Cached separately (same stamp, agent-profile key).
+    static func encodeForAgentContext(url: URL) -> Output? {
+        let stamp = fileStamp(url: url).map {
+            FileStamp(path: "agent-context:" + $0.path, size: $0.size, mtime: $0.mtime)
+        }
+        if let stamp, let hit = cachedOutput(stamp) { return hit }
+        let output = agentContextPassthrough(url: url)
+            ?? downscaled(url: url, maxEdge: AgentContextProfile.maxLongestEdge, maxBytes: AgentContextProfile.maxBytes)
         if let output, let stamp { store(output, for: stamp) }
         return output
     }
@@ -78,14 +100,32 @@ enum ImageEncoder {
         return Output(data: data, mime: mime)
     }
 
-    private static func downscaled(url: URL) -> Output? {
-        guard let image = thumbnail(url: url, maxPixelSize: maxLongestEdge) else { return nil }
+    private static func downscaled(
+        url: URL,
+        maxEdge: Int = maxLongestEdge,
+        maxBytes byteCap: Int = maxBytes
+    ) -> Output? {
+        guard let image = thumbnail(url: url, maxPixelSize: maxEdge) else { return nil }
         for quality in [0.85, 0.7, 0.55, 0.4] as [CGFloat] {
-            if let data = encodeJPEG(image, quality: quality), data.count <= maxBytes {
+            if let data = encodeJPEG(image, quality: quality), data.count <= byteCap {
                 return Output(data: data, mime: "image/jpeg")
             }
         }
         return nil
+    }
+
+    /// Passthrough for the agent profile: only files already at/below the
+    /// tighter agent targets skip re-encoding.
+    private static func agentContextPassthrough(url: URL) -> Output? {
+        let imageMetadata = metadata(url: url)
+        guard let mime = sniffedMime(url: url),
+              let stamp = fileStamp(url: url), stamp.size <= AgentContextProfile.maxBytes,
+              let width = imageMetadata.width,
+              let height = imageMetadata.height,
+              max(width, height) <= AgentContextProfile.maxLongestEdge,
+              let data = try? Data(contentsOf: url, options: [.mappedIfSafe])
+        else { return nil }
+        return Output(data: data, mime: mime)
     }
 
     // MARK: - Cache

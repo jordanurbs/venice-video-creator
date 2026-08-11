@@ -121,6 +121,22 @@ struct VeniceAPI: Sendable {
         return obj
     }
 
+    /// POST a JSON object, decode the response, and also surface Venice's own
+    /// model-deprecation headers (harness rule 34) once per (model, date) so the
+    /// agent/user learn before a model sunsets.
+    func postJSON(path: String, body: [String: Any], forModel model: String) async throws -> [String: Any] {
+        let request = makeRequest(path: path, body: try jsonBody(body))
+        let (data, response) = try await data(for: request)
+        try Self.assertOK(data: data, response: response)
+        if let http = response as? HTTPURLResponse {
+            DeprecationMonitor.shared.inspect(model: model, headers: http.allHeaderFields)
+        }
+        guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            throw VeniceError.decode("expected a JSON object")
+        }
+        return obj
+    }
+
     /// GET a path and decode the JSON response into a dictionary.
     func getJSON(path: String) async throws -> [String: Any] {
         let request = makeRequest(path: path, method: "GET")

@@ -169,7 +169,7 @@ extension ToolExecutor {
         let body: [String: Any] = [
             "model": model.id,
             "storyboarded": results,
-            "hint": "Panels are generating. Call wait_for_media with the storyboardAssetIds, then inspect_media to review, then qa_shot / fix_panel or start production.",
+            "hint": "Panels are generating. Call wait_for_media with the storyboardAssetIds, then inspect_media to review. QA EACH character-bearing panel with qa_shot (fix_panel if it fails) BEFORE produce_shots — a panel with a wrong face or mirrored geography propagates into the paid video. produce_shots warns and auto-QAs when character panels are left unvetted.",
         ]
         return .ok(Self.jsonString(body) ?? "{}")
     }

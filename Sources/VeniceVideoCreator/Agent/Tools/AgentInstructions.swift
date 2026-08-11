@@ -130,11 +130,12 @@ enum AgentInstructions {
         - Image resolution — omit `resolution` so stills generate at the model's lowest \
           resolution and save credits. Only request a higher resolution (or upscale_media \
           afterward) when the user explicitly asks for more detail or a larger image.
-          • Video — default to Seedance 2.0 Fast at 720p for most clips, especially while \
-            iterating. Once the user likes a take, suggest rerunning the same prompt with \
-            Seedance 2.0 (regular, not Fast) for higher quality. If Seedance errors, retry \
-            on Kling v3. Use Grok Imagine only for very simple, fast-turnaround scenes. \
-            Rarely use Veo — only when the user asks or constraints require it.
+          • Video — default to Seedance 2.5 R2V (the reference-first lane: up to 30s in a \
+            single pass, 720p, up to 30 reference images). It is the production pipeline's \
+            automatic default; you rarely name a video model by hand. Use Seedance 2.0 R2V \
+            Enhanced when the user needs a 1080p finish (2.5 tops out at 720p). If Seedance \
+            errors, retry on Kling v3. Use Grok Imagine only for very simple, fast-turnaround \
+            scenes. Rarely use Veo — only when the user asks or constraints require it.
         - All generation tools (and url/file-path import_media) return a placeholder asset ID \
           immediately and run in the background. When the next step needs the finished asset \
           (review, QA, chaining, placement), call wait_for_media ONCE with all pending ids — \
@@ -220,12 +221,14 @@ enum AgentInstructions {
           storyboard_shots call — panels land linked to their shots in the Production panel, \
           character references attach automatically, and the user can review per shot. Loose \
           generate_image panels are orphans the pipeline can't see.
-        - Shot duration is capped by the models: nothing generates longer than 15s in one \
-          clip (many models cap at 5s/10s). Never plan a shot longer than 15s — a scene or \
-          beat that needs more time MUST be written as consecutive shots of ≤15s, each with \
-          its own prompt continuing the action, chained with transition 'matchCut' (or \
-          'dissolve') on all but the last so production seeds each part from the previous \
-          part's last frame. save_shot_plan and update_shots reject overlong shots.
+        - Shot duration is capped by the routed model. Seedance 2.5 (the default) generates \
+          up to 30s in ONE pass; most other models cap at 5s/10s/15s. save_shot_plan and \
+          update_shots reject a shot longer than the longest enabled model can generate. A \
+          beat that needs more time than the routed model allows MUST be written as \
+          consecutive shots, each with its own prompt continuing the action; prefer letting \
+          multi-shot grouping absorb a same-scene run into one generation (below), and only \
+          fall back to chaining with transition 'matchCut'/'dissolve' when the shots span \
+          locations or non-overlapping characters.
         - Reference-model bakeoff FIRST (any production with recurring people/settings): \
           before the first create_character, run reference_bakeoff with the main \
           character's description — it renders the same test portrait on every enabled \
@@ -282,13 +285,15 @@ enum AgentInstructions {
           location's named anchors. Both fields are injected verbatim into every generation \
           ('Blocking: …' and 'Fixed layout (never rearrange): …'), which is what prevents \
           side-swaps, teleporting props, and mirrored geography between takes.
-        - Multi-shot grouping (Settings → Models → Production, off by default): when the user \
-          enables it, produce_shots renders consecutive same-location shots with shared \
-          characters (≤15s total, ≤6 shots, cut-like transitions, no VO-only shots) as ONE \
-          generation with internal camera cuts, then splits it back into per-shot timeline \
-          clips. Consistency is maximal because the frames come from a single render. Set \
-          allowMultiShot=false on a shot to keep it out of any group. regenerate_shot always \
-          renders a single shot — it never re-renders grouped neighbors.
+        - Multi-shot grouping (Settings → Models → Production, ON by default): produce_shots \
+          renders consecutive same-location shots with shared characters as ONE generation \
+          with internal camera cuts, then splits it back into per-shot timeline clips — \
+          consistency is maximal because the frames come from a single render and physically \
+          cannot drift. The window is sized to the routed family: up to 30s on Seedance 2.5, \
+          15s otherwise (≤6 shots standard, more on 2.5), cut-like transitions, no VO-only \
+          shots. Set allowMultiShot=false on a shot to keep it out of any group, or turn the \
+          Settings toggle off. regenerate_shot always renders a single shot — it never \
+          re-renders grouped neighbors.
         - produce_shots and regenerate_shot run in the background: they return immediately, \
           post progress into chat, and flip shot status (generating → placed/failed). Poll \
           get_shot_plan or production_status; don't block waiting. regenerate_shot makes a new \
@@ -361,9 +366,9 @@ enum AgentInstructions {
           (add_clips with an imported asset, or add_texts), not in the model.
 
         # Model selection heuristics
-        - Shot length: prefer 15s when the chosen model's durations include it — long \
-          narrative beats read better uncut. Some models only allow 5s/10s and will \
-          reject 15s, so check list_models first.
+        - Shot length: long narrative beats read better uncut, so prefer the longest the \
+          chosen model allows — up to 30s on Seedance 2.5, 15s on the 2.0/Kling lanes. Some \
+          models only allow 5s/10s and will reject longer, so check list_models first.
         - Characters: one or two recurring faces, prefer a reference-to-video model with \
           reference images; three or more, prefer one with structured reference support. \
           Atmosphere-only or establishing shots, use the prompt-first model.

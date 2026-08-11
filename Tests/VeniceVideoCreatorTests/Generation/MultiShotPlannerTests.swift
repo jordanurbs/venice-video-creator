@@ -112,6 +112,27 @@ struct MultiShotPlannerTests {
         #expect(units[0].shotIds.count == 6)
         #expect(units[1].shotIds.count == 2)
     }
+
+    @Test func seedance25BudgetGroupsUpToThirtySeconds() {
+        // 3 × 6s = 18s: over the 15s standard cap (first two pair at 12s, the
+        // third is a single) but within the Seedance 2.5 30s single-pass budget,
+        // so all three group into one unit.
+        let plan = makePlan(shotCount: 3, seconds: 6)
+        let standard = MultiShotPlanner.plan(shots: plan.shots, plan: plan, groupingEnabled: true)
+        #expect(standard.count == 2, "18s must split under the 15s standard budget")
+        #expect(standard[0].shotIds == ["s1", "s2"])
+        let wide = MultiShotPlanner.plan(shots: plan.shots, plan: plan, groupingEnabled: true, budget: .seedance25)
+        #expect(wide.count == 1, "18s must group under the 30s Seedance 2.5 budget")
+        #expect(wide[0].shotIds == ["s1", "s2", "s3"])
+    }
+
+    @Test func seedance25BudgetStillHonorsThirtySecondCeiling() {
+        // 5 × 8s = 40s > 30s: only the first three (24s) group under the 2.5 budget.
+        let plan = makePlan(shotCount: 5, seconds: 8)
+        let units = MultiShotPlanner.plan(shots: plan.shots, plan: plan, groupingEnabled: true, budget: .seedance25)
+        #expect(units[0].shotIds == ["s1", "s2", "s3"])
+        #expect(units[0].shotIds.count == 3)
+    }
 }
 
 @Suite("MultiShotPlanner prompt")
@@ -167,5 +188,19 @@ struct MultiShotPromptTests {
         plan.shots[0].prompt = String(repeating: "very long action ", count: 300)
         let prompt = MultiShotPlanner.multiShotPrompt(window: plan.shots, plan: plan)
         #expect(prompt.count <= VideoModelCapabilities.videoPromptCharLimit)
+    }
+
+    @Test func overLimitTrimKeepsTailAndStructure() {
+        // Blow the FIRST beat past the cap; the trim must shorten it rather than
+        // hard-cutting the tail, so the geometry hold, the last beat, and the
+        // Lens switch. separator all survive.
+        var plan = makePlan()
+        plan.shots[0].prompt = String(repeating: "very long action beat ", count: 400)
+        let prompt = MultiShotPlanner.multiShotPrompt(window: plan.shots, plan: plan)
+        #expect(prompt.count <= VideoModelCapabilities.videoPromptCharLimit)
+        #expect(prompt.contains("do not mirror, swap, or rearrange"))  // geometry hold kept
+        #expect(prompt.contains("Lens switch."))
+        #expect(prompt.contains("Shot 2 (4s): Jax closes the door"))   // last beat intact
+        #expect(prompt.contains("Mara appears exactly as in the reference images."))
     }
 }

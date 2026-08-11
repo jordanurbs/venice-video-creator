@@ -20,23 +20,39 @@ enum MultiShotPlanner {
         var isMultiShot: Bool { shotIds.count > 1 }
     }
 
-    /// Both native multi-shot lanes cap a single generation at 15 seconds.
+    /// The per-window duration + shot-count budget. The 2.0-era native
+    /// multi-shot lane caps a single generation at 15s / 6 shots; Seedance 2.5
+    /// renders a single pass up to 30s, so its window budget is larger (harness
+    /// rules 50/51). The caller picks the budget from the routed video family.
+    struct WindowBudget: Equatable, Sendable {
+        var maxSeconds: Double
+        var maxShots: Int
+
+        /// 2.0-era native multi-shot lane (Kling 3.0 / Seedance 2.0).
+        static let standard = WindowBudget(maxSeconds: 15, maxShots: 6)
+        /// Seedance 2.5: single-pass up to 30s, more beats per window.
+        static let seedance25 = WindowBudget(maxSeconds: 30, maxShots: 10)
+    }
+
+    /// Both native multi-shot lanes cap a single generation at 15 seconds
+    /// (2.0-era default; Seedance 2.5 raises this via `WindowBudget.seedance25`).
     static let maxWindowSeconds: Double = 15
-    /// Kling 3.0 supports up to 6 shots per generation; Seedance follows suit.
+    /// Kling 3.0 supports up to 6 shots per generation; Seedance 2.0 follows suit.
     static let maxWindowShots = 6
 
     // MARK: - Planning
 
     /// Splits the requested shots (already in plan order) into generation units.
     /// Only consecutive runs group; a shot that fails any gate becomes a single.
-    static func plan(shots: [Shot], plan: ShotPlan, groupingEnabled: Bool) -> [Unit] {
+    /// `budget` sizes the window to the routed family (30s on Seedance 2.5).
+    static func plan(shots: [Shot], plan: ShotPlan, groupingEnabled: Bool, budget: WindowBudget = .standard) -> [Unit] {
         guard groupingEnabled else {
             return shots.map { Unit(shotIds: [$0.id], reason: "standalone render") }
         }
         var units: [Unit] = []
         var index = 0
         while index < shots.count {
-            if let window = selectWindow(shots: shots, startIndex: index, plan: plan) {
+            if let window = selectWindow(shots: shots, startIndex: index, plan: plan, budget: budget) {
                 units.append(window)
                 index += window.shotIds.count
             } else {
@@ -49,12 +65,12 @@ enum MultiShotPlanner {
 
     /// Longest groupable window starting at `startIndex` (greedy, longest first,
     /// minimum 2) — mirrors the harness `selectMultiShotWindow`.
-    private static func selectWindow(shots: [Shot], startIndex: Int, plan: ShotPlan) -> Unit? {
-        let maxLength = min(maxWindowShots, shots.count - startIndex)
+    private static func selectWindow(shots: [Shot], startIndex: Int, plan: ShotPlan, budget: WindowBudget) -> Unit? {
+        let maxLength = min(budget.maxShots, shots.count - startIndex)
         guard maxLength >= 2 else { return nil }
         for length in stride(from: maxLength, through: 2, by: -1) {
             let window = Array(shots[startIndex..<(startIndex + length)])
-            if let reason = groupingVerdict(window: window, plan: plan) {
+            if let reason = groupingVerdict(window: window, plan: plan, budget: budget) {
                 return Unit(shotIds: window.map(\.id), reason: reason)
             }
         }
@@ -63,7 +79,7 @@ enum MultiShotPlanner {
 
     /// Returns a human-readable grouping reason when the window can group,
     /// nil otherwise. The gates mirror the harness `canUseMultiShotWindow`.
-    static func groupingVerdict(window: [Shot], plan: ShotPlan) -> String? {
+    static func groupingVerdict(window: [Shot], plan: ShotPlan, budget: WindowBudget = .standard) -> String? {
         guard window.count >= 2 else { return nil }
 
         // Per-shot opt-out and status: only produce-ready shots group, and a
@@ -73,9 +89,9 @@ enum MultiShotPlanner {
         // Explicit model overrides pin a shot to its own lane.
         if window.contains(where: { $0.modelOverride != nil }) { return nil }
 
-        // 15s single-generation cap.
+        // Single-generation duration cap (15s standard, 30s on Seedance 2.5).
         let total = window.reduce(0.0) { $0 + $1.durationSeconds }
-        guard total <= maxWindowSeconds else { return nil }
+        guard total <= budget.maxSeconds else { return nil }
 
         // Same single location across the window (rule 21b): the unit builds
         // ONE reference stack, so a location change would anchor the second

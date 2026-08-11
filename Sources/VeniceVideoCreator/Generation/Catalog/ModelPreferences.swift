@@ -38,6 +38,8 @@ final class ModelPreferences {
     private static let characterSlugKey = "agentCharacterSlug"
     private static let seedanceConsentKey = "seedanceConsentGranted"
     private static let multiShotGroupingKey = "multiShotGroupingEnabled"
+    private static let imageSlotBindingKey = "imageSlotBindingEnabled"
+    private static let lipSyncKey = "lipSyncEnabled"
 
     private(set) var disabledIds: Set<String>
     /// task.rawValue -> model id
@@ -56,10 +58,33 @@ final class ModelPreferences {
 
     /// When true, production groups consecutive same-scene shots into one
     /// multi-shot generation (`Lens switch.` beats — harness rule 21) instead
-    /// of one render per shot. Opt-in: it changes paid request bodies, so the
-    /// non-regression rule keeps it off by default.
+    /// of one render per shot. ON by default (2026-08-10, harness anti-pattern
+    /// 20 / rule 51): frames from one render physically cannot drift, which is
+    /// the single biggest consistency lever. Per-shot `allowMultiShot=false` and
+    /// this Settings toggle remain the opt-outs. (Flipping this changed paid
+    /// request bodies — see CONTRIBUTING.md / CHANGELOG.)
     var multiShotGroupingEnabled: Bool {
         didSet { UserDefaults.standard.set(multiShotGroupingEnabled, forKey: Self.multiShotGroupingKey) }
+    }
+
+    /// When true, @Image-tag video models (the Seedance R2V family) get an
+    /// explicit @ImageN slot binding: the prompt names each reference by its
+    /// push-order index ("@Image1 is Bob", "@Image5 is a second angle of the
+    /// location") and substitutes character names with their @ImageN tag, so
+    /// the model never guesses which reference is whom (harness rule 42).
+    /// Probe-verified for Seedance; defaults ON for that family only.
+    var imageSlotBindingEnabled: Bool {
+        didSet { UserDefaults.standard.set(imageSlotBindingEnabled, forKey: Self.imageSlotBindingKey) }
+    }
+
+    /// When true, a dialogue shot whose speaker has a locked voice, routed to a
+    /// model that accepts a top-level `audio_url`, TTS-es the line and attaches it
+    /// as the lip-sync track instead of the timbre-only voice-donor sample
+    /// (harness rule 32). Changes a paid request body, so the non-regression rule
+    /// keeps it OFF by default; the generation path is wired incrementally behind
+    /// this flag.
+    var lipSyncEnabled: Bool {
+        didSet { UserDefaults.standard.set(lipSyncEnabled, forKey: Self.lipSyncKey) }
     }
 
     private init() {
@@ -69,7 +94,12 @@ final class ModelPreferences {
         agentCharacterSlug = UserDefaults.standard.string(forKey: Self.characterSlugKey)
         // Opt-in: off until granted in first-run setup or Settings → Models.
         seedanceConsentGranted = UserDefaults.standard.object(forKey: Self.seedanceConsentKey) as? Bool ?? false
-        multiShotGroupingEnabled = UserDefaults.standard.object(forKey: Self.multiShotGroupingKey) as? Bool ?? false
+        // ON by default (2026-08-10): grouped renders can't drift internally.
+        multiShotGroupingEnabled = UserDefaults.standard.object(forKey: Self.multiShotGroupingKey) as? Bool ?? true
+        // On by default (probe-verified for Seedance R2V, applied only to that family).
+        imageSlotBindingEnabled = UserDefaults.standard.object(forKey: Self.imageSlotBindingKey) as? Bool ?? true
+        // Opt-in: changes a paid request body (audio_url), off until enabled.
+        lipSyncEnabled = UserDefaults.standard.object(forKey: Self.lipSyncKey) as? Bool ?? false
     }
 
     // MARK: - Enable / disable

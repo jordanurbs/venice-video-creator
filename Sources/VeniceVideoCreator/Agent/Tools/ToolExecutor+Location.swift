@@ -10,10 +10,11 @@ extension ToolExecutor {
         let description = args.string("description")
         let visualPrompt = args.string("prompt") ?? description ?? name
         let spatialAnchors = args.string("spatialAnchors")
+        let lightingNotes = args.string("lightingNotes")
 
         var location = LocationSpec(
             name: name, description: description, visualPrompt: visualPrompt,
-            spatialAnchors: spatialAnchors
+            spatialAnchors: spatialAnchors, lightingNotes: lightingNotes
         )
 
         var attachedRefs: [MediaAsset] = []
@@ -25,7 +26,9 @@ extension ToolExecutor {
             attachedRefs.append(a)
         }
 
-        let defaultCount = attachedRefs.isEmpty ? 2 : 0
+        // Harness parity: locations default to the full 3-angle ladder
+        // (wide/medium/detail) — one angle per ref, all depicting ONE space.
+        let defaultCount = attachedRefs.isEmpty ? Self.locationAngles.count : 0
         let count = min(4, max(0, args.int("count") ?? defaultCount))
 
         var generatedIds: [String] = []
@@ -33,22 +36,29 @@ extension ToolExecutor {
             guard AccountService.shared.hasVeniceKey else {
                 throw ToolError("Generating references requires a Venice API key. Tell the user to add it in Settings, or pass referenceMediaRefs instead.")
             }
-            guard let model = try resolveImageModelForLocation(args) else {
+            guard let model = try resolveImageModelForLocation(args, editor: editor) else {
                 throw ToolError("Image model catalog not loaded yet. Try again in a moment.")
             }
             let aspectRatio = args.string("aspectRatio") ?? model.aspectRatios.first ?? ""
-            let resolution = args.string("resolution") ?? Self.cheapestResolution(model)
-            let quality = model.qualities?.last
+            // Location plates are tier-2 references — full quality/resolution
+            // (harness quality floor), not the cheapest tier.
+            let resolution = args.string("resolution") ?? Self.referenceResolution(model)
+            let quality = args.string("quality") ?? Self.referenceQuality(model)
             if let err = model.validate(aspectRatio: aspectRatio, resolution: resolution, quality: quality, imageRefCount: 0, numImages: 1) {
                 throw ToolError(err)
             }
             let folderId = try resolveFolderId(args, editor: editor, fallbackReferences: attachedRefs)
             let provided = args.stringArray("angles")
             let angles = provided.isEmpty ? Self.locationAngles : provided
+            // Bake locked geography into EVERY angle (harness rule 49) so the
+            // ladder depicts one coherent space the video model can navigate.
+            let anchorsClause = spatialAnchors.map { ", fixed layout (never rearrange): \($0)" } ?? ""
+            // Front-load the plan's locked series style so plates match the look.
+            let styleLead = ShotPromptBuilder.stylePrefix(editor.shotPlan).map { "\($0). " } ?? ""
             for i in 0..<count {
                 let angle = angles[i % angles.count]
                 var genInput = GenerationInput(
-                    prompt: "\(visualPrompt), \(angle), \(Self.locationRefStyleSuffix)",
+                    prompt: "\(styleLead)\(visualPrompt), \(angle)\(anchorsClause), \(Self.locationRefStyleSuffix)",
                     model: model.id, duration: 0,
                     aspectRatio: aspectRatio, resolution: resolution, quality: quality
                 )
@@ -62,8 +72,8 @@ extension ToolExecutor {
         }
 
         location.referenceImageAssetIds = attachedRefs.map(\.id) + generatedIds
-        // Lock one canonical plate by default (see createCharacter); shots using
-        // this location follow the lock automatically.
+        // Lock the wide angle as primary by default. Location locks PRIORITIZE
+        // (the other angles still ride along) — see activeReferenceAssetIds.
         if location.lockedReferenceAssetId == nil, let first = location.referenceImageAssetIds.first {
             location.lockedReferenceAssetId = first
         }
@@ -83,7 +93,7 @@ extension ToolExecutor {
         }
         if !generatedIds.isEmpty {
             body["generatingAssetIds"] = generatedIds
-            body["hint"] = "Location references are generating; the first is locked as the canonical plate (the user can switch it later). Call wait_for_media with these asset ids, then inspect them. Attach the location to shots via locationIds."
+            body["hint"] = "Location angle ladder is generating (wide/medium/detail of ONE space). The wide angle is locked as primary; all angles ride shot generation together for environment coverage. Call wait_for_media with these asset ids, then inspect them. Attach the location to shots via locationIds."
         }
         return .ok(Self.jsonString(body) ?? "{}")
     }
@@ -100,6 +110,7 @@ extension ToolExecutor {
         if let description = args.string("description") { location.description = description }
         if let prompt = args.string("prompt") { location.visualPrompt = prompt }
         if args.keys.contains("spatialAnchors") { location.spatialAnchors = args.string("spatialAnchors") }
+        if args.keys.contains("lightingNotes") { location.lightingNotes = args.string("lightingNotes") }
 
         func validatedImageIds(_ key: String) throws -> [String]? {
             guard args[key] != nil else { return nil }
@@ -120,6 +131,13 @@ extension ToolExecutor {
         if let add = try validatedImageIds("addReferenceMediaRefs") {
             location.referenceImageAssetIds += add.filter { !location.referenceImageAssetIds.contains($0) }
             referencesChanged = !add.isEmpty || referencesChanged
+        }
+        // Detach without deleting: the assets stay in the media library.
+        if args["removeReferenceMediaRefs"] != nil {
+            let remove = Set(args.stringArray("removeReferenceMediaRefs"))
+            let before = location.referenceImageAssetIds.count
+            location.referenceImageAssetIds.removeAll { remove.contains($0) }
+            referencesChanged = location.referenceImageAssetIds.count != before || referencesChanged
         }
 
         if args.keys.contains("lockedReferenceMediaRef") {
@@ -155,18 +173,35 @@ extension ToolExecutor {
         return .ok(Self.jsonString(body) ?? "{}")
     }
 
+    // MARK: - remove_location
+
+    /// Deletes a location from the shot plan and detaches it from every shot.
+    /// Reference plates stay in the media library. Undoable as one step.
+    func removeLocation(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
+        let locationId = try args.requireString("locationId")
+        guard let location = editor.location(id: locationId) else {
+            throw ToolError("Location not found: \(locationId). Call get_shot_plan to list locations.")
+        }
+        let affectedShots = (editor.shotPlan?.shots ?? [])
+            .filter { $0.locationIds.contains(locationId) }
+            .map { $0.slug ?? String($0.id.prefix(6)) }
+        editor.removeLocation(id: locationId)
+        var body: [String: Any] = [
+            "removed": locationId,
+            "name": location.name,
+            "hint": "Location removed from the plan and detached from its shots. Its reference plates remain in the media library — call delete_media if they should be deleted too. The user can undo this.",
+        ]
+        if !affectedShots.isEmpty {
+            body["detachedFromShots"] = affectedShots
+        }
+        return .ok(Self.jsonString(body) ?? "{}")
+    }
+
     // MARK: - Helpers
 
-    private func resolveImageModelForLocation(_ args: [String: Any]) throws -> ImageModelConfig? {
-        if let id = args.string("model") {
-            guard let model = ImageModelConfig.allModels.first(where: { $0.id == id }) else {
-                throw ToolError("Unknown image model '\(id)'.")
-            }
-            guard ModelPreferences.shared.isEnabled(id) else {
-                throw ToolError("Image model '\(id)' is turned off in Settings → Models.")
-            }
-            return model
-        }
-        return ImageModelConfig.allModels.first { ModelPreferences.shared.isEnabled($0.id) }
+    /// Same resolution order as characters: explicit arg > bakeoff-locked
+    /// plan.referenceImageModel > first enabled.
+    private func resolveImageModelForLocation(_ args: [String: Any], editor: EditorViewModel? = nil) throws -> ImageModelConfig? {
+        try resolveImageModel(args, editor: editor)
     }
 }

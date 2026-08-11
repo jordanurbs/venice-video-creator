@@ -20,7 +20,7 @@ extension EditorViewModel {
     /// Selecting a shot claims the inspector: clip/asset selection is cleared so
     /// the routing (clip > shot > character > asset > project) lands on the shot.
     func selectShot(id: String) {
-        guard shot(id: id) != nil else { return }
+        guard let shot = shot(id: id) else { return }
         selectedShotId = id
         selectedCharacterId = nil
         selectedLocationId = nil
@@ -28,6 +28,17 @@ extension EditorViewModel {
         selectedGap = nil
         selectedTimelineRange = nil
         selectedMediaAssetIds = []
+        // Show the shot's visual state in the viewer: generated video when
+        // placed, else its storyboard panel — reviewing panels shot-by-shot
+        // is the storyboard workflow.
+        if let videoId = shot.videoAssetId,
+           let video = mediaAssets.first(where: { $0.id == videoId }),
+           !video.isGenerating {
+            openPreviewTab(for: video)
+        } else if let sbId = shot.storyboardAssetId,
+                  let panel = mediaAssets.first(where: { $0.id == sbId }) {
+            openPreviewTab(for: panel)
+        }
     }
 
     func deselectShot() {
@@ -187,16 +198,24 @@ extension EditorViewModel {
             editorToast = MediaPanelToast(message: "Add your Venice API key in Settings to generate references.")
             return
         }
-        guard let model = ImageModelConfig.allModels.first(where: { ModelPreferences.shared.isEnabled($0.id) }) else {
+        guard let model = referencePlateModel() else {
             editorToast = MediaPanelToast(message: "No enabled image model. Turn one on in Settings → Models.")
             return
         }
 
         let visualPrompt = character.effectiveVisualPrompt
         let aspectRatio = model.aspectRatios.first ?? ""
-        let resolution = ToolExecutor.cheapestResolution(model)
-        let quality = model.qualities?.last
-        let poses = [
+        // Reference sheets are tier-1 identity anchors — full quality/resolution.
+        let resolution = ToolExecutor.referenceResolution(model)
+        let quality = ToolExecutor.referenceQuality(model)
+        let styleLead = ShotPromptBuilder.stylePrefix(shotPlan).map { "\($0). " } ?? ""
+        // Match the create path: objects get the product-style suffix, the object
+        // pose ladder, and no-face provenance; people get the photoreal-portrait
+        // set. (The UI regenerate previously forced the person styling on both,
+        // so prop refs came back face-oriented and mis-provenanced.)
+        let isObject = character.kind == .object
+        let styleSuffix = isObject ? ToolExecutor.objectRefStyleSuffix : ToolExecutor.characterRefStyleSuffix
+        let poses = isObject ? ToolExecutor.objectPoses : [
             "front view, facing the camera, neutral expression",
             "three-quarter view",
             "profile side view",
@@ -211,11 +230,11 @@ extension EditorViewModel {
         for i in 0..<max(1, min(4, count)) {
             let pose = poses[i % poses.count]
             var genInput = GenerationInput(
-                prompt: "\(visualPrompt), \(pose), \(ToolExecutor.characterRefStyleSuffix)",
+                prompt: "\(styleLead)\(visualPrompt), \(pose), \(styleSuffix)",
                 model: model.id, duration: 0,
                 aspectRatio: aspectRatio, resolution: resolution, quality: quality
             )
-            genInput.hasFace = true
+            genInput.hasFace = !isObject
             let pid = ImageGenerationSubmission.make(
                 genInput: genInput, model: model, references: [],
                 name: "\(character.name) · ref \(i + 1)", folderId: folderId
@@ -228,7 +247,7 @@ extension EditorViewModel {
         // Old lock is gone; lock the first new take so one canonical look stays
         // set by default (the user can switch it in the inspector).
         updated.lockedReferenceAssetId = generatedIds.first
-        updated.provenance = CharacterProvenance(generationModel: model.id, hasFace: true)
+        updated.provenance = CharacterProvenance(generationModel: model.id, hasFace: !isObject)
         upsertCharacter(updated)
     }
 
@@ -236,7 +255,9 @@ extension EditorViewModel {
     /// the character's voice samples. Uses the character's locked voice when set,
     /// else the model's default. The sample can then be locked as the character's
     /// voice reference (attached as audio_url during shot generation).
-    func generateCharacterVoiceSample(characterId: String, voice: String? = nil, text: String? = nil) {
+    /// `lockIfUnset`: auditioning from the inspector picker passes false — trying
+    /// a voice must not silently lock it; locking is the explicit next step.
+    func generateCharacterVoiceSample(characterId: String, voice: String? = nil, text: String? = nil, lockIfUnset: Bool = true) {
         guard let character = character(id: characterId) else { return }
         guard AccountService.shared.hasVeniceKey else {
             editorToast = MediaPanelToast(message: "Add your Venice API key in Settings to generate a voice sample.")
@@ -279,7 +300,7 @@ extension EditorViewModel {
 
         var updated = character
         updated.voiceSampleAssetIds.append(pid)
-        if updated.lockedVoiceId == nil { updated.lockedVoiceId = chosenVoice }
+        if lockIfUnset, updated.lockedVoiceId == nil { updated.lockedVoiceId = chosenVoice }
         if updated.voiceModel == nil { updated.voiceModel = model.id }
         upsertCharacter(updated)
     }
@@ -350,6 +371,147 @@ extension EditorViewModel {
         return location
     }
 
+    // MARK: - Shot reset (start over)
+
+    /// Wipes a shot's produced state back to `planned`: removes its placed
+    /// timeline clip, clears video/storyboard links, takes, QA notes, and the
+    /// failure reason. The generated assets STAY in the media library (they
+    /// cost money; delete them explicitly if unwanted). One undoable step.
+    /// The prompt/summary/blocking are untouched — this resets production,
+    /// not planning.
+    func resetShot(id: String) {
+        guard let shot = shotPlan?.shot(id: id) else { return }
+        undoManager?.beginUndoGrouping()
+        // Remove the clip backing this shot from the timeline (placed runs).
+        if let assetId = shot.videoAssetId, let clipId = productionClipId(forAsset: assetId) {
+            removeClips(ids: [clipId], prune: true)
+        }
+        mutateShotPlan(actionName: "Start Shot Over") { plan in
+            guard let idx = plan.shots.firstIndex(where: { $0.id == id }) else { return }
+            plan.shots[idx].videoAssetId = nil
+            plan.shots[idx].storyboardAssetId = nil
+            plan.shots[idx].takes = []
+            plan.shots[idx].qaSummary = nil
+            plan.shots[idx].failureReason = nil
+            plan.shots[idx].status = .planned
+        }
+        undoManager?.setActionName("Start Shot Over")
+        undoManager?.endUndoGrouping()
+    }
+
+    /// Start-over for the whole production: every shot back to `planned` in
+    /// one undoable step. Library assets are kept.
+    func resetAllShots() {
+        guard let plan = shotPlan, !plan.shots.isEmpty else { return }
+        undoManager?.beginUndoGrouping()
+        let clipIds = plan.shots
+            .compactMap(\.videoAssetId)
+            .compactMap { productionClipId(forAsset: $0) }
+        if !clipIds.isEmpty {
+            removeClips(ids: Set(clipIds), prune: true)
+        }
+        mutateShotPlan(actionName: "Start Production Over") { plan in
+            for idx in plan.shots.indices {
+                plan.shots[idx].videoAssetId = nil
+                plan.shots[idx].storyboardAssetId = nil
+                plan.shots[idx].takes = []
+                plan.shots[idx].qaSummary = nil
+                plan.shots[idx].failureReason = nil
+                plan.shots[idx].status = .planned
+            }
+        }
+        undoManager?.setActionName("Start Production Over")
+        undoManager?.endUndoGrouping()
+    }
+
+    /// Scrubs deleted media-asset ids out of the shot plan so cast/location
+    /// panes never show ghost references. Deleting media always cleaned the
+    /// timeline but historically left the plan pointing at gone assets — the
+    /// "assets randomly unlinked" bug: every delete_media / folder delete of a
+    /// reference image silently orphaned its entity (2026-08-07).
+    /// Registers its own undo via mutateShotPlan; callers run in the same
+    /// runloop undo group as their media mutation, so one Undo restores both.
+    func detachAssetsFromShotPlan(ids: Set<String>) {
+        guard !ids.isEmpty, let plan = mediaManifest.shotPlan else { return }
+        // Only mutate when something actually references a deleted id.
+        let referenced = plan.characters.contains { c in
+            c.referenceImageAssetIds.contains(where: ids.contains)
+                || c.voiceSampleAssetIds.contains(where: ids.contains)
+                || (c.voiceReferenceAssetId.map(ids.contains) ?? false)
+        } || plan.locations.contains { l in
+            l.referenceImageAssetIds.contains(where: ids.contains)
+        } || plan.shots.contains { s in
+            (s.audioReferenceAssetId.map(ids.contains) ?? false)
+                || (s.storyboardAssetId.map(ids.contains) ?? false)
+                || (s.videoAssetId.map(ids.contains) ?? false)
+        }
+        guard referenced else { return }
+
+        mutateShotPlan(actionName: "Detach Deleted Media") { plan in
+            for i in plan.characters.indices {
+                plan.characters[i].referenceImageAssetIds.removeAll { ids.contains($0) }
+                if let locked = plan.characters[i].lockedReferenceAssetId, ids.contains(locked) {
+                    plan.characters[i].lockedReferenceAssetId = plan.characters[i].referenceImageAssetIds.first
+                }
+                plan.characters[i].voiceSampleAssetIds.removeAll { ids.contains($0) }
+                if let voiceRef = plan.characters[i].voiceReferenceAssetId, ids.contains(voiceRef) {
+                    plan.characters[i].voiceReferenceAssetId = nil
+                }
+            }
+            for i in plan.locations.indices {
+                plan.locations[i].referenceImageAssetIds.removeAll { ids.contains($0) }
+                if let locked = plan.locations[i].lockedReferenceAssetId, ids.contains(locked) {
+                    plan.locations[i].lockedReferenceAssetId = plan.locations[i].referenceImageAssetIds.first
+                }
+            }
+            for i in plan.shots.indices {
+                if let audioRef = plan.shots[i].audioReferenceAssetId, ids.contains(audioRef) {
+                    plan.shots[i].audioReferenceAssetId = nil
+                }
+                if let sb = plan.shots[i].storyboardAssetId, ids.contains(sb) {
+                    plan.shots[i].storyboardAssetId = nil
+                    // Panel gone: the shot needs a new one before production.
+                    if plan.shots[i].status == .storyboarded { plan.shots[i].status = .planned }
+                }
+                if let video = plan.shots[i].videoAssetId, ids.contains(video) {
+                    plan.shots[i].videoAssetId = nil
+                }
+            }
+        }
+    }
+
+    /// One-shot heal for plans that already carry ghost ids (created before
+    /// deletion started detaching, 2026-08-07): scrubs every plan reference to
+    /// an asset that exists in neither the live library nor the manifest.
+    /// Called after project restore, when the real asset set is known.
+    /// Manifest entries count as existing so a missing-file asset (offline
+    /// disk, interrupted download) is NOT detached — it can still be relinked.
+    func reconcileShotPlanWithMediaLibrary() {
+        guard let plan = mediaManifest.shotPlan else { return }
+        var known = Set(mediaAssets.map(\.id))
+        known.formUnion(mediaManifest.entries.map(\.id))
+
+        var referenced = Set<String>()
+        for c in plan.characters {
+            referenced.formUnion(c.referenceImageAssetIds)
+            referenced.formUnion(c.voiceSampleAssetIds)
+            if let v = c.voiceReferenceAssetId { referenced.insert(v) }
+        }
+        for l in plan.locations {
+            referenced.formUnion(l.referenceImageAssetIds)
+        }
+        for s in plan.shots {
+            if let a = s.audioReferenceAssetId { referenced.insert(a) }
+            if let sb = s.storyboardAssetId { referenced.insert(sb) }
+            if let v = s.videoAssetId { referenced.insert(v) }
+        }
+
+        let ghosts = referenced.subtracting(known)
+        guard !ghosts.isEmpty else { return }
+        Log.project.notice("reconcile: detaching \(ghosts.count) ghost asset id(s) from the shot plan")
+        detachAssetsFromShotPlan(ids: ghosts)
+    }
+
     func removeLocation(id: String) {
         mutateShotPlan(actionName: "Remove Location") { plan in
             plan.locations.removeAll { $0.id == id }
@@ -357,6 +519,38 @@ extension EditorViewModel {
                 plan.shots[i].locationIds.removeAll { $0 == id }
             }
         }
+    }
+
+    /// Removes a single reference plate from a location: detaches it from the
+    /// location's reference set (repointing the canonical lock to the first
+    /// remaining plate if the removed one was locked) and deletes the underlying
+    /// media asset. Grouped into one undoable step.
+    func removeLocationReference(locationId: String, assetId: String) {
+        guard var location = location(id: locationId),
+              location.referenceImageAssetIds.contains(assetId) else { return }
+        undoManager?.beginUndoGrouping()
+        location.referenceImageAssetIds.removeAll { $0 == assetId }
+        if location.lockedReferenceAssetId == assetId {
+            location.lockedReferenceAssetId = location.referenceImageAssetIds.first
+        }
+        upsertLocation(location)
+        deleteMediaAssets(ids: [assetId])
+        undoManager?.setActionName("Remove Reference Plate")
+        undoManager?.endUndoGrouping()
+    }
+
+    /// The image model reference plates should be generated with: the
+    /// bakeoff-locked `plan.referenceImageModel` when it's set and still enabled,
+    /// otherwise the first enabled model. Keeps the panels' Regenerate buttons in
+    /// sync with the agent tool path (`ToolExecutor.resolveImageModel`), which
+    /// already prioritizes the bakeoff winner so every entity shares one look.
+    func referencePlateModel() -> ImageModelConfig? {
+        if let locked = mediaManifest.shotPlan?.referenceImageModel,
+           let model = ImageModelConfig.allModels.first(where: { $0.id == locked }),
+           ModelPreferences.shared.isEnabled(locked) {
+            return model
+        }
+        return ImageModelConfig.allModels.first { ModelPreferences.shared.isEnabled($0.id) }
     }
 
     /// Location counterpart of `regenerateCharacterReferences`: fresh angle set
@@ -367,16 +561,21 @@ extension EditorViewModel {
             editorToast = MediaPanelToast(message: "Add your Venice API key in Settings to generate references.")
             return
         }
-        guard let model = ImageModelConfig.allModels.first(where: { ModelPreferences.shared.isEnabled($0.id) }) else {
+        guard let model = referencePlateModel() else {
             editorToast = MediaPanelToast(message: "No enabled image model. Turn one on in Settings → Models.")
             return
         }
 
         let visualPrompt = location.effectiveVisualPrompt
         let aspectRatio = model.aspectRatios.first ?? ""
-        let resolution = ToolExecutor.cheapestResolution(model)
-        let quality = model.qualities?.last
+        // Location plates are tier-2 references — full quality/resolution.
+        let resolution = ToolExecutor.referenceResolution(model)
+        let quality = ToolExecutor.referenceQuality(model)
+        let styleLead = ShotPromptBuilder.stylePrefix(shotPlan).map { "\($0). " } ?? ""
         let angles = ToolExecutor.locationAngles
+        // Match the create path: bake the locked geography into every angle so
+        // regenerated plates keep the same fixed layout (harness rule 49).
+        let anchorsClause = location.spatialAnchors.map { ", fixed layout (never rearrange): \($0)" } ?? ""
         let folderId = location.referenceImageAssetIds
             .compactMap { id in mediaAssets.first { $0.id == id }?.folderId }
             .first
@@ -385,7 +584,7 @@ extension EditorViewModel {
         for i in 0..<max(1, min(4, count)) {
             let angle = angles[i % angles.count]
             var genInput = GenerationInput(
-                prompt: "\(visualPrompt), \(angle), \(ToolExecutor.locationRefStyleSuffix)",
+                prompt: "\(styleLead)\(visualPrompt), \(angle)\(anchorsClause), \(ToolExecutor.locationRefStyleSuffix)",
                 model: model.id, duration: 0,
                 aspectRatio: aspectRatio, resolution: resolution, quality: quality
             )
@@ -486,7 +685,8 @@ extension ShotPlan {
                 out += "- **Locations:** \(names.joined(separator: ", "))\n"
             }
             if let blocking = shot.blocking, !blocking.isEmpty { out += "- **Blocking:** \(blocking)\n" }
-            if !shot.prompt.isEmpty { out += "- **Prompt:** \(shot.prompt)\n" }
+            if !shot.prompt.isEmpty { out += "- **Video prompt:** \(shot.prompt)\n" }
+            if let sb = shot.storyboardPrompt, !sb.isEmpty { out += "- **Storyboard prompt:** \(sb)\n" }
             for line in shot.dialogue {
                 let who = line.characterId.flatMap { character(id: $0)?.name } ?? line.speaker ?? "Speaker"
                 let tag = line.voiceOver ? " (V.O.)" : ""

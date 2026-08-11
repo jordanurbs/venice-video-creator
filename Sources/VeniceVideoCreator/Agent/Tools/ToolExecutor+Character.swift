@@ -1,6 +1,103 @@
 import Foundation
 
 extension ToolExecutor {
+    // MARK: - reference_bakeoff
+
+    /// Harness-style model bakeoff for reference imagery: one identical test
+    /// prompt across several image models → user compares → `chooseModel`
+    /// locks the winner into `plan.referenceImageModel`, which
+    /// create_character / create_location then use for every ref generation.
+    func referenceBakeoff(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
+        // Phase 2: lock the user's chosen model — no generation.
+        if let winner = args.string("chooseModel") {
+            // The choice belongs to the USER. Agents were locking a winner
+            // themselves right after generating takes (2026-08-07 run) —
+            // refuse unless the call attests the user picked, with their words.
+            guard args.bool("userConfirmed") == true,
+                  let quote = args.string("userChoiceQuote"), !quote.isEmpty else {
+                throw ToolError(
+                    "chooseModel is the USER's decision, not yours. Show them the finished bakeoff takes "
+                    + "(they're in the media panel, named 'Bakeoff · <model>'), ask which look they want, and WAIT. "
+                    + "When they answer, call again with chooseModel, userConfirmed=true, and userChoiceQuote "
+                    + "set to their exact words (e.g. 'the second one' / 'the Seedream look')."
+                )
+            }
+            guard let model = ImageModelConfig.allModels.first(where: { $0.id == winner }) else {
+                throw ToolError("Unknown image model '\(winner)'.")
+            }
+            try ensureEnabled(model.id, kind: "image")
+            editor.mutateShotPlan(actionName: "Lock Reference Model") { plan in
+                plan.referenceImageModel = model.id
+            }
+            return .ok(Self.jsonString([
+                "referenceImageModel": model.id,
+                "hint": "Locked. create_character / create_location now generate every reference image with \(model.displayName). Existing references are unchanged — regenerate any entity whose refs should adopt the new look.",
+            ] as [String: Any]) ?? "{}")
+        }
+
+        // Phase 1: generate the same test portrait on every candidate model.
+        guard AccountService.shared.hasVeniceKey else {
+            throw ToolError("The bakeoff generates paid images — tell the user to add a Venice API key in Settings.")
+        }
+        let prompt = try args.requireString("prompt")
+        let requested = args.stringArray("models")
+        let enabled = ImageModelConfig.allModels.filter { ModelPreferences.shared.isEnabled($0.id) }
+        let candidates: [ImageModelConfig]
+        if requested.isEmpty {
+            candidates = Array(enabled.prefix(6))
+        } else {
+            candidates = try requested.map { id in
+                guard let m = ImageModelConfig.allModels.first(where: { $0.id == id }) else {
+                    throw ToolError("Unknown image model '\(id)'. Enabled: \(enabled.map(\.id).joined(separator: ", "))")
+                }
+                try ensureEnabled(id, kind: "image")
+                return m
+            }
+        }
+        guard candidates.count >= 2 else {
+            throw ToolError("A bakeoff needs at least 2 image models. Enabled: \(enabled.map(\.id).joined(separator: ", "))")
+        }
+
+        let folderId = try resolveFolderId(args, editor: editor)
+        let fullPrompt = "\(prompt), \(Self.characterRefStyleSuffix)"
+        var takes: [[String: Any]] = []
+        for model in candidates {
+            let aspectRatio = args.string("aspectRatio").flatMap { model.aspectRatios.contains($0) ? $0 : nil }
+                ?? (model.aspectRatios.contains("2:3") ? "2:3" : model.aspectRatios.first ?? "")
+            let resolution = Self.cheapestResolution(model)
+            let quality = model.qualities?.last
+            if let err = model.validate(aspectRatio: aspectRatio, resolution: resolution, quality: quality, imageRefCount: 0, numImages: 1) {
+                takes.append(["model": model.id, "skipped": err])
+                continue
+            }
+            var genInput = GenerationInput(
+                prompt: fullPrompt, model: model.id, duration: 0,
+                aspectRatio: aspectRatio, resolution: resolution, quality: quality
+            )
+            genInput.hasFace = true
+            let pid = ImageGenerationSubmission.make(
+                genInput: genInput, model: model, references: [],
+                name: "Bakeoff · \(model.displayName)", folderId: folderId
+            ).submit(service: editor.generationService, projectURL: editor.projectURL, editor: editor)
+            takes.append(["model": model.id, "displayName": model.displayName, "assetId": pid])
+        }
+
+        editor.mediaPanelVisible = true
+        editor.showMediaPanelMediaTab()
+
+        let generating = takes.compactMap { $0["assetId"] as? String }
+        guard !generating.isEmpty else {
+            throw ToolError("No candidate model accepted the bakeoff request. Check enabled image models.")
+        }
+        let body: [String: Any] = [
+            "prompt": prompt,
+            "takes": takes,
+            "generatingAssetIds": generating,
+            "hint": "Bakeoff takes are generating (named 'Bakeoff · <model>' in the media panel). wait_for_media on generatingAssetIds, then ASK THE USER to compare the takes and pick a model — do NOT pick for them. When they choose, call reference_bakeoff again with chooseModel=<winner> to lock it for all reference generation.",
+        ]
+        return .ok(Self.jsonString(body) ?? "{}")
+    }
+
     // MARK: - create_character
 
     /// Creates a recurring character and (optionally) generates front / three-quarter
@@ -35,21 +132,26 @@ extension ToolExecutor {
             guard AccountService.shared.hasVeniceKey else {
                 throw ToolError("Generating references requires a Venice API key. Tell the user to add it in Settings, or pass referenceMediaRefs instead.")
             }
-            guard let model = try resolveImageModel(args) else {
+            guard let model = try resolveImageModel(args, editor: editor) else {
                 throw ToolError("Image model catalog not loaded yet. Try again in a moment.")
             }
             modelUsed = model.id
             let aspectRatio = args.string("aspectRatio") ?? model.aspectRatios.first ?? ""
-            let resolution = args.string("resolution") ?? Self.cheapestResolution(model)
-            let quality = model.qualities?.last
+            // Reference sheets are tier-1 identity anchors — full quality/resolution
+            // (harness quality floor), not the cheapest tier.
+            let resolution = args.string("resolution") ?? Self.referenceResolution(model)
+            let quality = args.string("quality") ?? Self.referenceQuality(model)
             if let err = model.validate(aspectRatio: aspectRatio, resolution: resolution, quality: quality, imageRefCount: 0, numImages: 1) {
                 throw ToolError(err)
             }
             let folderId = try resolveFolderId(args, editor: editor, fallbackReferences: attachedRefs)
             let styleSuffix = kind == .object ? Self.objectRefStyleSuffix : Self.characterRefStyleSuffix
+            // Front-load the plan's locked series style so sheets match the
+            // production look, not just the generic cinematic-still suffix.
+            let styleLead = ShotPromptBuilder.stylePrefix(editor.shotPlan).map { "\($0). " } ?? ""
             let poses = Self.referencePoses(args, count: count, kind: kind)
             for (i, pose) in poses.enumerated() {
-                let fullPrompt = "\(visualPrompt), \(pose), \(styleSuffix)"
+                let fullPrompt = "\(styleLead)\(visualPrompt), \(pose), \(styleSuffix)"
                 var genInput = GenerationInput(
                     prompt: fullPrompt, model: model.id, duration: 0,
                     aspectRatio: aspectRatio, resolution: resolution, quality: quality
@@ -129,6 +231,13 @@ extension ToolExecutor {
             character.referenceImageAssetIds += add.filter { !character.referenceImageAssetIds.contains($0) }
             referencesChanged = !add.isEmpty || referencesChanged
         }
+        // Detach without deleting: the assets stay in the media library.
+        if args["removeReferenceMediaRefs"] != nil {
+            let remove = Set(args.stringArray("removeReferenceMediaRefs"))
+            let before = character.referenceImageAssetIds.count
+            character.referenceImageAssetIds.removeAll { remove.contains($0) }
+            referencesChanged = character.referenceImageAssetIds.count != before || referencesChanged
+        }
 
         // Lock/unlock the canonical reference. Explicit null/"" clears the lock.
         if args.keys.contains("lockedReferenceMediaRef") {
@@ -185,6 +294,31 @@ extension ToolExecutor {
         return .ok(Self.jsonString(body) ?? "{}")
     }
 
+    // MARK: - remove_character
+
+    /// Deletes a character/object from the shot plan and detaches it from every
+    /// shot. Reference images stay in the media library (delete_media removes
+    /// them if truly unwanted). Undoable as one step.
+    func removeCharacter(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
+        let characterId = try args.requireString("characterId")
+        guard let character = editor.character(id: characterId) else {
+            throw ToolError("Character not found: \(characterId). Call get_shot_plan to list characters.")
+        }
+        let affectedShots = (editor.shotPlan?.shots ?? [])
+            .filter { $0.characterIds.contains(characterId) }
+            .map { $0.slug ?? String($0.id.prefix(6)) }
+        editor.removeCharacter(id: characterId)
+        var body: [String: Any] = [
+            "removed": characterId,
+            "name": character.name,
+            "hint": "Character removed from the plan and detached from its shots. Its reference images remain in the media library — call delete_media if they should be deleted too. The user can undo this.",
+        ]
+        if !affectedShots.isEmpty {
+            body["detachedFromShots"] = affectedShots
+        }
+        return .ok(Self.jsonString(body) ?? "{}")
+    }
+
     // MARK: - audition_voices
 
     /// Generates one short TTS sample per candidate voice so the user/agent can pick one.
@@ -205,12 +339,16 @@ extension ToolExecutor {
         let voices: [String]
         if !requested.isEmpty {
             for v in requested where !allVoices.contains(v) {
-                let sample = Array(allVoices.prefix(10)).joined(separator: ", ")
-                throw ToolError("Voice '\(v)' isn't offered by \(model.id). Available (sample): \(sample)")
+                throw ToolError("Voice '\(v)' isn't offered by \(model.id). Available: \(allVoices.joined(separator: ", "))")
             }
             voices = requested
         } else {
-            voices = Array(allVoices.prefix(count))
+            // No explicit choice: don't silently sample the first N voices —
+            // voice order is arbitrary (gender/accent lottery; a mob enforcer
+            // got a British voice this way). Make the agent pick deliberately.
+            throw ToolError(
+                "Pass 'voices' explicitly — pick candidates that fit the character's persona (age, gender, accent, temperament) instead of sampling arbitrary ones. \(model.id) offers: \(allVoices.joined(separator: ", ")). If none obviously fit, audition a spread of \(count) and say why."
+            )
         }
 
         let character = args.string("characterId").flatMap { editor.character(id: $0) }
@@ -383,19 +521,27 @@ extension ToolExecutor {
         "detail close-up",
     ]
 
-    /// Location counterpart: environment plates, no people.
+    /// Location counterpart: environment plates. These must be the EMPTY space —
+    /// image models kept populating them with the scene's subjects (a vehicle
+    /// appeared in 2/3 plates on 2026-08-07). The existing "no people" clause
+    /// worked (no people rendered), so the same positive-negation covers vehicles
+    /// and props once they're named explicitly. Keep the space unoccupied so the
+    /// plate reads as a set the video model can populate, not a still with action.
     static let locationRefStyleSuffix =
-        "cinematic film still, photorealistic, location establishing plate, no people, consistent environment across shots, natural light"
+        "cinematic film still, photorealistic, location establishing plate, completely empty and unoccupied, no people, no vehicles, no cars, no animals, no props, no moving subjects, deserted environment, consistent environment across shots, natural light"
 
-    /// Default angle ladder for location reference generation.
+    /// Default angle ladder for location reference generation — ports the
+    /// harness's `LOCATION_ANGLES` (wide/medium/detail): three complementary
+    /// views of ONE coherent space, so downstream reference stacks can hand
+    /// the video model an environment it can navigate rather than a single
+    /// fixed angle it reproduces in every take.
     static let locationAngles = [
-        "wide establishing shot",
-        "medium shot from the main entrance perspective",
-        "detail shot of a distinctive feature",
-        "reverse angle",
+        "wide establishing shot of the location, full environment visible, cinematic widescreen framing",
+        "medium shot of the location, mid-distance framing showing the key features and spatial layout",
+        "close detail shot of a distinctive feature of the location, texture and material detail",
     ]
 
-    private func resolveImageModel(_ args: [String: Any]) throws -> ImageModelConfig? {
+    func resolveImageModel(_ args: [String: Any], editor: EditorViewModel? = nil) throws -> ImageModelConfig? {
         if let id = args.string("model") {
             guard let model = ImageModelConfig.allModels.first(where: { $0.id == id }) else {
                 throw ToolError("Unknown image model '\(id)'.")
@@ -403,6 +549,13 @@ extension ToolExecutor {
             guard ModelPreferences.shared.isEnabled(id) else {
                 throw ToolError("Image model '\(id)' is turned off in Settings → Models.")
             }
+            return model
+        }
+        // Bakeoff winner: the plan's locked reference-image model wins over
+        // "first enabled" so every entity's refs share one look.
+        if let locked = editor?.shotPlan?.referenceImageModel,
+           let model = ImageModelConfig.allModels.first(where: { $0.id == locked }),
+           ModelPreferences.shared.isEnabled(locked) {
             return model
         }
         return ImageModelConfig.allModels.first { ModelPreferences.shared.isEnabled($0.id) }

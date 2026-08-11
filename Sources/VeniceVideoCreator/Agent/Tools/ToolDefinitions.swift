@@ -57,10 +57,14 @@ enum ToolName: String, CaseIterable, Sendable {
     case saveShotPlan = "save_shot_plan"
     case getShotPlan = "get_shot_plan"
     case updateShots = "update_shots"
+    case resetShots = "reset_shots"
+    case referenceBakeoff = "reference_bakeoff"
     case createCharacter = "create_character"
     case updateCharacter = "update_character"
+    case removeCharacter = "remove_character"
     case createLocation = "create_location"
     case updateLocation = "update_location"
+    case removeLocation = "remove_location"
     case auditionVoices = "audition_voices"
     case lockVoice = "lock_voice"
     case storyboardShots = "storyboard_shots"
@@ -1033,6 +1037,7 @@ enum ToolDefinitions {
                 properties: [
                     "title": ["type": "string", "description": "Production title."],
                     "logline": ["type": "string", "description": "One-line premise (optional)."],
+                    "styleBlock": ["type": "string", "description": "ALWAYS author this: the series' locked visual system in ONE sentence — medium, palette, lighting language, and lens character (e.g. 'grainy 16mm docudrama, desaturated teal-and-amber palette, hard low-key key light, 35mm anamorphic shallow focus'). Front-loaded into every storyboard, video, and reference-image prompt so the whole production shares one look instead of drifting per shot. Derive it from the logline and the user's intent."],
                     "aspectRatio": ["type": "string", "description": "e.g. '16:9', '9:16'. Default '16:9'."],
                     "resolution": ["type": "string", "description": "e.g. '720p', '1080p'. Default '1080p'."],
                     "defaultModel": ["type": "string", "description": "Default video model slug for shots without a modelOverride. Optional — the orchestrator routes a sensible default otherwise."],
@@ -1067,7 +1072,8 @@ enum ToolDefinitions {
                                 "shot": shotSchema(),
                                 "slug": ["type": "string"],
                                 "summary": ["type": "string"],
-                                "prompt": ["type": "string"],
+                                "prompt": ["type": "string", "description": "The VIDEO prompt (camera + motion; motionless prompts are refused at production)."],
+                                "storyboardPrompt": ["type": "string", "description": "Separate storyboard-panel prompt. Pass empty/null to clear (panels then derive from the video prompt)."],
                                 "durationSeconds": ["type": "number"],
                                 "motionLevel": ["type": "string", "enum": ShotMotionLevel.allCases.map(\.rawValue)],
                                 "transition": ["type": "string", "enum": ShotTransition.allCases.map(\.rawValue)],
@@ -1087,6 +1093,30 @@ enum ToolDefinitions {
                     ],
                 ],
                 required: ["operations"]
+            )
+        ),
+        AgentTool(
+            name: .resetShots,
+            description: "Start over after a bad production run: resets shots to 'planned' — placed clips come off the timeline, take history, storyboard links, and QA notes are cleared. Prompts and summaries are NOT touched; generated media stays in the library (delete_media to purge). Pass shotIds for specific shots, omit to reset the whole plan. Undoable. Typical recovery: reset_shots → rewrite the failed prompts as proper VIDEO prompts via update_shots → produce_shots again.",
+            inputSchema: objectSchema(
+                properties: [
+                    "shotIds": ["type": "array", "items": ["type": "string"], "description": "Shots to reset. Omit to reset every shot in the plan."],
+                ]
+            )
+        ),
+        AgentTool(
+            name: .referenceBakeoff,
+            description: "Run a reference-image model BAKEOFF before creating a production's cast: generate the SAME test portrait prompt across every enabled image model (or a passed subset), so the user can compare looks side by side and pick the model used for ALL of the project's reference images (characters, locations, objects). Async — wait_for_media on the returned asset ids, then TELL THE USER to review the takes in the media panel and say which model they prefer; then call it again with 'chooseModel' to lock the winner into the plan (plan.referenceImageModel). create_character / create_location then default to the locked model. ALWAYS run this before the first create_character of a new production unless the user already named a model.",
+            inputSchema: objectSchema(
+                properties: [
+                    "prompt": ["type": "string", "description": "Test subject to render identically on every model — usually the production's main character description. Required unless choosing."],
+                    "models": ["type": "array", "items": ["type": "string"], "description": "Image model slugs to include. Omit for all enabled image models (capped at 6)."],
+                    "aspectRatio": ["type": "string", "description": "Aspect ratio for every take (default 2:3 portrait)."],
+                    "chooseModel": ["type": "string", "description": "Locks this model as the project's reference-image model (plan.referenceImageModel). ONLY after the user explicitly picked — the call is REFUSED without userConfirmed + userChoiceQuote. Never pick for them."],
+                    "userConfirmed": ["type": "boolean", "description": "Required with chooseModel: attests the USER (not you) picked this winner after reviewing the takes."],
+                    "userChoiceQuote": ["type": "string", "description": "Required with chooseModel: the user's exact words choosing the winner (e.g. 'the second one', 'the Seedream look')."],
+                    "folderId": ["type": "string", "description": "Folder for the bakeoff takes."],
+                ]
             )
         ),
         AgentTool(
@@ -1120,6 +1150,7 @@ enum ToolDefinitions {
                     "prompt": ["type": "string", "description": "New visual prompt for reference [re]generation."],
                     "referenceMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Image asset ids that REPLACE the character's reference set."],
                     "addReferenceMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Image asset ids to APPEND to the character's reference set."],
+                    "removeReferenceMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Image asset ids to DETACH from the character's reference set (the assets stay in the media library; use delete_media to also delete them). A removed locked reference clears the lock."],
                     "lockedReferenceMediaRef": ["type": "string", "description": "Lock ONE attached reference as the character's canonical look — generation then uses only it (recommended when references show different-looking takes). Pass empty/null to unlock."],
                     "voiceReferenceMediaRef": ["type": "string", "description": "Lock ONE audio asset as the character's canonical voice reference — shots with this character then attach it as audio_url by default on audio-input models (Seedance R2V, Wan 2.5/2.6/2.7). Pass empty/null to unlock."],
                 ],
@@ -1127,14 +1158,25 @@ enum ToolDefinitions {
             )
         ),
         AgentTool(
+            name: .removeCharacter,
+            description: "Remove a character or object from the shot plan entirely: deletes the Cast & Objects entry and detaches its id from every shot's characterIds. Its reference images and voice samples STAY in the media library — call delete_media with those asset ids if the user wants them gone too. Use for duplicates, abandoned characters, or entities created by mistake. Undoable. To merely change references or looks, use update_character instead.",
+            inputSchema: objectSchema(
+                properties: [
+                    "characterId": ["type": "string", "description": "Character id from get_shot_plan."],
+                ],
+                required: ["characterId"]
+            )
+        ),
+        AgentTool(
             name: .createLocation,
-            description: "Create a recurring location/setting for the production and (by default) generate 2 reference plates (wide establishing + entrance perspective) so environments stay consistent across shots. Pass name plus a visual 'prompt' (or 'description'). Pass count/angles to control views, or referenceMediaRefs to attach existing images instead. Async — wait_for_media on generatingAssetIds. Attach to shots via locationIds; shot generation feeds the location's references alongside character references.",
+            description: "Create a recurring location/setting for the production and (by default) generate its 3-angle reference ladder — wide establishing, medium spatial-layout, and detail shots of ONE coherent space — so environments stay consistent across shots while giving the video model multiple views to navigate. ALWAYS pass spatialAnchors (3-5 named landmarks with fixed relative positions); they are baked into every angle. Pass name plus a visual 'prompt' (or 'description'). Pass count/angles to override views, or referenceMediaRefs to attach existing images instead. Async — wait_for_media on generatingAssetIds. Attach to shots via locationIds; shot generation feeds the ladder alongside character references (identity first, storyboard panel protected, then location angles).",
             inputSchema: objectSchema(
                 properties: [
                     "name": ["type": "string", "description": "Location name (e.g. 'Dale's kitchen', 'Mill interior')."],
                     "description": ["type": "string", "description": "Setting notes (also used as the image prompt if 'prompt' is omitted)."],
                     "prompt": ["type": "string", "description": "Visual prompt for the reference plates (architecture, era, mood, palette)."],
                     "spatialAnchors": ["type": "string", "description": "The location's locked geography: 3–5 named landmarks and their fixed relative positions (e.g. 'bar counter along the left wall; entrance door on the right; pool table center-back'). Injected as a 'Fixed layout (never rearrange)' clause into every shot at this location so geography never mirrors or reshuffles between generations. Strongly recommended for locations used across multiple shots."],
+                    "lightingNotes": ["type": "string", "description": "The location's locked lighting: time of day, key/fill direction, colour temperature and mood (e.g. 'late-afternoon sun through west windows, warm key from screen-left, cool shadows, practical neon fill'). Injected into storyboard panel prompts so consecutive same-location panels don't drift in time of day or mood."],
                     "count": ["type": "integer", "description": "Number of reference plates to generate (0–4). Default 2, or 0 when referenceMediaRefs are supplied."],
                     "angles": ["type": "array", "items": ["type": "string"], "description": "Optional angle descriptors, one per plate (e.g. 'wide establishing shot')."],
                     "referenceMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Existing image asset ids to attach instead of (or in addition to) generating."],
@@ -1156,22 +1198,34 @@ enum ToolDefinitions {
                     "description": ["type": "string", "description": "New setting notes."],
                     "prompt": ["type": "string", "description": "New visual prompt for reference [re]generation."],
                     "spatialAnchors": ["type": "string", "description": "Set/replace the location's locked geography (3–5 named landmarks with fixed relative positions). Pass empty/null to clear."],
+                    "lightingNotes": ["type": "string", "description": "Set/replace the location's locked lighting (time of day, key/fill direction, colour temperature, mood) injected into storyboard panels. Pass empty/null to clear."],
                     "referenceMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Image asset ids that REPLACE the location's reference set."],
                     "addReferenceMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Image asset ids to APPEND to the location's reference set."],
+                    "removeReferenceMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Image asset ids to DETACH from the location's reference set (the assets stay in the media library; use delete_media to also delete them). A removed locked reference clears the lock."],
                     "lockedReferenceMediaRef": ["type": "string", "description": "Lock ONE attached reference as the location's canonical look. Pass empty/null to unlock."],
                 ],
                 required: ["locationId"]
             )
         ),
         AgentTool(
+            name: .removeLocation,
+            description: "Remove a location from the shot plan entirely: deletes the Locations entry and detaches its id from every shot's locationIds. Its reference plates STAY in the media library — call delete_media with those asset ids if the user wants them gone too. Use for duplicate or abandoned locations (e.g. an empty duplicate created by mistake). Undoable. To merely change plates or the prompt, use update_location instead.",
+            inputSchema: objectSchema(
+                properties: [
+                    "locationId": ["type": "string", "description": "Location id from get_shot_plan."],
+                ],
+                required: ["locationId"]
+            )
+        ),
+        AgentTool(
             name: .auditionVoices,
-            description: "Generate one short text-to-speech sample per candidate voice so the user can choose one for a character. Uses an enabled TTS model; pass specific 'voices' or let it pick the first few. Samples are async — wait_for_media on the sample ids, then inspect_media to listen. This does NOT lock a voice; call lock_voice with the winner afterward.",
+            description: "Generate one short text-to-speech sample per candidate voice so the user can choose one for a character. Uses an enabled TTS model. REQUIRED: pass 'voices' you chose deliberately to FIT THE CHARACTER — match age, gender, accent, and temperament to the persona (list_models filter='audio' returns each TTS model's full voice list). Never audition arbitrary voices. Samples are async — wait_for_media on the sample ids, then inspect_media to listen. This does NOT lock a voice; call lock_voice with the winner afterward.",
             inputSchema: objectSchema(
                 properties: [
                     "characterId": ["type": "string", "description": "Character to audition for (labels the samples and the default line)."],
                     "model": ["type": "string", "description": "TTS model slug (defaults to an enabled speech model with voices)."],
-                    "voices": ["type": "array", "items": ["type": "string"], "description": "Specific voice ids to try. Omit to use the first few the model offers."],
-                    "count": ["type": "integer", "description": "How many voices to sample when 'voices' is omitted (1–8, default 4)."],
+                    "voices": ["type": "array", "items": ["type": "string"], "description": "Voice ids chosen to fit the character's persona (age/gender/accent/temperament). Effectively required — omitting it returns the full voice list and asks you to choose."],
+                    "count": ["type": "integer", "description": "How many voices to sample (1–8, default 4)."],
                     "text": ["type": "string", "description": "The line each voice speaks. Defaults to a generic self-introduction."],
                     "folderId": ["type": "string", "description": "Folder to place the samples in."],
                 ]
@@ -1192,7 +1246,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .storyboardShots,
-            description: "Generate a storyboard panel image for each shot so the look can be reviewed before paying for video. By default panels are made for every shot without one yet; pass shotIds to target specific shots (or regenerate). When a shot references characters with ready reference images, those are passed as image references so the panel keeps the character's likeness. Each panel is linked to its shot and the shot moves to 'storyboarded'. Async — wait_for_media on the panel ids, then inspect_media / qa_shot / fix_panel.",
+            description: "Generate a storyboard panel image for each shot so the look can be reviewed before paying for video. PRECONDITION: every referenced character's reference images must be generated and READY (wait_for_media) first — this tool REFUSES character-bearing shots whose cast refs aren't ready, because panels drawn without likeness refs show the wrong face and video generation anchors on the panel. By default panels are made for every shot without one yet; pass shotIds to target specific shots (or regenerate). Character + location refs are passed as image references so panels keep likeness and environment. Each panel is linked to its shot and the shot moves to 'storyboarded'. Async — wait_for_media on the panel ids, then inspect_media / qa_shot / fix_panel.",
             inputSchema: objectSchema(
                 properties: [
                     "shotIds": ["type": "array", "items": ["type": "string"], "description": "Shots to storyboard. Omit to storyboard every shot without a panel yet."],
@@ -1219,7 +1273,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .fixPanel,
-            description: "Correct a shot's storyboard panel with a multi-edit pass. Defaults the instruction to the shot's QA notes; pass 'instructions' to override. The corrected panel replaces the shot's storyboard (async — wait_for_media, then qa_shot again).",
+            description: "Correct a shot's storyboard panel. When the shot's character (or location) reference images are ready, it runs a multi-edit pass with the panel as image 1 and those refs attached, so LIKENESS is corrected against the real references (not just recomposed); with no ready refs it falls back to a single-image edit. Defaults the instruction to the shot's QA notes; pass 'instructions' to override. The corrected panel replaces the shot's storyboard (async — wait_for_media, then qa_shot again). Note: on close-up shots multi-edit can re-crop off-aspect — the result hint will say so and suggest a clean storyboard_shots regeneration instead.",
             inputSchema: objectSchema(
                 properties: [
                     "shotId": ["type": "string", "description": "Shot id whose storyboard panel to fix."],
@@ -1237,6 +1291,7 @@ enum ToolDefinitions {
                     "shotIds": ["type": "array", "items": ["type": "string"], "description": "Shots to produce (in plan order). Omit to produce every shot not already placed."],
                     "autoQA": ["type": "boolean", "description": "Run vision QA on each generated shot and auto-retry a hard fail. Default false."],
                     "maxRetries": ["type": "integer", "description": "Retries per shot on failure (0–5, default 2)."],
+                    "allowThinPrompts": ["type": "boolean", "description": "Bypass the pre-flight that refuses prompts with no camera/motion language (which render static footage). Only pass true after the user explicitly accepts the prompts as-is."],
                 ]
             )
         ),
@@ -1284,7 +1339,8 @@ enum ToolDefinitions {
                 "id": ["type": "string", "description": "Existing shot id (from get_shot_plan). Omit to create a new shot."],
                 "slug": ["type": "string", "description": "Short handle shown in the UI/chat, e.g. 'S1'."],
                 "summary": ["type": "string", "description": "One-line human description of the shot."],
-                "prompt": ["type": "string", "description": "The prompt sent to the video model."],
+                "prompt": ["type": "string", "description": "The VIDEO prompt — camera move, subject action, what moves, beat by beat. NEVER a still-image caption; produce_shots refuses motionless prompts. A 15s shot needs 2-4 sentences of choreography."],
+                "storyboardPrompt": ["type": "string", "description": "Optional separate prompt for the STORYBOARD panel (a still: composition, framing, look). Omit to derive panels from the video prompt. Use this for 'film still' style language — never put it in 'prompt'."],
                 "durationSeconds": ["type": "number", "description": "Shot length in seconds."],
                 "motionLevel": ["type": "string", "enum": ShotMotionLevel.allCases.map(\.rawValue), "description": "Motion intensity hint."],
                 "transition": ["type": "string", "enum": ShotTransition.allCases.map(\.rawValue), "description": "Transition into the next shot. dissolve/matchCut drive last-frame chaining."],

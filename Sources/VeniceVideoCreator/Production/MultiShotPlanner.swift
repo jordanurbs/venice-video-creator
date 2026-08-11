@@ -113,66 +113,120 @@ enum MultiShotPlanner {
     /// front, a continuity lock, per-beat `Shot N (Xs):` blocks separated by
     /// literal `Lens switch.` lines, per-beat blocking, a geometry-hold clause,
     /// and the 2500-char cap (base-prompt trimming, most-detailed-last).
-    static func multiShotPrompt(window: [Shot], plan: ShotPlan) -> String {
-        var parts: [String] = []
+    static func multiShotPrompt(window: [Shot], plan: ShotPlan, slotPlan: ReferenceSlots.Plan? = nil) -> String {
+        func tagged(_ text: String) -> String { slotPlan?.substitutingNames(in: text) ?? text }
 
-        // Identity declarations: name every recurring character up front so
-        // the model binds them before the beats reference them. The app's
-        // reference stack is flat reference_image_urls (character refs first,
-        // then location refs — see ProductionOrchestrator.routeUnit), so
-        // names, not @ImageN tags, carry identity here.
+        // Identity declarations. On an @Image-tag model the slot plan binds each
+        // reference to a slot ("@Image1 is Bob", "@Image5 is the location …") and
+        // names are substituted with @ImageN throughout; otherwise the app's flat
+        // reference stack carries identity by NAME in prose.
         let characterIds = orderedUniqueCharacterIds(window)
         let names = characterIds.compactMap { plan.character(id: $0)?.name }.filter { !$0.isEmpty }
-        for name in names {
-            parts.append("\(name) appears exactly as in the reference images.")
+        let identityLines: [String]
+        if let slotPlan, !slotPlan.isEmpty {
+            identityLines = slotPlan.identityDeclarations + slotPlan.roleClauseLines
+        } else {
+            identityLines = names.map { "\($0) appears exactly as in the reference images." }
         }
 
-        parts.append("\(window.count)-shot continuous sequence in one take family. Lock face, wardrobe, environment, and geography across all shots.")
+        let continuity = "\(window.count)-shot continuous sequence in one take family. Lock face, wardrobe, environment, and geography across all shots."
 
         // Location description + fixed layout, once for the whole unit.
+        var locationLine: String?
         if let locId = window.first?.locationIds.first, let loc = plan.location(id: locId) {
-            var locLine: [String] = []
-            if let d = loc.description, !d.isEmpty { locLine.append(d) }
+            var locParts: [String] = []
+            if let d = loc.description, !d.isEmpty { locParts.append(d) }
             if let anchors = loc.spatialAnchors, !anchors.isEmpty {
-                locLine.append("Fixed layout (never rearrange): \(anchors).")
+                locParts.append("Fixed layout (never rearrange): \(anchors).")
             }
-            if !locLine.isEmpty { parts.append("Location: \(locLine.joined(separator: " "))") }
+            if !locParts.isEmpty { locationLine = "Location: \(locParts.joined(separator: " "))" }
         }
 
-        // Per-beat blocks with literal Lens switch. separators.
-        for (index, shot) in window.enumerated() {
-            var beat: [String] = []
-            let seconds = max(1, Int(shot.durationSeconds.rounded()))
-            let base = shot.prompt.isEmpty ? shot.summary : shot.prompt
-            beat.append("Shot \(index + 1) (\(seconds)s): \(base)")
-            if let blocking = shot.blocking, !blocking.isEmpty {
-                beat.append("Blocking: \(blocking).")
-            }
-            let onScreen = shot.onScreenDialogue
-            for line in onScreen where !line.text.isEmpty {
+        // Per-beat blocks: the `base` action is trimmable under the cap; the
+        // seconds label, blocking, and dialogue lines are structural and kept.
+        struct Beat {
+            let index: Int
+            let seconds: Int
+            var base: String
+            let blocking: String?
+            let dialogue: [String]
+        }
+        var beats: [Beat] = window.enumerated().map { index, shot in
+            var lines: [String] = []
+            for line in shot.onScreenDialogue where !line.text.isEmpty {
                 let speaker = line.characterId.flatMap { plan.character(id: $0)?.name }
                     ?? line.speaker ?? "Character"
-                beat.append("[\(speaker)]: \"\(line.text)\"")
+                lines.append("[\(tagged(speaker))]: \"\(tagged(line.text))\"")
             }
-            parts.append(beat.joined(separator: " "))
-            if index < window.count - 1 {
-                parts.append("Lens switch.")
-            }
+            let rawBlocking = (shot.blocking?.isEmpty == false) ? shot.blocking : nil
+            return Beat(
+                index: index, seconds: max(1, Int(shot.durationSeconds.rounded())),
+                base: tagged(shot.prompt.isEmpty ? shot.summary : shot.prompt),
+                blocking: rawBlocking.map(tagged), dialogue: lines
+            )
         }
 
         // Geometry hold across the internal cuts (rule 49).
-        parts.append("Each character stays on the same side of the scene and keeps the same position relative to the landmarks in every shot; do not mirror, swap, or rearrange who stands where.")
+        let geometryHold = "Each character stays on the same side of the scene and keeps the same position relative to the landmarks in every shot; do not mirror, swap, or rearrange who stands where."
 
-        var prompt = parts.joined(separator: " ")
-
-        // 2500-char Venice video prompt cap. Trim the longest beat bases first
-        // rather than hard-cutting the tail (which would delete the geometry
-        // hold and the last beats entirely).
-        let limit = VideoModelCapabilities.videoPromptCharLimit
-        if prompt.count > limit {
-            prompt = String(prompt.prefix(limit))
+        func assemble() -> String {
+            var parts: [String] = []
+            // Locked series style FIRST (harness rule 11) — one front-loaded
+            // style anchor at the top of the multi-beat prompt.
+            if let style = ShotPromptBuilder.stylePrefix(plan) { parts.append(style) }
+            parts.append(contentsOf: identityLines)
+            parts.append(continuity)
+            if let locationLine { parts.append(locationLine) }
+            for (i, beat) in beats.enumerated() {
+                var beatParts = ["Shot \(beat.index + 1) (\(beat.seconds)s): \(beat.base)"]
+                if let blocking = beat.blocking { beatParts.append("Blocking: \(blocking).") }
+                beatParts.append(contentsOf: beat.dialogue)
+                parts.append(beatParts.joined(separator: " "))
+                if i < beats.count - 1 { parts.append("Lens switch.") }
+            }
+            parts.append(geometryHold)
+            return parts.joined(separator: " ")
         }
+
+        // 2500-char Venice video prompt cap. Shorten the LONGEST beat base first
+        // (dropping trailing words) rather than hard-cutting the tail — which
+        // would delete the geometry-hold clause and the last beats entirely.
+        // Identity declarations, Lens switch. separators, blocking, and dialogue
+        // all survive.
+        let limit = VideoModelCapabilities.videoPromptCharLimit
+        let minBaseChars = 24
+        var prompt = assemble()
+        var guardIterations = 0
+        while prompt.count > limit, guardIterations < 500 {
+            guardIterations += 1
+            guard let longest = beats.indices
+                .filter({ beats[$0].base.count > minBaseChars })
+                .max(by: { beats[$0].base.count < beats[$1].base.count }) else { break }
+            let overflow = prompt.count - limit
+            beats[longest].base = trimTrailingWords(beats[longest].base, byAtLeast: overflow, floor: minBaseChars)
+            prompt = assemble()
+        }
+        // Last resort if structural text alone still exceeds the cap.
+        if prompt.count > limit { prompt = String(prompt.prefix(limit)) }
         return prompt
+    }
+
+    /// Shortens `text` by at least `byAtLeast` characters by dropping whole
+    /// trailing words, never below `floor` characters, appending an ellipsis
+    /// when anything was removed so the truncation reads as intentional.
+    private static func trimTrailingWords(_ text: String, byAtLeast: Int, floor: Int) -> String {
+        var words = text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+        guard words.count > 1 else {
+            // Single long token: hard-cut to floor as a fallback.
+            return String(text.prefix(max(floor, text.count - byAtLeast)))
+        }
+        let target = max(floor, text.count - byAtLeast)
+        var joined = words.joined(separator: " ")
+        while joined.count + 1 > target, words.count > 1 {
+            words.removeLast()
+            joined = words.joined(separator: " ")
+        }
+        return joined + " …"
     }
 
     /// Unique character ids across the window, in first-appearance order.

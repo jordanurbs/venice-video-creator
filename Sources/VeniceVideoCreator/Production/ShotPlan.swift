@@ -14,10 +14,26 @@ struct ShotPlan: Codable, Sendable, Equatable {
     var resolution: String
     /// Default video model for shots without an override (a Venice slug).
     var defaultModel: String?
+    /// Image model locked for ALL reference-image generation in this project
+    /// (characters, locations, objects) — chosen via the reference bakeoff so
+    /// every entity's refs share one look. Nil = first enabled model.
+    var referenceImageModel: String?
+    /// The series' locked visual system — ONE authored sentence naming medium,
+    /// palette, lighting language, and lens character (harness rule 11 /
+    /// anti-pattern 2). Front-loaded into every storyboard panel, video, and
+    /// multi-shot prompt, and into character/location reference generations, so
+    /// the whole production shares one look instead of drifting per shot. Nil =
+    /// no locked style (prompts fall back to their own phrasing).
+    var styleBlock: String?
     var defaultShotSeconds: Double
     var shots: [Shot]
     var characters: [CharacterSpec]
     var locations: [LocationSpec]
+    /// Locked series seed for reproducibility (harness rule seeds): when set and
+    /// the routed family accepts a seed, every shot generates from it so a run is
+    /// repeatable. Only applied on seed-capable models; nil leaves the queue to
+    /// pick a random seed per job (current behavior).
+    var seed: Int?
     var updatedAt: Date
 
     init(
@@ -26,10 +42,13 @@ struct ShotPlan: Codable, Sendable, Equatable {
         aspectRatio: String = "16:9",
         resolution: String = "1080p",
         defaultModel: String? = nil,
+        referenceImageModel: String? = nil,
+        styleBlock: String? = nil,
         defaultShotSeconds: Double = 5,
         shots: [Shot] = [],
         characters: [CharacterSpec] = [],
         locations: [LocationSpec] = [],
+        seed: Int? = nil,
         updatedAt: Date = Date()
     ) {
         self.title = title
@@ -37,15 +56,18 @@ struct ShotPlan: Codable, Sendable, Equatable {
         self.aspectRatio = aspectRatio
         self.resolution = resolution
         self.defaultModel = defaultModel
+        self.referenceImageModel = referenceImageModel
+        self.styleBlock = styleBlock
         self.defaultShotSeconds = defaultShotSeconds
         self.shots = shots
         self.characters = characters
         self.locations = locations
+        self.seed = seed
         self.updatedAt = updatedAt
     }
 
     private enum CodingKeys: String, CodingKey {
-        case title, logline, aspectRatio, resolution, defaultModel, defaultShotSeconds, shots, characters, locations, updatedAt
+        case title, logline, aspectRatio, resolution, defaultModel, referenceImageModel, styleBlock, defaultShotSeconds, shots, characters, locations, seed, updatedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -55,10 +77,13 @@ struct ShotPlan: Codable, Sendable, Equatable {
         aspectRatio = try c.decodeIfPresent(String.self, forKey: .aspectRatio) ?? "16:9"
         resolution = try c.decodeIfPresent(String.self, forKey: .resolution) ?? "1080p"
         defaultModel = try c.decodeIfPresent(String.self, forKey: .defaultModel)
+        referenceImageModel = try c.decodeIfPresent(String.self, forKey: .referenceImageModel)
+        styleBlock = try c.decodeIfPresent(String.self, forKey: .styleBlock)
         defaultShotSeconds = try c.decodeIfPresent(Double.self, forKey: .defaultShotSeconds) ?? 5
         shots = try c.decodeIfPresent([Shot].self, forKey: .shots) ?? []
         characters = try c.decodeIfPresent([CharacterSpec].self, forKey: .characters) ?? []
         locations = try c.decodeIfPresent([LocationSpec].self, forKey: .locations) ?? []
+        seed = try c.decodeIfPresent(Int.self, forKey: .seed)
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
     }
 
@@ -80,8 +105,14 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
     var slug: String?
     /// One-line human description of the shot.
     var summary: String
-    /// The prompt actually sent to the video model.
+    /// The VIDEO prompt — camera movement, subject action, what moves. This is
+    /// the paid path's prompt; the pre-flight gate rejects motionless ones.
     var prompt: String
+    /// Optional STORYBOARD-panel prompt (a still frame: composition, framing,
+    /// look — no motion language needed). Nil = panels compose from `prompt`,
+    /// which keeps pre-split plans working unchanged. Split 2026-08-10 so a
+    /// panel-caption prompt can never masquerade as the video prompt again.
+    var storyboardPrompt: String?
     var durationSeconds: Double
     var motionLevel: ShotMotionLevel
     var transition: ShotTransition
@@ -127,6 +158,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         slug: String? = nil,
         summary: String = "",
         prompt: String = "",
+        storyboardPrompt: String? = nil,
         durationSeconds: Double = 5,
         motionLevel: ShotMotionLevel = .moderate,
         transition: ShotTransition = .cut,
@@ -151,6 +183,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         self.slug = slug
         self.summary = summary
         self.prompt = prompt
+        self.storyboardPrompt = storyboardPrompt
         self.durationSeconds = durationSeconds
         self.motionLevel = motionLevel
         self.transition = transition
@@ -173,7 +206,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, slug, summary, prompt, durationSeconds, motionLevel, transition
+        case id, slug, summary, prompt, storyboardPrompt, durationSeconds, motionLevel, transition
         case modelOverride, characterIds, locationIds, dialogue, blocking, allowMultiShot, nativeAudio, audioContent, status
         case audioReferenceAssetId, attachCastVoiceReference
         case storyboardAssetId, videoAssetId, takes, qaSummary, failureReason
@@ -185,6 +218,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         slug = try c.decodeIfPresent(String.self, forKey: .slug)
         summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? ""
+        storyboardPrompt = try c.decodeIfPresent(String.self, forKey: .storyboardPrompt)
         durationSeconds = try c.decodeIfPresent(Double.self, forKey: .durationSeconds) ?? 5
         motionLevel = try c.decodeIfPresent(ShotMotionLevel.self, forKey: .motionLevel) ?? .moderate
         transition = try c.decodeIfPresent(ShotTransition.self, forKey: .transition) ?? .cut
@@ -204,6 +238,13 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         takes = try c.decodeIfPresent([ShotTake].self, forKey: .takes) ?? []
         qaSummary = try c.decodeIfPresent(String.self, forKey: .qaSummary)
         failureReason = try c.decodeIfPresent(String.self, forKey: .failureReason)
+    }
+
+    /// The base the storyboard-panel prompt composes from: the dedicated
+    /// storyboard prompt when authored, else the video prompt, else the summary.
+    var effectiveStoryboardBase: String {
+        if let sb = storyboardPrompt, !sb.isEmpty { return sb }
+        return prompt.isEmpty ? summary : prompt
     }
 
     /// Dialogue lines the video model should hear (on-screen speech), excluding
@@ -314,6 +355,15 @@ struct ShotTake: Codable, Sendable, Equatable, Identifiable {
     var note: String?
     var qaScore: Double?
     var qaSummary: String?
+    /// The full submitted call for this take (harness rule 39 recipe): final
+    /// prompt string, model, reference asset ids, negative prompt, seed. Makes a
+    /// take replayable ("regenerate exactly take 2 but change one word") and gives
+    /// an inspectable prompt history per shot.
+    var recipe: GenerationInput?
+
+    /// The seed this take was generated with, when the routed family accepts one
+    /// (mirror of `recipe?.seed`, hoisted for cheap display/replay).
+    var seed: Int?
 
     init(
         id: String = UUID().uuidString,
@@ -322,7 +372,9 @@ struct ShotTake: Codable, Sendable, Equatable, Identifiable {
         createdAt: Date = Date(),
         note: String? = nil,
         qaScore: Double? = nil,
-        qaSummary: String? = nil
+        qaSummary: String? = nil,
+        recipe: GenerationInput? = nil,
+        seed: Int? = nil
     ) {
         self.id = id
         self.videoAssetId = videoAssetId
@@ -331,9 +383,11 @@ struct ShotTake: Codable, Sendable, Equatable, Identifiable {
         self.note = note
         self.qaScore = qaScore
         self.qaSummary = qaSummary
+        self.recipe = recipe
+        self.seed = seed
     }
 
-    private enum CodingKeys: String, CodingKey { case id, videoAssetId, model, createdAt, note, qaScore, qaSummary }
+    private enum CodingKeys: String, CodingKey { case id, videoAssetId, model, createdAt, note, qaScore, qaSummary, recipe, seed }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -344,6 +398,8 @@ struct ShotTake: Codable, Sendable, Equatable, Identifiable {
         note = try c.decodeIfPresent(String.self, forKey: .note)
         qaScore = try c.decodeIfPresent(Double.self, forKey: .qaScore)
         qaSummary = try c.decodeIfPresent(String.self, forKey: .qaSummary)
+        recipe = try c.decodeIfPresent(GenerationInput.self, forKey: .recipe)
+        seed = try c.decodeIfPresent(Int.self, forKey: .seed)
     }
 }
 
@@ -470,6 +526,13 @@ struct LocationSpec: Codable, Sendable, Equatable, Identifiable {
     /// language ("at the counter", "by the door") resolves to the same physical
     /// layout in every generation.
     var spatialAnchors: String?
+    /// The locked lighting of the place (harness storyboard pass-1 + anti-pattern
+    /// 7): time of day, key/fill direction, colour temperature and mood, e.g.
+    /// "late-afternoon sun through the west windows, warm key from screen-left,
+    /// cool shadows, practical neon fill." Injected into storyboard panel prompts
+    /// so consecutive panels of the same location match, and carried forward as
+    /// the "match the previous panel's lighting" instruction.
+    var lightingNotes: String?
     var createdAt: Date
 
     init(
@@ -480,6 +543,7 @@ struct LocationSpec: Codable, Sendable, Equatable, Identifiable {
         referenceImageAssetIds: [String] = [],
         lockedReferenceAssetId: String? = nil,
         spatialAnchors: String? = nil,
+        lightingNotes: String? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -489,6 +553,7 @@ struct LocationSpec: Codable, Sendable, Equatable, Identifiable {
         self.referenceImageAssetIds = referenceImageAssetIds
         self.lockedReferenceAssetId = lockedReferenceAssetId
         self.spatialAnchors = spatialAnchors
+        self.lightingNotes = lightingNotes
         self.createdAt = createdAt
     }
 
@@ -498,15 +563,19 @@ struct LocationSpec: Codable, Sendable, Equatable, Identifiable {
         return name
     }
 
+    /// Location references are an ANGLE LADDER of one coherent space
+    /// (wide/medium/detail — harness `LOCATION_ANGLES`), not divergent takes,
+    /// so a lock PRIORITIZES its angle rather than excluding the rest.
+    /// (Characters differ: their refs are alternative looks, locked wins alone.)
     var activeReferenceAssetIds: [String] {
         if let locked = lockedReferenceAssetId, referenceImageAssetIds.contains(locked) {
-            return [locked]
+            return [locked] + referenceImageAssetIds.filter { $0 != locked }
         }
         return referenceImageAssetIds
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, description, visualPrompt, referenceImageAssetIds, lockedReferenceAssetId, spatialAnchors, createdAt
+        case id, name, description, visualPrompt, referenceImageAssetIds, lockedReferenceAssetId, spatialAnchors, lightingNotes, createdAt
     }
 
     init(from decoder: Decoder) throws {
@@ -518,6 +587,7 @@ struct LocationSpec: Codable, Sendable, Equatable, Identifiable {
         referenceImageAssetIds = try c.decodeIfPresent([String].self, forKey: .referenceImageAssetIds) ?? []
         lockedReferenceAssetId = try c.decodeIfPresent(String.self, forKey: .lockedReferenceAssetId)
         spatialAnchors = try c.decodeIfPresent(String.self, forKey: .spatialAnchors)
+        lightingNotes = try c.decodeIfPresent(String.self, forKey: .lightingNotes)
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     }
 }

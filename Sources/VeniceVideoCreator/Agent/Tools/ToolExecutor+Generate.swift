@@ -45,7 +45,7 @@ extension ToolExecutor {
     }
 
     /// Rejects a model the user has turned off in Settings → Models.
-    private func ensureEnabled(_ id: String, kind: String) throws {
+    func ensureEnabled(_ id: String, kind: String) throws {
         guard ModelPreferences.shared.isEnabled(id) else {
             throw ToolError("Model '\(id)' is turned off in Settings → Models. Pick an enabled \(kind) model (see list_models) or ask the user to turn it back on.")
         }
@@ -247,6 +247,26 @@ extension ToolExecutor {
     static func cheapestResolution(_ model: ImageModelConfig) -> String? {
         guard let resolutions = model.resolutions, !resolutions.isEmpty else { return nil }
         return resolutions.min { resolutionRank($0) < resolutionRank($1) }
+    }
+
+    /// Resolution for tier-2 REFERENCE imagery — storyboard panels, character and
+    /// location reference sheets. Panels are what the video anchors on, so cheap
+    /// panels propagate mush into every take (harness quality floor). Pick the
+    /// model's best option up to a ~1080p class (long edge ≤ 1920); only when
+    /// every option already exceeds that do we fall to the smallest, to bound the
+    /// cost of 4K-only models. Chat-driven stills stay on `cheapestResolution`.
+    static func referenceResolution(_ model: ImageModelConfig) -> String? {
+        guard let resolutions = model.resolutions, !resolutions.isEmpty else { return nil }
+        let withinClass = resolutions.filter { resolutionRank($0) <= 1920 }
+        if let best = withinClass.max(by: { resolutionRank($0) < resolutionRank($1) }) { return best }
+        return resolutions.min { resolutionRank($0) < resolutionRank($1) }
+    }
+
+    /// Default (best available) quality for reference imagery — the model's top
+    /// quality tier rather than the cheapest, for the same reason as
+    /// `referenceResolution`. Nil when the model has no quality tiers.
+    static func referenceQuality(_ model: ImageModelConfig) -> String? {
+        model.qualities?.last
     }
 
     private static func resolutionRank(_ id: String) -> Int {
@@ -649,7 +669,10 @@ extension ToolExecutor {
             "supportsStyleInstructions": m.supportsStyleInstructions,
         ]
         if let voices = m.voices {
-            info["voicesSample"] = Array(voices.prefix(3))
+            // Full list, not a sample: the agent picks audition candidates from
+            // here — with only 3 visible it defaulted to the first few voices,
+            // which have arbitrary genders/accents for the character.
+            info["voices"] = voices
             info["voiceCount"] = voices.count
         }
         if let defaultVoice = m.defaultVoice { info["defaultVoice"] = defaultVoice }

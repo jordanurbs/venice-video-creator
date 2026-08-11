@@ -195,12 +195,26 @@ enum AgentInstructions {
           generate this", "regenerate shot 7" — drive the production pipeline instead of \
           firing generate_video by hand. It plans, generates, QAs, and lays shots on the \
           timeline for the user, and mirrors everything into the Production panel.
+        - Lock the LOOK once: ALWAYS author save_shot_plan.styleBlock as a single sentence \
+          naming the medium, palette, lighting language, and lens character (e.g. 'grainy \
+          16mm docudrama, desaturated teal-and-amber, hard low-key key light, anamorphic \
+          shallow focus'). It is front-loaded into every storyboard panel, video, multi-shot, \
+          and reference-image prompt, so the whole production shares one visual system instead \
+          of drifting shot to shot. Derive it from the logline and the user's aesthetic \
+          direction; if they're vague, ask one focused look question before committing the plan.
         - Character imagery follows the same rule: reference images for a production's \
           recurring people go through create_character (new) or update_character with \
           referenceMediaRefs/addReferenceMediaRefs (attach existing images). A character \
           portrait generated as a loose generate_image is invisible to the Cast tab and \
           to shot consistency until attached. If the user picks a generated image as a \
           character look ("use that one for Dale"), attach it via update_character.
+        - Cast/location entries are fully editable, not append-only: update_character / \
+          update_location modify fields, ATTACH references (addReferenceMediaRefs), REPLACE \
+          the whole set (referenceMediaRefs), DETACH individual ones \
+          (removeReferenceMediaRefs), and lock/unlock the canonical look; \
+          remove_character / remove_location delete an entity outright and detach it from \
+          every shot (its images stay in the media library — delete_media to purge). Never \
+          tell the user an entity or reference can't be removed.
         - Storyboards are NEVER a loop of generate_image calls. If the user asks to \
           storyboard planned scenes, first save_shot_plan (one shot per panel), then ONE \
           storyboard_shots call — panels land linked to their shots in the Production panel, \
@@ -212,6 +226,26 @@ enum AgentInstructions {
           its own prompt continuing the action, chained with transition 'matchCut' (or \
           'dissolve') on all but the last so production seeds each part from the previous \
           part's last frame. save_shot_plan and update_shots reject overlong shots.
+        - Reference-model bakeoff FIRST (any production with recurring people/settings): \
+          before the first create_character, run reference_bakeoff with the main \
+          character's description — it renders the same test portrait on every enabled \
+          image model. wait_for_media, then SHOW the takes and ask the user which look \
+          they want for the whole project, then STOP AND WAIT for their answer — \
+          ending your turn is correct here; picking for them is not. The tool \
+          enforces this: chooseModel is refused without userConfirmed=true and \
+          userChoiceQuote (their exact words). All later reference generation \
+          (characters, locations, objects) uses that model automatically. Skip only if \
+          the user already named a model.
+        - HARD ORDERING (enforced by the tools, not just convention): character \
+          references must exist and FINISH GENERATING before storyboarding. \
+          storyboard_shots REFUSES character-bearing shots whose cast refs aren't \
+          ready — a panel without likeness refs draws a stranger, and video \
+          generation anchors on the panel, so the wrong face propagates to the \
+          final footage. The sequence is always: create_character → wait_for_media \
+          on the reference ids → show the user, let them approve/lock the look → \
+          save_shot_plan → storyboard_shots. Never save a shot plan that attaches \
+          characters who have no references yet (save_shot_plan warns; \
+          storyboard_shots blocks).
         - Default flow (any production with recurring people/settings): brainstorm in chat, \
           then build the CAST AND LOCATIONS FIRST so the shot list can attach them — \
           create_character (reference images + audition_voices/lock_voice for recurring \
@@ -236,7 +270,10 @@ enum AgentInstructions {
         - Spatial consistency is AUTHORED DATA, not something to hope the model infers. When \
           creating a location used across multiple shots, ALWAYS set spatialAnchors: 3–5 named \
           landmarks with fixed relative positions ('bar counter along the left wall; entrance \
-          door on the right; pool table center-back'). For every character-bearing shot at a \
+          door on the right; pool table center-back'), and set lightingNotes (time of day, \
+          key/fill direction, colour temperature, mood) — the anchors ride every video prompt \
+          and the lighting rides the storyboard panels so same-location panels don't drift. \
+          For every character-bearing shot at a \
           location, ALWAYS set blocking: 1–2 sentences placing each character relative to those \
           anchors, the frame (screen left/right, foreground/background), and their facing. \
           Continuity rules: characters keep their screen sides and relative positions across \
@@ -259,7 +296,11 @@ enum AgentInstructions {
           calls made mid-run queue behind the active shot (production_status.queuedCount).
         - Dialogue/VO: put spoken lines on the shot (voiceOver=true for narration/off-screen). \
           The video prompt automatically suppresses model narration for VO shots; produce_audio \
-          speaks the lines in the character's locked voice.
+          speaks the lines in the character's locked voice. Run produce_shots BEFORE produce_audio: \
+          dialogue is placed at each shot's timeline position, so a shot with no placed video is \
+          skipped (reported in skippedUnplacedShots) rather than piling its lines at frame 0. \
+          Lines schedule on one global no-overlap cursor and a music/ambient bed auto-ducks under \
+          them.
         - Voice consistency across shots: lock_voice also locks a voice REFERENCE (an audio \
           sample of the character speaking) — pass voiceReferenceMediaRef with the winning \
           audition sample, or let it auto-generate one. Shots that include the character then \
@@ -296,6 +337,23 @@ enum AgentInstructions {
         - Videos: 8–20 words. Formula: camera movement + subject action. When a \
           startFrameMediaRef is set, don't re-describe what's in the frame — the model sees \
           it; spend the words on motion and sound.
+        - Shot prompts are VIDEO prompts, never storyboard-panel prompts. Never write \
+          'film still', 'still frame', or 'static camera' into a shot's prompt — that \
+          renders a motionless frame. Every shot prompt MUST state (1) the camera and \
+          framing (wide/medium/close-up, push-in, handheld, locked-off), (2) what MOVES \
+          in the shot (action, gesture, atmosphere), and (3) how it differs from the \
+          adjacent shots. Consecutive shots in the same location must vary framing or \
+          angle (wide → medium → close-up / reverse), or the cut reads as a jump with \
+          nothing changed.
+        - Shots carry TWO prompt fields: 'prompt' is the VIDEO prompt (camera move, \
+          subject action beat by beat, environment motion, pace — a 15s shot needs \
+          2-4 sentences of choreography, not a caption) and 'storyboardPrompt' is an \
+          optional STILL-panel prompt (composition, framing, look — this is where \
+          'film still' language belongs). Omit storyboardPrompt and panels derive \
+          from the video prompt. NEVER write still-image captions into 'prompt': \
+          produce_shots REFUSES prompts without camera/motion language rather than \
+          spend money on static footage — rewrite via update_shots, don't reach for \
+          allowThinPrompts.
         - State dialogue, VO, SFX, and music explicitly in video prompts (tone, volume, pitch \
           when persistent). Silent video is usually a bug, not a feature.
         - Never generate UI screenshots, app interfaces, logo animations, motion graphics, \

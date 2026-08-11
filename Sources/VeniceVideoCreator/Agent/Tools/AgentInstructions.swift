@@ -203,6 +203,9 @@ enum AgentInstructions {
           and reference-image prompt, so the whole production shares one visual system instead \
           of drifting shot to shot. Derive it from the logline and the user's aesthetic \
           direction; if they're vague, ask one focused look question before committing the plan.
+        - Reproducibility: save_shot_plan locks a series seed once (kept across re-saves). \
+          It's applied to reference, panel, and video generations on models that accept a \
+          seed, so a run can be replayed; you don't set or manage it by hand.
         - Character imagery follows the same rule: reference images for a production's \
           recurring people go through create_character (new) or update_character with \
           referenceMediaRefs/addReferenceMediaRefs (attach existing images). A character \
@@ -251,10 +254,13 @@ enum AgentInstructions {
           storyboard_shots blocks).
         - Default flow (any production with recurring people/settings): brainstorm in chat, \
           then build the CAST AND LOCATIONS FIRST so the shot list can attach them — \
-          create_character (reference images + audition_voices/lock_voice for recurring \
-          people; pass kind='object' for a recurring prop/object like a specific car or \
-          gadget — objects skip the face gate and have no voice) and create_location \
-          (reference plates for settings). Each entity \
+          create_character (a 4-view reference sheet — front / three-quarter / profile / \
+          full-body, the identity ladder R2V anchors on — + audition_voices/lock_voice for \
+          recurring people; pass kind='object' for a recurring prop/object like a specific \
+          car or gadget — objects skip the face gate and have no voice) and create_location \
+          (a 3-angle plate ladder for settings). Reference sheets generate on the \
+          bakeoff-locked model at full resolution and carry the plan's styleBlock, so they \
+          match the production look. Each entity \
           auto-locks its first reference as the canonical look; wait_for_media on the \
           reference ids, review them, and re-lock a better one if needed. THEN save_shot_plan \
           (title, format, ordered shots) with every shot's characterIds/locationIds set to \

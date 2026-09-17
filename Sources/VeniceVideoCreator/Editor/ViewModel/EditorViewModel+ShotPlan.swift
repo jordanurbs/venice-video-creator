@@ -430,6 +430,7 @@ extension EditorViewModel {
             for idx in plan.shots.indices where ids.contains(plan.shots[idx].id) {
                 plan.shots[idx].videoAssetId = nil
                 plan.shots[idx].placement = nil
+                plan.shots[idx].activeProductionOperationId = nil
                 plan.shots[idx].storyboardAssetId = nil
                 plan.shots[idx].takes = []
                 plan.shots[idx].qaSummary = nil

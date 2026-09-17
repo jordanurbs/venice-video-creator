@@ -165,6 +165,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
     var panelReview: StoryboardReview?
     var videoAssetId: String?
     var placement: ShotPlacement?
+    var activeProductionOperationId: String?
     var takes: [ShotTake]
     var qaSummary: String?
     var failureReason: String?
@@ -228,7 +229,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         case cameraTrajectory
         case modelOverride, characterIds, locationIds, dialogue, blocking, allowMultiShot, nativeAudio, audioContent, status
         case audioReferenceAssetId, attachCastVoiceReference
-        case storyboardAssetId, panelReview, videoAssetId, placement, takes, qaSummary, failureReason
+        case storyboardAssetId, panelReview, videoAssetId, placement, activeProductionOperationId, takes, qaSummary, failureReason
     }
 
     init(from decoder: Decoder) throws {
@@ -257,6 +258,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         panelReview = try c.decodeIfPresent(StoryboardReview.self, forKey: .panelReview)
         videoAssetId = try c.decodeIfPresent(String.self, forKey: .videoAssetId)
         placement = try c.decodeIfPresent(ShotPlacement.self, forKey: .placement)
+        activeProductionOperationId = try c.decodeIfPresent(String.self, forKey: .activeProductionOperationId)
         takes = try c.decodeIfPresent([ShotTake].self, forKey: .takes) ?? []
         qaSummary = try c.decodeIfPresent(String.self, forKey: .qaSummary)
         failureReason = try c.decodeIfPresent(String.self, forKey: .failureReason)

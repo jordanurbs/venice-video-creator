@@ -12,11 +12,36 @@ struct ProductionStatus: Encodable {
     let generatingShotIds: [String]
     let runningUSD: Double
     let lastError: String?
+    var operationCount: Int = 0
+    var operations: [OperationSummary] = []
+
+    struct OperationSummary: Encodable {
+        let id: String
+        let stage: ProductionOperation.Stage
+        let shotIds: [String]
+        let attemptCount: Int
+        let attemptId: String?
+        let placeholderId: String?
+        let queueId: String?
+        let failureReason: String?
+
+        init(_ operation: ProductionOperation) {
+            id = operation.id
+            stage = operation.stage
+            shotIds = operation.destinations.map(\.shotId)
+            attemptCount = operation.attempts.count
+            attemptId = operation.attempts.last?.id
+            placeholderId = operation.attempts.last?.placeholderId
+            queueId = operation.attempts.last?.queueId
+            failureReason = operation.failureReason ?? operation.attempts.last?.failureReason
+        }
+    }
 
     enum CodingKeys: String, CodingKey {
         case isRunning, isPaused, currentShotId, completedCount, succeededCount, failedCount
         case cancelledCount, settledCount, pendingCount, totalCount, queuedCount, queuedUnitCount
         case queuedShotIds, queuedUnits, generatingShotIds, runningUSD, lastError
+        case operationCount, operations
     }
 
     func encode(to encoder: Encoder) throws {
@@ -40,5 +65,7 @@ struct ProductionStatus: Encodable {
         try c.encode(generatingShotIds, forKey: .generatingShotIds)
         try c.encode(runningUSD, forKey: .runningUSD)
         try c.encode(lastError, forKey: .lastError)
+        try c.encode(operationCount, forKey: .operationCount)
+        try c.encode(operations, forKey: .operations)
     }
 }

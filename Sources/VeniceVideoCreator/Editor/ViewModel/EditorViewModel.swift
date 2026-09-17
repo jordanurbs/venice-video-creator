@@ -249,6 +249,7 @@ final class EditorViewModel {
 
     weak var undoManager: UndoManager?
     @ObservationIgnored var onProjectCheckpointRequired: (() -> Void)?
+    @ObservationIgnored var persistProductionState: (@MainActor () async throws -> Void)?
     var isDocumentEdited: Bool = false
 
     /// Marks the backing document dirty for changes that don't register undo

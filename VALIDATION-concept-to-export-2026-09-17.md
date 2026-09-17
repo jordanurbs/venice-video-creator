@@ -1,7 +1,7 @@
 # Concept-to-export implementation validation
 
 Date: 2026-09-17
-Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c`, and native fixture `d9f2975` committed. Durable placement bindings compiled and regression-tested. Native control acceptance remains blocked. Not E2E-ready.
+Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c`, native fixture `d9f2975`, and placement bindings `f3542fb` committed. Production operation/attempt persistence and cancellation guards compiled and regression-tested. Native control acceptance remains blocked. Not E2E-ready.
 
 ## Permissions and spending
 
@@ -45,7 +45,7 @@ Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c
 
 ## Next slice and open gates
 
-1. Phase 2 continuation: persist operation/line IDs and placeholders before asynchronous waits, then reconcile live/recovered completion through one finalizer. Current placement identity is durable, but operation identity and callback lifetime are not.
+1. Phase 2 continuation: use the new operation/attempt records in one shared live/recovered finalizer, retaining validation/QA results and source ranges before exactly-once placement. Reopen currently holds interrupted new-format operations for review; it does not auto-place or resubmit them. Durable audio line identities remain open.
 2. Finish Phase 1 native verification of all six camera controls, unsupported-camera clear path, approval controls, inspector/retake/save-reopen, and 1080P budget presentation. The fixture rendered, but its background window on another Space exposes only menu-bar accessibility elements. Do not change the user's foreground app/Space to bypass this limitation.
 3. Finish Phase 2 placement ownership: selection preview source windows, manually split descendants, arbitrary source replacement, and keep/duck/mute restoration. Exact retake/reset/dialogue addressing and linked replacement/reorder are covered below; these do not establish full production recovery.
 4. Phases 3–5 remain open: revisioned QA/approval and dependency invalidation, attempt/quote ledger and stricter decoded-output validation, idempotent measured audio and exact-speech ownership, readiness, retained export jobs and verified immutable delivery.
@@ -62,6 +62,8 @@ Prepared staging inputs (outside the repository): `/tmp/venice-concept-to-export
 The first commit used 47 explicit whole-file paths and a refreshed request-builder patch; `git diff --cached --check` passed. The second catalog/1080P slice is committed as `fa3e067`, `fix(generation): guard catalog refreshes and budget 1080P attempts` (20 files), after staged-diff inspection. Storyboard approval is committed as `563608c`, `feat(production): bind storyboard approval to reviewed revisions` (20 files). Each commit excluded the unchanged Seedance bitrate block.
 
 Native fixture/evidence is committed as `d9f2975`, `test(production): add native camera project fixture` (three files), with only the unrelated bitrate block left unstaged afterward.
+
+Placement identity is committed as `f3542fb`, `fix(production): persist exact shot placement bindings` (13 files), after related-only staged review. The unrelated bitrate block remained unstaged.
 
 ## Catalog/1080P follow-up validation
 
@@ -115,6 +117,21 @@ Native fixture/evidence is committed as `d9f2975`, `test(production): add native
 - Final source review added `placedClipId` to the input prefix resolver and changed the repair regression to pass the actual short ID. `swift test --filter 'ShotPlacementTests|ShortIdTests'`: passed, 18 tests in two suites (0.176s tests, 10.85s build), after that change. No paid/API/native interactions in this slice.
 - Remaining: pre-wait durable operation/line identities and job stages; exactly-once finalization with validation/QA; cancellation/restart callbacks; split-descendant and selection-preview ownership; keep/duck/mute restoration; revisioned take/range QA; measured idempotent audio; retained verified export. Group unit IDs here are assigned when recording a completed take, not durable pre-submission operation IDs.
 - Related paths: `Production/{ShotPlacement,ShotPlan,ProductionOrchestrator,StoryboardReview}.swift`, `Editor/ViewModel/EditorViewModel+{GeneratedClips,ShotPlan}.swift`, `Agent/Tools/{ToolDefinitions,ToolExecutor+ShotPlan,ToolExecutor+ProduceAudio,ToolExecutor+ShortId}.swift`, the new tests, and both dated progress records. The unrelated `VeniceGeneration.swift` bitrate block remains excluded.
+
+## Production operation lifecycle validation
+
+- Added `Production/ProductionOperation.swift`. The manifest retains operation/run IDs, shot setting digests and destination placements, QA policy, stage, attempts, per-attempt stable take IDs, pre-upload recipes, placeholders, backend/remote queue IDs, generation status, and failure reasons. Older manifests decode an empty operation array. These records survive shot-plan resaves and media-library undo; shot runtime operation bindings are excluded from storyboard fingerprints.
+- Single-shot operations are recorded and checkpointed before frame chaining or quotes. Group operations are recorded before their first asynchronous quote. Attempts and take IDs are created before submission; the shared generation service associates the actual placeholder and awaits another checkpoint before reference preparation. Native `VideoProject` supplies an awaited autosave callback; missing/closed/unsaved projects and checkpoint errors stop production before provider access. Native autosave callback behavior has compiled but still needs native acceptance.
+- Submission validates the current run, operation, latest attempt, shot settings, and destination again at the final runner's existing submission guard, including its post-quote check. Unit tasks are owned/cancelled; production checks operation identity after generation, output validation, and QA waits. A cancelled old callback cannot place, record a late take, overwrite current QA, or increment the new run's counters. `runningUSD` resets for each run; it still measures accepted quoted outputs rather than reconciled total billing.
+- Take IDs are assigned before generation and reused when recording the result; grouped `productionUnitId` is now the pre-wait operation ID. `production_status` includes a total operation count and the latest 50 compact operation summaries without recipes/reference payloads. Backend completion can still update its own attempt metadata after production stops, preserving the actual remote outcome.
+- Failed or unavailable auto-QA now stops placement when retries are exhausted; a QA outage retains the generated take without buying another one. This fixes the previous unchecked/failed fallthrough but does not establish revision-bound take reviews or per-range QA for every grouped beat.
+- Reopen holds interrupted operation-backed shots for review, preserving the operation and assets. Existing generation service queue/download recovery remains separate; no new paid request or automatic placement is initiated by production reconciliation for these operations. Legacy recovery is blocked from acting on a shot now owned by a new operation. A shared validated/QA-aware live/recovered finalizer is the next implementation gate.
+- Added 11 tests in `Agent/ProductionOperationTests.swift`, using the real production loop with injected catalog, quote, generation, validation, QA, and checkpoint boundaries: pre-provider operation/take identity, late completion/validation/QA across Stop→Start, edits during checkpoint, failed/unavailable QA at retry limit, distinct retry identities, actual service placeholder checkpoint failure, interrupted package round trip, cancelled checkpoint failure, and ledger retention through media-library undo. Provider outputs in these lifecycle tests are metadata fixtures; the earlier placement package test supplies real H.264 coverage.
+- `swift test --filter 'ProductionOperationTests|ProductionStatusTests|ShotPlacementTests|StoryboardApprovalTests'`: passed, 36 tests in four suites (0.293s tests, 16.95s build).
+- `swift test`: passed, reported 1,104 tests in 171 suites (1.894s tests, 2.24s incremental build). Same seven skips. Combined output: `/Users/venetian42069/.local/share/opencode/tool-output/tool_0b0e38bc5001gRGBnZc6qU9ADx`.
+- Final source review preserved specific provider/checkpoint failure details instead of overwriting them with a generic generation failure. `swift test --filter ProductionOperationTests`: passed, 11 tests in one suite (0.024s tests, 13.70s build) after that change. No paid/API/native interactions in this slice.
+- Remaining: shared recovered finalization and explicit resume/review actions; durable audio-line records; decoded output dimensions/aspect and QA revision/range evidence; total attempt/cost reconciliation; unknown-billing transport retry policy; native checkpoint/error/reopen operation; the dated full workflow acceptance. Pre-submit checkpoint snapshots are tested through injection and package I/O, not crash-injected native autosave.
+- Related files: `Production/{ProductionOperation,ProductionOrchestrator,ProductionStatus,ShotPlan,StoryboardReview}.swift`, `Models/MediaManifest.swift`, `Generation/GenerationService.swift`, `Project/VideoProject.swift`, `Editor/ViewModel/{EditorViewModel,EditorViewModel+ShotPlan,EditorViewModel+Folders}.swift`, `Agent/Tools/ToolExecutor+{Production,ShotPlan}.swift`, the new lifecycle tests, and both dated records. `VeniceGeneration.swift` remains excluded.
 
 ## Changed-file inventory
 

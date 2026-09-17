@@ -358,6 +358,7 @@ final class VideoProject: NSDocument {
         editorViewModel.generationService.detachAll()
         editorViewModel.productionOrchestrator.detachAll()
         editorViewModel.onProjectCheckpointRequired = nil
+        editorViewModel.persistProductionState = nil
         editorViewModel.onProjectContentChanged = nil
         editorViewModel.agentService.onSessionsChanged = nil
         let searchIndex = editorViewModel.searchIndex
@@ -387,6 +388,17 @@ final class VideoProject: NSDocument {
         }
         editorViewModel.onProjectCheckpointRequired = { [weak self] in
             self?.scheduleProjectCheckpointAutosave()
+        }
+        editorViewModel.persistProductionState = { [weak self] in
+            guard let self, self.fileURL != nil, !self.isClosed else {
+                throw ToolError("Save the project before producing so operation records can be recovered.")
+            }
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                self.autosave(withImplicitCancellability: false) { error in
+                    if let error { continuation.resume(throwing: error) }
+                    else { continuation.resume() }
+                }
+            }
         }
 
         if let manifest = loadedManifest {

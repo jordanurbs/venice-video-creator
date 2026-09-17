@@ -37,8 +37,14 @@ final class ProductionOrchestrator {
     private(set) var lastError: String?
 
     @ObservationIgnored var executeUnit: ((MultiShotPlanner.Unit, Options) async -> Void)?
+    @ObservationIgnored var availableModels: (() -> [VideoModelConfig])?
+    @ObservationIgnored var quoteVideo: ((String, Int, String?, String) async -> Double?)?
+    @ObservationIgnored var generateVideo: ((GenerationInput) async -> MediaAsset?)?
+    @ObservationIgnored var validateVideo: ((MediaAsset, Double, String) async -> OutputValidator.Result)?
+    @ObservationIgnored var evaluateVideoQA: ((String, MediaAsset, ShotPlan) async -> VisionQA.Result?)?
     @ObservationIgnored private var runID = UUID()
     @ObservationIgnored private var runTask: Task<Void, Never>?
+    @ObservationIgnored private var unitTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var cancelRequested = false
     /// Generation units waiting to produce, drained in order by the run loop.
     /// A unit is one shot (normal) or a grouped multi-shot window (opt-in).
@@ -74,6 +80,66 @@ final class ProductionOrchestrator {
         interruptAwaits.removeAll()
     }
 
+    func acceptsSubmissions(runId: UUID) -> Bool { isRunning && !cancelRequested && runID == runId }
+    var currentRunId: UUID { runID }
+
+    private func cancelUnitTasks() {
+        for task in unitTasks.values { task.cancel() }
+        unitTasks.removeAll()
+    }
+
+    private func startOperation(shotIds: [String], options: Options, runId: UUID) async -> String? {
+        guard acceptsSubmissions(runId: runId), let editor else { return nil }
+        var operationId: String?
+        do {
+            let id = try editor.beginProductionOperation(shotIds: shotIds, runId: runId, autoQA: options.autoQA)
+            operationId = id
+            try await editor.checkpointProductionState()
+            guard operationIsCurrent(id) else { return nil }
+            return id
+        } catch {
+            if let operationId, editor.productionOperation(id: operationId)?.stage.isTerminal == false {
+                editor.mutateProductionOperation(operationId) { $0.stage = .failed; $0.failureReason = error.localizedDescription }
+            }
+            if acceptsSubmissions(runId: runId) {
+                for shotId in shotIds { failShot(shotId, reason: error.localizedDescription) }
+            }
+            return nil
+        }
+    }
+
+    private func operationIsCurrent(_ id: String) -> Bool {
+        guard let editor else { return false }
+        do { _ = try editor.requireCurrentProductionOperation(id); return !Task.isCancelled }
+        catch {
+            guard let operation = editor.productionOperation(id: id), !operation.stage.isTerminal else { return false }
+            editor.mutateProductionOperation(id) { $0.stage = .failed; $0.failureReason = error.localizedDescription }
+            if acceptsSubmissions(runId: operation.runId) {
+                for destination in operation.destinations where editor.shot(id: destination.shotId)?.activeProductionOperationId == id {
+                    failShot(destination.shotId, reason: error.localizedDescription)
+                }
+            }
+            return false
+        }
+    }
+
+    private func settleUnfinishedOperation(_ id: String) {
+        guard let editor, let operation = editor.productionOperation(id: id), !operation.stage.isTerminal else { return }
+        let reason = operation.destinations.compactMap { editor.shot(id: $0.shotId)?.failureReason }.first ?? "Production did not finish. Review the operation before retrying."
+        editor.mutateProductionOperation(id) { $0.stage = .failed; $0.failureReason = reason }
+    }
+
+    private func quote(model: String, duration: Int, resolution: String?, aspect: String) async -> Double? {
+        if let quoteVideo { return await quoteVideo(model, duration, resolution, aspect) }
+        return await VeniceAPI.fromKeychain()?.videoQuote(model: model, duration: duration, resolution: resolution, aspectRatio: aspect)
+    }
+
+    private func validate(asset: MediaAsset, duration: Double, aspect: String) async -> OutputValidator.Result {
+        if let validateVideo { return await validateVideo(asset, duration, aspect) }
+        guard let url = editor?.mediaResolver.resolveURL(for: asset.id) else { return .fail("Generated video cannot be resolved.") }
+        return await OutputValidator.validate(url: url, requestedDurationSeconds: duration, targetAspectRatio: aspect)
+    }
+
     var progressText: String {
         guard isRunning else { return "Idle" }
         let base = "Shot \(min(settledCount + 1, max(totalCount, 1))) of \(totalCount)"
@@ -84,11 +150,13 @@ final class ProductionOrchestrator {
 
     /// Cancels the in-memory loop (Venice jobs already queued keep running server-side).
     func detachAll() {
+        editor?.settleProductionOperations(runId: runID, stage: .interrupted)
         cancelledCount += max(0, totalCount - settledCount)
         runID = UUID()
         cancelRequested = true
         runTask?.cancel()
         runTask = nil
+        cancelUnitTasks()
         fireInterrupts()
         pendingQueue.removeAll()
         generatingShotIds.removeAll()
@@ -104,10 +172,19 @@ final class ProductionOrchestrator {
     /// places it on completion. Does not auto-resume the loop — the user restarts it from
     /// the panel/agent.
     func resume(editor: EditorViewModel) {
+        guard !isRunning else { return }
         editor.reconcileLegacyProductionPlacements()
         guard let plan = editor.shotPlan else { return }
         for shot in plan.shots {
             guard shot.status == .generating || shot.status == .qa else { continue }
+            if let operationId = shot.activeProductionOperationId {
+                if let operation = editor.productionOperation(id: operationId), operation.stage == .placed { continue }
+                if let operation = editor.productionOperation(id: operationId), !operation.stage.isTerminal {
+                    editor.mutateProductionOperation(operationId) { $0.stage = .interrupted }
+                }
+                failShot(shot.id, reason: "Production was interrupted. Its operation and generated assets are retained; review them before starting another take.")
+                continue
+            }
             guard let assetId = shot.takes.last?.videoAssetId ?? shot.videoAssetId,
                   let asset = editor.mediaAssets.first(where: { $0.id == assetId }) else {
                 failShot(shot.id, reason: "Generation was interrupted before it could be recovered. Regenerate the shot.")
@@ -129,6 +206,7 @@ final class ProductionOrchestrator {
         Task { @MainActor [weak self] in
             while let self, let editor = self.editor {
                 guard let shot = editor.shot(id: shotId), shot.status == .generating || shot.status == .qa,
+                      shot.activeProductionOperationId == nil,
                       (shot.takes.last?.videoAssetId ?? shot.videoAssetId) == assetId else { return }
                 guard let asset = editor.mediaAssets.first(where: { $0.id == assetId }) else {
                     self.failShot(shotId, reason: "Generated asset disappeared. Regenerate the shot.")
@@ -184,12 +262,14 @@ final class ProductionOrchestrator {
     /// `generating` to their pre-run status so per-shot Generate stays usable.
     func cancel() {
         guard isRunning else { return }
+        editor?.settleProductionOperations(runId: runID, stage: .cancelled)
         cancelledCount += max(0, totalCount - settledCount)
         runID = UUID()
         cancelRequested = true
         isPaused = false
         runTask?.cancel()
         runTask = nil
+        cancelUnitTasks()
         fireInterrupts()
         pendingQueue.removeAll()
         generatingShotIds.removeAll()
@@ -292,6 +372,7 @@ final class ProductionOrchestrator {
         completedCount = 0
         failedCount = 0
         cancelledCount = 0
+        runningUSD = 0
         runID = UUID()
         let id = runID
         totalCount = totalShots
@@ -364,17 +445,19 @@ final class ProductionOrchestrator {
                 currentShotId = unit.shotIds.first
                 if unit.isMultiShot { currentUnitShotIds = unit.shotIds }
                 inFlight += 1
-                Task { @MainActor [weak self] in
+                let taskId = UUID()
+                unitTasks[taskId] = Task { @MainActor [weak self] in
                     if let self, self.runID == id {
                         if let executeUnit = self.executeUnit {
                             await executeUnit(unit, options)
                         } else if unit.isMultiShot {
-                            await self.produceUnit(unit, options: options)
+                            await self.produceUnit(unit, options: options, runId: id)
                         } else if let shotId = unit.shotIds.first {
-                            await self.produceOne(shotId: shotId, options: options)
+                            await self.produceOne(shotId: shotId, options: options, runId: id)
                         }
                     }
                     report(unit.shotIds)
+                    self?.unitTasks[taskId] = nil
                 }
             }
 
@@ -408,26 +491,27 @@ final class ProductionOrchestrator {
     /// `Lens switch.` beats), then places one timeline clip PER SHOT, each
     /// trimmed to its beat's slice of the single asset — the editor still
     /// shows and manages individual shots.
-    private func produceUnit(_ unit: MultiShotPlanner.Unit, options: Options) async {
+    private func produceUnit(_ unit: MultiShotPlanner.Unit, options: Options, runId: UUID) async {
+        guard acceptsSubmissions(runId: runId) else { return }
         guard let editor, let plan = editor.shotPlan else { return }
         let window = unit.shotIds.compactMap { plan.shot(id: $0) }
         guard window.count == unit.shotIds.count, window.count >= 2 else {
             // Plan changed since queuing — fall back to singles.
-            for id in unit.shotIds { await produceOne(shotId: id, options: options) }
+            for id in unit.shotIds { await produceOne(shotId: id, options: options, runId: runId) }
             return
         }
         let label = "\(window.first?.slug ?? "S?")–\(window.last?.slug ?? "S?")"
 
         guard let route = routeUnit(window, plan: plan, editor: editor) else {
             postNotice("\(label): no reference-capable model available for a grouped generation — rendering shots individually.")
-            for id in unit.shotIds { await produceOne(shotId: id, options: options) }
+            for id in unit.shotIds { await produceOne(shotId: id, options: options, runId: runId) }
             return
         }
 
         if route.model.id.lowercased().contains("seedance"),
            !ModelPreferences.shared.seedanceConsentGranted {
             postNotice("\(label): Seedance requires consent (Settings → Models) — rendering shots individually.")
-            for id in unit.shotIds { await produceOne(shotId: id, options: options) }
+            for id in unit.shotIds { await produceOne(shotId: id, options: options, runId: runId) }
             return
         }
 
@@ -443,7 +527,7 @@ final class ProductionOrchestrator {
             duration = rung
         } else {
             postNotice("\(label): \(requested)s window exceeds \(route.model.displayName)'s ladder — rendering shots individually.")
-            for id in unit.shotIds { await produceOne(shotId: id, options: options) }
+            for id in unit.shotIds { await produceOne(shotId: id, options: options, runId: runId) }
             return
         }
 
@@ -455,17 +539,18 @@ final class ProductionOrchestrator {
         let resolution = route.model.resolutions?.contains(plan.resolution) == true ? plan.resolution : route.model.resolutions?.first
         if let err = route.model.validate(duration: duration, aspectRatio: aspect, resolution: resolution) {
             postNotice("\(label): \(err) — rendering shots individually.")
-            for id in unit.shotIds { await produceOne(shotId: id, options: options) }
+            for id in unit.shotIds { await produceOne(shotId: id, options: options, runId: runId) }
             return
         }
         if aspect != plan.aspectRatio {
             postNotice("⚠️ \(label): \(route.model.displayName) doesn't offer \(plan.aspectRatio) — generating \(aspect) instead.")
         }
 
+        guard let operationId = await startOperation(shotIds: unit.shotIds, options: options, runId: runId) else { return }
+        defer { settleUnfinishedOperation(operationId) }
         for shot in window { editor.setShotStatus(id: shot.id, .generating) }
-        let quoted = await VeniceAPI.fromKeychain()?.videoQuote(
-            model: route.model.id, duration: duration, resolution: resolution, aspectRatio: aspect
-        )
+        let quoted = await quote(model: route.model.id, duration: duration, resolution: resolution, aspect: aspect)
+        guard operationIsCurrent(operationId) else { return }
         let costNote = quoted.map { String(format: " (~$%.2f)", $0) } ?? ""
         postNotice("Generating \(label) with \(route.model.displayName) as one multi-shot take: \(unit.reason), \(duration)s @ \(aspect)\(costNote).")
 
@@ -490,15 +575,16 @@ final class ProductionOrchestrator {
 
         var lastFailure = "generation failed"
         for attempt in 0...max(0, options.maxRetries) {
-            if cancelRequested { return }
+            guard operationIsCurrent(operationId) else { return }
             let asset = await submitAndAwait(
                 genInput: genInput, model: route.model, inputAssets: route.inputAssets,
-                placeholderDuration: Double(duration), generateAudio: true, editor: editor
+                placeholderDuration: Double(duration), generateAudio: true, editor: editor, operationId: operationId
             )
-            if cancelRequested { return }
+            guard operationIsCurrent(operationId) else { return }
 
             guard let asset else {
-                lastFailure = "generation failed"
+                lastFailure = editor.productionOperation(id: operationId)?.attempts.last?.failureReason ?? "generation failed"
+                editor.recordProductionAttemptFailure(operationId, reason: lastFailure)
                 if attempt < options.maxRetries {
                     let delay = options.retryBaseDelay * Double(attempt + 1)
                     postNotice("\(label) failed — retrying in \(Int(delay))s (attempt \(attempt + 2)).")
@@ -508,14 +594,13 @@ final class ProductionOrchestrator {
                 break
             }
 
-            // Post-render output validation (same as the single-shot path): reject
-            // a portrait/truncated multi-shot take and let the retry path replace it.
-            if let url = editor.mediaResolver.resolveURL(for: asset.id) {
-                let check = await OutputValidator.validate(
-                    url: url, requestedDurationSeconds: Double(duration), targetAspectRatio: aspect
-                )
+            editor.mutateProductionOperation(operationId) { $0.stage = .validating }
+            let check = await validate(asset: asset, duration: Double(duration), aspect: aspect)
+            guard operationIsCurrent(operationId) else { return }
+            do {
                 if !check.ok {
                     lastFailure = check.reason ?? "output failed validation"
+                    editor.recordProductionAttemptFailure(operationId, reason: lastFailure)
                     if attempt < options.maxRetries {
                         postNotice("\(label) output rejected (\(lastFailure)) — regenerating.")
                         try? await Task.sleep(for: .seconds(options.retryBaseDelay))
@@ -528,23 +613,31 @@ final class ProductionOrchestrator {
             let segments: [ShotSourceRange]
             do { segments = try unitSourceRanges(window: window, asset: asset) }
             catch { lastFailure = error.localizedDescription; break }
-            let unitId = UUID().uuidString
+            let unitId = operationId
             for (shot, segment) in zip(window, segments) {
-                recordTake(shotId: shot.id, asset: asset, model: route.model.id, unitId: unitId, sourceRange: segment)
+                recordTake(shotId: shot.id, asset: asset, model: route.model.id, unitId: unitId, sourceRange: segment, operationId: operationId)
             }
 
             if options.autoQA, let firstId = window.first?.id {
-                if let result = await runAutoQA(shotId: firstId, asset: asset, plan: plan) {
-                    if !result.pass && attempt < options.maxRetries {
+                let result = await runAutoQA(shotId: firstId, asset: asset, plan: plan, operationId: operationId)
+                guard operationIsCurrent(operationId) else { return }
+                guard let result else { lastFailure = "QA is unavailable. Review the retained take before placement."; break }
+                if !result.pass {
+                    lastFailure = "Take failed QA: \(result.summary)"
+                    editor.recordProductionAttemptFailure(operationId, reason: lastFailure)
+                    if attempt < options.maxRetries {
                         postNotice("\(label) failed QA (score \(String(format: "%.2f", result.score))) — regenerating.")
                         try? await Task.sleep(for: .seconds(options.retryBaseDelay))
                         continue
                     }
+                    break
                 }
             }
 
+            guard operationIsCurrent(operationId) else { return }
             do { try placeUnitClips(window: window, segments: segments, asset: asset, editor: editor) }
             catch { lastFailure = error.localizedDescription; break }
+            editor.mutateProductionOperation(operationId) { $0.stage = .placed }
             editor.reorderProductionClipsToPlanOrder()
             if let quoted { runningUSD += quoted }
             postNotice("Placed \(label) on the timeline as \(window.count) clips from one take.")
@@ -660,17 +753,21 @@ final class ProductionOrchestrator {
 
     // MARK: - Per-shot production
 
-    private func produceOne(shotId: String, options: Options) async {
+    private func produceOne(shotId: String, options: Options, runId: UUID) async {
+        guard acceptsSubmissions(runId: runId) else { return }
         guard let editor, let plan = editor.shotPlan, let shot = plan.shot(id: shotId) else { return }
         let label = shot.slug ?? "shot \(shotId.prefix(6))"
+        guard let operationId = await startOperation(shotIds: [shotId], options: options, runId: runId) else { return }
+        defer { settleUnfinishedOperation(operationId) }
 
         // Frame chaining: if the previous shot transitions by dissolve/match-cut, seed this
         // shot from its last frame for visual continuity (needs an image-to-video model).
         let chainFrame = await chainStartFrame(for: shotId, plan: plan, editor: editor)
+        guard operationIsCurrent(operationId) else { return }
 
         let route: Route
         do {
-            route = try self.route(shot, plan: plan, editor: editor, chainFrame: chainFrame)
+            route = try self.route(shot, plan: plan, editor: editor, chainFrame: chainFrame, availableModels: availableModels?())
         } catch {
             failShot(shotId, reason: error.localizedDescription)
             return
@@ -707,9 +804,8 @@ final class ProductionOrchestrator {
         catch { failShot(shotId, reason: error.localizedDescription); return }
 
         editor.setShotStatus(id: shotId, .generating)
-        let quoted = await VeniceAPI.fromKeychain()?.videoQuote(
-            model: route.model.id, duration: duration, resolution: resolution, aspectRatio: aspect
-        )
+        let quoted = await quote(model: route.model.id, duration: duration, resolution: resolution, aspect: aspect)
+        guard operationIsCurrent(operationId) else { return }
         let costNote = quoted.map { String(format: " (~$%.2f)", $0) } ?? ""
         // Always name the model — "is Seedance even being used?" must be
         // answerable from the chat transcript alone.
@@ -742,18 +838,18 @@ final class ProductionOrchestrator {
 
         var lastFailure = "generation failed"
         for attempt in 0...max(0, options.maxRetries) {
-            if cancelRequested { return }
+            guard operationIsCurrent(operationId) else { return }
             let asset = await submitAndAwait(
                 genInput: genInput, model: route.model, inputAssets: route.inputAssets,
-                placeholderDuration: Double(duration), generateAudio: generateAudio, editor: editor,
+                placeholderDuration: Double(duration), generateAudio: generateAudio, editor: editor, operationId: operationId,
                 videoBudget: options.videoBudget
             )
 
-            // Interrupted by Stop — state was already reset; don't mark failed.
-            if cancelRequested { return }
+            guard operationIsCurrent(operationId) else { return }
 
             guard let asset else {
-                lastFailure = "generation failed"
+                lastFailure = editor.productionOperation(id: operationId)?.attempts.last?.failureReason ?? "generation failed"
+                editor.recordProductionAttemptFailure(operationId, reason: lastFailure)
                 if attempt < options.maxRetries {
                     let delay = options.retryBaseDelay * Double(attempt + 1)
                     postNotice("\(label) failed — retrying in \(Int(delay))s (attempt \(attempt + 2)).")
@@ -763,15 +859,13 @@ final class ProductionOrchestrator {
                 break
             }
 
-            // Post-render output validation: a portrait/truncated file passes the
-            // queue but is unusable — treat it as a failed attempt so the retry
-            // path replaces it instead of placing a broken clip.
-            if let url = editor.mediaResolver.resolveURL(for: asset.id) {
-                let check = await OutputValidator.validate(
-                    url: url, requestedDurationSeconds: Double(duration), targetAspectRatio: aspect
-                )
+            editor.mutateProductionOperation(operationId) { $0.stage = .validating }
+            let check = await validate(asset: asset, duration: Double(duration), aspect: aspect)
+            guard operationIsCurrent(operationId) else { return }
+            do {
                 if !check.ok {
                     lastFailure = check.reason ?? "output failed validation"
+                    editor.recordProductionAttemptFailure(operationId, reason: lastFailure)
                     if attempt < options.maxRetries {
                         postNotice("\(label) output rejected (\(lastFailure)) — regenerating.")
                         try? await Task.sleep(for: .seconds(options.retryBaseDelay))
@@ -781,21 +875,29 @@ final class ProductionOrchestrator {
                 }
             }
 
-            recordTake(shotId: shotId, asset: asset, model: route.model.id)
+            recordTake(shotId: shotId, asset: asset, model: route.model.id, operationId: operationId)
 
             // Optional auto-QA: a hard fail with retries left triggers another take.
             if options.autoQA {
-                if let result = await runAutoQA(shotId: shotId, asset: asset, plan: plan) {
-                    if !result.pass && attempt < options.maxRetries {
+                let result = await runAutoQA(shotId: shotId, asset: asset, plan: plan, operationId: operationId)
+                guard operationIsCurrent(operationId) else { return }
+                guard let result else { lastFailure = "QA is unavailable. Review the retained take before placement."; break }
+                if !result.pass {
+                    lastFailure = "Take failed QA: \(result.summary)"
+                    editor.recordProductionAttemptFailure(operationId, reason: lastFailure)
+                    if attempt < options.maxRetries {
                         postNotice("\(label) failed QA (score \(String(format: "%.2f", result.score))) — regenerating.")
                         try? await Task.sleep(for: .seconds(options.retryBaseDelay))
                         continue
                     }
+                    break
                 }
             }
 
+            guard operationIsCurrent(operationId) else { return }
             do { try editor.placeProductionShot(asset: asset, shotId: shotId) }
             catch { failShot(shotId, reason: error.localizedDescription); return }
+            editor.mutateProductionOperation(operationId) { $0.stage = .placed }
             editor.reorderProductionClipsToPlanOrder()
             if let quoted { runningUSD += quoted }
             postNotice("Placed \(label) on the timeline.")
@@ -813,15 +915,33 @@ final class ProductionOrchestrator {
         placeholderDuration: Double,
         generateAudio: Bool,
         editor: EditorViewModel,
+        operationId: String,
         videoBudget: VideoGenerationBudget? = nil
     ) async -> MediaAsset? {
+        let input: GenerationInput
+        do {
+            let recipe = VideoGenerationSubmission.make(genInput: genInput, model: model, inputAssets: inputAssets,
+                                                       placeholderDuration: placeholderDuration, generateAudio: generateAudio).genInput
+            input = try editor.beginProductionAttempt(operationId: operationId, recipe: recipe)
+            try await editor.checkpointProductionState()
+            try editor.validateProductionAttempt(input)
+        } catch {
+            if operationIsCurrent(operationId) {
+                editor.mutateProductionOperation(operationId) { $0.stage = .failed; $0.failureReason = error.localizedDescription }
+                for destination in editor.productionOperation(id: operationId)?.destinations ?? [] {
+                    failShot(destination.shotId, reason: error.localizedDescription)
+                }
+            }
+            return nil
+        }
+        if let generateVideo { return await generateVideo(input) }
         let awaitKey = UUID()
         defer { interruptAwaits[awaitKey] = nil }
         return await withCheckedContinuation { (continuation: CheckedContinuation<MediaAsset?, Never>) in
             let once = FirstOnlyFlag()
             interruptAwaits[awaitKey] = { if once.fire() { continuation.resume(returning: nil) } }
             let submission = VideoGenerationSubmission.make(
-                genInput: genInput,
+                genInput: input,
                 model: model,
                 inputAssets: inputAssets,
                 placeholderDuration: placeholderDuration,
@@ -839,24 +959,36 @@ final class ProductionOrchestrator {
         }
     }
 
-    private func runAutoQA(shotId: String, asset: MediaAsset, plan: ShotPlan) async -> VisionQA.Result? {
+    private func runAutoQA(shotId: String, asset: MediaAsset, plan: ShotPlan, operationId: String) async -> VisionQA.Result? {
+        guard operationIsCurrent(operationId) else { return nil }
+        if let evaluateVideoQA {
+            editor?.mutateProductionOperation(operationId) { $0.stage = .reviewing }
+            let result = await evaluateVideoQA(shotId, asset, plan)
+            guard operationIsCurrent(operationId) else { return nil }
+            if let result { recordQAResult(result, shotId: shotId) }
+            return result
+        }
         guard let editor,
               let api = VeniceAPI.fromKeychain(),
               let model = VisionQA.selectModel(),
               let url = editor.mediaResolver.resolveURL(for: asset.id),
               let shot = editor.shotPlan?.shot(id: shotId) else { return nil }
         var frames = await VisionQA.videoFrames(url: url, count: 3)
+        guard operationIsCurrent(operationId) else { return nil }
         guard !frames.isEmpty else { return nil }
         // Spatial drift guard (harness qa-storyboard): append the nearest earlier
         // same-location frame so the reviewer can catch mirrored geography /
         // side-swaps against real prior coverage, not the stated layout alone.
         let priorFrame = await priorSameLocationQAFrame(for: shot, plan: plan, editor: editor)
+        guard operationIsCurrent(operationId) else { return nil }
         if let priorFrame { frames.append(priorFrame) }
         let rubric = ProductionOrchestrator.qaRubric(for: shot, plan: plan, comparePriorPanel: priorFrame != nil)
         let result: VisionQA.Result
+        editor.mutateProductionOperation(operationId) { $0.stage = .reviewing }
         do {
             result = try await VisionQA.evaluate(images: frames, rubric: rubric, api: api, model: model)
         } catch {
+            guard operationIsCurrent(operationId) else { return nil }
             // Errored QA is NOT a silent pass (harness rule 46b): stamp the shot
             // UNCHECKED so no auto-approve path reads the missing verdict as "all
             // clear". Returning nil keeps the retry path from treating it as a
@@ -867,7 +999,13 @@ final class ProductionOrchestrator {
             }
             return nil
         }
-        editor.mutateShotPlan(actionName: "QA Shot") { plan in
+        guard operationIsCurrent(operationId) else { return nil }
+        recordQAResult(result, shotId: shotId)
+        return result
+    }
+
+    private func recordQAResult(_ result: VisionQA.Result, shotId: String) {
+        editor?.mutateShotPlan(actionName: "QA Shot") { plan in
             guard let idx = plan.shots.firstIndex(where: { $0.id == shotId }) else { return }
             plan.shots[idx].qaSummary = result.summary
             if let last = plan.shots[idx].takes.indices.last {
@@ -875,7 +1013,6 @@ final class ProductionOrchestrator {
                 plan.shots[idx].takes[last].qaSummary = result.summary
             }
         }
-        return result
     }
 
     /// A single JPEG frame of the nearest earlier shot (plan order) that shares a
@@ -908,15 +1045,17 @@ final class ProductionOrchestrator {
 
     // MARK: - Plan mutations
 
-    private func recordTake(shotId: String, asset: MediaAsset, model: String, unitId: String? = nil, sourceRange: ShotSourceRange? = nil) {
+    private func recordTake(shotId: String, asset: MediaAsset, model: String, unitId: String? = nil, sourceRange: ShotSourceRange? = nil, operationId: String) {
         // The produced asset carries the fully-resolved submitted call (final
         // prompt, reference asset ids, negative prompt, seed) — snapshot it as the
         // take's replayable recipe (harness rule 39).
         let recipe = asset.generationInput
+        guard let takeId = editor?.productionOperation(id: operationId)?.attempts.last?.takeIds[shotId] else { return }
         editor?.mutateShotPlan(actionName: "Shot Take") { plan in
             guard let idx = plan.shots.firstIndex(where: { $0.id == shotId }) else { return }
+            guard !plan.shots[idx].takes.contains(where: { $0.id == takeId }) else { return }
             var take = ShotTake(
-                videoAssetId: asset.id, model: model, recipe: recipe, seed: recipe?.seed
+                id: takeId, videoAssetId: asset.id, model: model, recipe: recipe, seed: recipe?.seed
             )
             take.productionUnitId = unitId
             take.sourceRange = sourceRange

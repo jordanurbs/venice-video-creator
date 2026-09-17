@@ -102,6 +102,11 @@ final class GenerationService {
             }
             do {
                 try Task.checkCancellation()
+                if genInput.productionOperationId != nil {
+                    try editor.validateProductionAttempt(genInput)
+                    try await editor.checkpointProductionState()
+                    try editor.validateProductionAttempt(genInput)
+                }
                 for binding in genInput.storyboardBindings ?? [] { try editor.validateStoryboardSubmission(binding) }
                 if assetType == .video {
                     guard catalog.isLoaded, let model = catalog.video.first(where: { $0.id == genInput.model }),
@@ -322,6 +327,7 @@ final class GenerationService {
         placeholder.generationStatus = .preparing
         placeholder.folderId = folderId
         editor.importMediaAsset(placeholder)
+        editor.recordProductionJobMetadata(placeholder)
         return placeholder
     }
 
@@ -354,6 +360,7 @@ final class GenerationService {
             editor.importMediaAsset(asset, skipAppend: true)
             editor.appendGenerationLog(for: asset)
             await editor.finalizeImportedAsset(asset)
+            editor.recordProductionJobMetadata(asset)
             return true
         } catch {
             let message = error.localizedDescription
@@ -484,6 +491,7 @@ final class GenerationService {
             asset.generationInput = input
         }
         editor.updateManifestMetadata(for: asset)
+        editor.recordProductionJobMetadata(asset)
     }
 
     /// Uploads each reference and returns the hosted URLs.
@@ -575,6 +583,7 @@ final class GenerationService {
                 videoBudget: videoBudget,
                 validateSubmission: { [weak editor] in
                     guard let editor else { throw ToolError("The project closed before submission.") }
+                    try editor.validateProductionAttempt(genInput)
                     for binding in genInput.storyboardBindings ?? [] { try editor.validateStoryboardSubmission(binding) }
                 }
             )

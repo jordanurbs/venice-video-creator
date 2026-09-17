@@ -157,13 +157,15 @@ extension ToolExecutor {
 
     func productionStatus(_ editor: EditorViewModel) -> ToolResult {
         let o = editor.productionOrchestrator
-        let status = ProductionStatus(
+        var status = ProductionStatus(
             isRunning: o.isRunning, isPaused: o.isPaused, currentShotId: o.currentShotId,
             succeededCount: o.completedCount, failedCount: o.failedCount,
             cancelledCount: o.cancelledCount, totalCount: o.totalCount,
             queuedUnits: o.pendingQueue, generatingShotIds: o.generatingShotIds.sorted(),
             runningUSD: o.runningUSD, lastError: o.lastError
         )
+        status.operationCount = editor.mediaManifest.productionOperations.count
+        status.operations = editor.mediaManifest.productionOperations.suffix(50).map(ProductionStatus.OperationSummary.init)
         do {
             let data = try JSONEncoder().encode(status)
             return .ok(String(decoding: data, as: UTF8.self))

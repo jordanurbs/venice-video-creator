@@ -397,6 +397,7 @@ extension ToolExecutor {
             merged.panelReview = old.panelReview
             merged.videoAssetId = old.videoAssetId
             merged.placement = old.placement
+            merged.activeProductionOperationId = old.activeProductionOperationId
             merged.takes = old.takes
             merged.qaSummary = old.qaSummary
             merged.failureReason = old.failureReason

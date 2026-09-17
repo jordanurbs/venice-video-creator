@@ -11,6 +11,7 @@ final class ProductionOrchestrator {
     weak var editor: EditorViewModel?
 
     struct Options: Sendable {
+        var videoBudget: VideoGenerationBudget?
         var autoQA: Bool = false
         var maxRetries: Int = 2
         /// Seconds to wait before retrying a failed shot (grows per attempt).
@@ -191,8 +192,9 @@ final class ProductionOrchestrator {
     /// Starts producing the given shots (in plan order), or — if a run is already
     /// active — appends them to the pending queue so they generate after the
     /// in-flight shot instead of being refused.
-    func produceShots(ids requestedIds: [String], options: Options = Options()) {
-        guard let editor, let plan = editor.shotPlan else { return }
+    @discardableResult
+    func produceShots(ids requestedIds: [String], options: Options = Options()) -> Bool {
+        guard let editor, let plan = editor.shotPlan else { return false }
 
         // Resolve to plan order; if none requested, produce everything not yet placed.
         let orderedShots = plan.shots.filter { shot in
@@ -202,7 +204,18 @@ final class ProductionOrchestrator {
 
         guard !orderedShots.isEmpty else {
             postNotice("Nothing to produce — all requested shots are already placed.")
-            return
+            return false
+        }
+
+        let requiresBudget = orderedShots.contains {
+            VideoGenerationBudget.isRequired(model: $0.modelOverride ?? plan.defaultModel ?? "", resolution: plan.resolution)
+        }
+        if requiresBudget && (options.videoBudget == nil || isRunning) {
+            lastError = isRunning
+                ? "Wait for the current production run to finish before submitting a new 1080P budget."
+                : "Set a 1080P spending cap in the Production panel or pass maxCostUSD with user approval."
+            postNotice(lastError!)
+            return false
         }
 
         // Group consecutive same-scene shots into multi-shot units when the
@@ -231,13 +244,13 @@ final class ProductionOrchestrator {
             let addable = ordered.filter { $0.shotIds.allSatisfy { !busy.contains($0) } }
             guard !addable.isEmpty else {
                 postNotice("Those shots are already generating or queued.")
-                return
+                return false
             }
             pendingQueue.append(contentsOf: addable)
             let addedShots = addable.reduce(0) { $0 + $1.shotIds.count }
             totalCount += addedShots
             postNotice("Queued \(addedShots) shot\(addedShots == 1 ? "" : "s") behind the active run.")
-            return
+            return true
         }
 
         let totalShots = ordered.reduce(0) { $0 + $1.shotIds.count }
@@ -266,6 +279,7 @@ final class ProductionOrchestrator {
                 postNotice("Production finished: \(completedCount) succeeded, \(failedCount) failed, \(cancelledCount) cancelled (\(totalCount) shots).")
             }
         }
+        return true
     }
 
     /// Drains the queue with up to `maxParallel` units generating at once.
@@ -687,7 +701,8 @@ final class ProductionOrchestrator {
             if cancelRequested { return }
             let asset = await submitAndAwait(
                 genInput: genInput, model: route.model, inputAssets: route.inputAssets,
-                placeholderDuration: Double(duration), generateAudio: generateAudio, editor: editor
+                placeholderDuration: Double(duration), generateAudio: generateAudio, editor: editor,
+                videoBudget: options.videoBudget
             )
 
             // Interrupted by Stop — state was already reset; don't mark failed.
@@ -752,7 +767,8 @@ final class ProductionOrchestrator {
         inputAssets: VideoGenerationSubmission.InputAssets,
         placeholderDuration: Double,
         generateAudio: Bool,
-        editor: EditorViewModel
+        editor: EditorViewModel,
+        videoBudget: VideoGenerationBudget? = nil
     ) async -> MediaAsset? {
         let awaitKey = UUID()
         defer { interruptAwaits[awaitKey] = nil }
@@ -771,6 +787,7 @@ final class ProductionOrchestrator {
                 service: editor.generationService,
                 projectURL: editor.projectURL,
                 editor: editor,
+                videoBudget: videoBudget,
                 onComplete: { asset in if once.fire() { continuation.resume(returning: asset) } },
                 onFailure: { if once.fire() { continuation.resume(returning: nil) } }
             )

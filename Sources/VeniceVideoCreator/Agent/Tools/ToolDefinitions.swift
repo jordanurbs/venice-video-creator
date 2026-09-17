@@ -552,6 +552,7 @@ enum ToolDefinitions {
             inputSchema: objectSchema(
                 properties: [
                     "cameraTrajectory": cameraTrajectorySchema,
+                    "maxCostUSD": videoBudgetSchema,
                     "prompt": ["type": "string", "description": "Video prompt. Optional only for Multi-Angle with a valid camera move."],
                     "name": ["type": "string", "description": "Display name for the asset in the media library. Defaults to first 30 chars of prompt."],
                     "model": ["type": "string", "description": "Model ID (e.g. 'veo3.1-fast'). Use list_models to see options. Defaults to first available model."],
@@ -1293,6 +1294,7 @@ enum ToolDefinitions {
                     "shotIds": ["type": "array", "items": ["type": "string"], "description": "Shots to produce (in plan order). Omit to produce every shot not already placed."],
                     "autoQA": ["type": "boolean", "description": "Run vision QA on each generated shot and auto-retry a hard fail. Default false."],
                     "maxRetries": ["type": "integer", "description": "Retries per shot on failure (0–5, default 2)."],
+                    "maxCostUSD": videoBudgetSchema,
                     "allowThinPrompts": ["type": "boolean", "description": "Bypass the pre-flight that refuses prompts with no camera/motion language (which render static footage). Only pass true after the user explicitly accepts the prompts as-is."],
                 ]
             )
@@ -1305,6 +1307,7 @@ enum ToolDefinitions {
                     "shotId": ["type": "string", "description": "Shot id from get_shot_plan."],
                     "prompt": ["type": "string", "description": "Optional new prompt for this shot."],
                     "model": ["type": "string", "description": "Optional video model override for this shot."],
+                    "maxCostUSD": videoBudgetSchema,
                     "autoQA": ["type": "boolean", "description": "Run vision QA on the new take. Default false."],
                 ],
                 required: ["shotId"]
@@ -1344,6 +1347,11 @@ enum ToolDefinitions {
                 "distance": ["type": "number", "exclusiveMinimum": 0],
             ], required: ["time", "azimuth", "elevation", "distance"]),
         ]
+    }
+
+    private static var videoBudgetSchema: [String: Any] {
+        ["type": "number", "exclusiveMinimum": 0,
+         "description": "Required for explicit Multi-Angle 1080P. User-approved total USD cap for this request's 1080P attempts, including retries. Each attempt refreshes its quote. Not saved or reused on rerun; other lanes are not covered by this cap."]
     }
 
     private static func shotSchema() -> [String: Any] {

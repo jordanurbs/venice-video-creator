@@ -71,6 +71,7 @@ extension ToolExecutor {
         }()
 
         var options = ProductionOrchestrator.Options()
+        options.videoBudget = try Self.videoBudget(args)
         // Default autoQA ON when panels are unvetted so the produce loop rejects
         // and retakes a bad shot instead of silently placing it; the agent can
         // still pass autoQA explicitly to override.
@@ -79,7 +80,9 @@ extension ToolExecutor {
 
         // Queues behind an active run rather than refusing; duplicates coalesce.
         let queued = editor.productionOrchestrator.isRunning
-        editor.productionOrchestrator.produceShots(ids: shotIds, options: options)
+        guard editor.productionOrchestrator.produceShots(ids: shotIds, options: options) else {
+            throw ToolError(editor.productionOrchestrator.lastError ?? "No shots were queued.")
+        }
         let skippedPlaced = shotIds.isEmpty ? plan.shots.count - targets.count : 0
         var body: [String: Any] = [
             "started": true,
@@ -116,6 +119,11 @@ extension ToolExecutor {
         }
 
         // Apply optional overrides before the run so routing/prompt use them.
+        let videoBudget = try Self.videoBudget(args)
+        try VideoGenerationBudget.requireIfNeeded(
+            model: args.string("model") ?? plan.shot(id: shotId)?.modelOverride ?? plan.defaultModel ?? "",
+            resolution: plan.resolution, budget: videoBudget
+        )
         let newPrompt = args.string("prompt")
         let newModel = args.string("model")
         if newPrompt != nil || newModel != nil {
@@ -128,8 +136,11 @@ extension ToolExecutor {
 
         var options = ProductionOrchestrator.Options()
         options.autoQA = args.bool("autoQA") ?? false
+        options.videoBudget = videoBudget
         let queued = editor.productionOrchestrator.isRunning
-        editor.productionOrchestrator.produceShots(ids: [shotId], options: options)
+        guard editor.productionOrchestrator.produceShots(ids: [shotId], options: options) else {
+            throw ToolError(editor.productionOrchestrator.lastError ?? "No shot was queued.")
+        }
 
         let body: [String: Any] = [
             "started": true,

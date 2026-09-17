@@ -31,7 +31,7 @@ enum VideoModelCapabilities {
     }
 
     static func automaticResolution(id: String, allowed: [String]?) -> String? {
-        if id == multiAngleID, allowed?.contains("768P") == true { return "768P" }
+        if id == multiAngleID { return ["768P", "480P"].first { allowed?.contains($0) == true } }
         return allowed?.first
     }
 

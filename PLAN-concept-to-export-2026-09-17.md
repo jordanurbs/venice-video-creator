@@ -1,7 +1,7 @@
 # Concept-to-export remediation plan
 
 Date: 2026-09-17
-Status: first implementation slice compiled; targeted regressions and full Swift suite pass. Related-only commit preparation in progress. No phase exit or dated E2E acceptance has passed.
+Status: first implementation slice committed as `c36247d`; catalog/1080P follow-up compiled and regression-tested. No phase exit or dated E2E acceptance has passed.
 Evidence and detailed acceptance cases: `AUDIT-concept-to-export-2026-09-17.md`.
 Session instructions: `HANDOFF-concept-to-export-2026-09-17.md`.
 
@@ -34,7 +34,8 @@ Exit: build/test baseline is known, new regressions reproduce the defects, and d
 
 ## Phase 1 — Routing and full MiniMax contract (F02)
 
-- [ ] Resolve explicit model/lane before fallback; reject unknown, unavailable, or incompatible overrides with an actionable error. Never silently substitute a paid model.
+- [x] Resolve explicit model/lane before fallback; reject unknown, unavailable, or incompatible overrides with an actionable error. Never silently substitute a paid model.
+- [x] Guard superseded catalog success/error callbacks and bind native video picker selection to model ID. Block video submissions during catalog reload and when the selected model disappears.
 - [ ] Route approved storyboard frames to I2V, reference slots to R2V, and no image inputs to T2V. Separate inherited output aspect from the omitted API `aspect_ratio` field.
 - [ ] Reconcile the app manifest and local harness contract. Coordinate schema policy for `supportsCameraTrajectory`; a manifest refresh must not accidentally activate unrelated capabilities.
 - [ ] Verify live catalog availability before supplementing missing picker models; the bundled capability snapshot is not a catalog.
@@ -42,7 +43,7 @@ Exit: build/test baseline is known, new regressions reproduce the defects, and d
 - [ ] Thread camera settings through shot tools, direct generation, submission/backend parameters, and the final Venice request builder. Validate before upload, quote, or queue.
 - [ ] Add six accessible inspector/settings controls, reset, validation, undo, and agent schema support. Preserve advanced trajectories rather than flattening them on load/edit.
 - [x] Handle Multi-Angle before broad family fallbacks. Keep explicit camera moves single-shot; make grouped Max R2V simple-prompt behavior capability-aware or leave that grouping disabled until verified.
-- [ ] Separate automatic resolution from maximum supported resolution: Multi-Angle defaults to 768P; explicit 1080P requires a refreshed quote.
+- [x] Separate automatic resolution from maximum supported resolution: Multi-Angle defaults to 768P (480P if that is the only lower tier); automatic mode never selects 1080P. Explicit 1080P requires a fresh queue-boundary quote and a per-request cap shared by retries/batch attempts. This is not the durable all-lane attempt ledger in Phase 3.
 - [ ] Test every lane's request body, inherited aspect, unsupported combinations, missing image, absent Multi-Angle prompt, trajectory boundaries, resolution load races, undo/retake, and old-project decoding.
 
 Exit: all six lane fixtures pass, selected models are honored, and the six camera settings survive save/reopen and reach the serialized provider request.
@@ -152,3 +153,5 @@ Advanced camera curve editor/presets, unrelated model-family parity, deferred `e
 - Source review follow-up: added a visible Remove action for unsupported camera state, guarded stale audio quotes, corrected optional model metadata, rejected explicit T2V with visual inputs and fractional MiniMax durations, and replaced the PNG fixture with CRC-checked data. Unrelated Seedance bitrate request hunk is preserved and flagged in the validation report, not included in the proposed commit.
 - Commit attempt: staging approval rejected before execution by the automatic reviewer. Index unchanged; no commit created. All related work and the flagged unrelated bitrate hunk remain preserved. Authorized build/tests and Git writes are the next gates; no bypass attempted.
 - 2026-09-17 continuation: normal build execution restored. Fixed camera-array decoding and Swift 6 transfer of the extracted request dictionary. A targeted regression exposed agent undo ignoring shot-plan-only changes; extended its snapshot guard and added manual-edit protection and malformed-camera regressions. Targeted 115 tests pass; full Swift suite reports 1,058 tests in 165 suites passing (six model-dependent skips). Existing local export tests ran; the dated 35–50s workflow, native UI, recovery, and paid acceptance remain open.
+- First slice committed: `c36247d` (`feat(production): implement status and MiniMax camera routing contracts`), 48 files, after staged-diff review. Only the explicitly excluded Seedance bitrate hunk remained unstaged.
+- Catalog/1080P follow-up: injectable catalog loader, superseded-result guards, key-removal clearing, stable video selection, and loaded/enabled model checks before reference preparation and final queueing. Added an ephemeral 1080P spending cap through UI, agent, production retries, service/backend, and final request runner; reruns cannot inherit approval from recipes. New catalog/budget tests and existing contracts pass: targeted 32 tests in seven suites; full suite reports 1,070 tests in 167 suites passing (same six skips). Native acceptance and revision-approved storyboard routing are next; phases 2–6 remain open.

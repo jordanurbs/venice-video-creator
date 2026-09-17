@@ -7,6 +7,7 @@ struct ProductionPanel: View {
     @Environment(EditorViewModel.self) private var editor
     @State private var confirmingStartOver = false
     @State private var confirmingShotReset: String?
+    @State private var maximumVideoUSD = 0.0
 
     private var plan: ShotPlan? { editor.shotPlan }
     private var orchestrator: ProductionOrchestrator { editor.productionOrchestrator }
@@ -61,6 +62,14 @@ struct ProductionPanel: View {
 
     // MARK: - Run bar
 
+    private func produce(ids: [String]) {
+        var options = ProductionOrchestrator.Options()
+        if maximumVideoUSD.isFinite, maximumVideoUSD > 0 {
+            options.videoBudget = try? VideoGenerationBudget(maximumUSD: maximumVideoUSD)
+        }
+        if orchestrator.produceShots(ids: ids, options: options) { maximumVideoUSD = 0 }
+    }
+
     private func runBar(_ plan: ShotPlan) -> some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
             HStack(spacing: AppTheme.Spacing.sm) {
@@ -78,7 +87,7 @@ struct ProductionPanel: View {
                     // produceShots(ids: []) only generates shots not yet placed —
                     // say so on the button so "all" can't read as "regenerate all".
                     let remaining = remainingCount(plan)
-                    Button { orchestrator.produceShots(ids: []) } label: {
+                    Button { produce(ids: []) } label: {
                         controlLabel(remaining == plan.shots.count
                             ? "Produce all (\(remaining))"
                             : "Produce remaining (\(remaining))", "play.fill")
@@ -131,6 +140,11 @@ struct ProductionPanel: View {
                 Text(orchestrator.progressText)
                     .font(.system(size: AppTheme.FontSize.xxs))
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
+            }
+            if plan.shots.contains(where: {
+                VideoGenerationBudget.isRequired(model: $0.modelOverride ?? plan.defaultModel ?? "", resolution: plan.resolution)
+            }), !orchestrator.isRunning {
+                VideoBudgetControl(maximumUSD: $maximumVideoUSD)
             }
             if let err = orchestrator.lastError, !orchestrator.isRunning {
                 Text(err)
@@ -227,7 +241,7 @@ struct ProductionPanel: View {
                         isQueued: orchestrator.isQueued(shot.id),
                         onSelect: { editor.selectShot(id: shot.id) },
                         onApprove: { editor.setShotStatus(id: shot.id, .approved) },
-                        onRegenerate: { editor.productionOrchestrator.produceShots(ids: [shot.id]) },
+                        onRegenerate: { produce(ids: [shot.id]) },
                         onStartOver: { confirmingShotReset = shot.id }
                     )
                 }

@@ -15,6 +15,9 @@ final class FirstOnlyFlag {
 
 @MainActor
 final class GenerationService {
+    private let catalog: ModelCatalog
+
+    init(catalog: ModelCatalog = .shared) { self.catalog = catalog }
 
     private static let uploadCacheTTL: TimeInterval = 6 * 24 * 60 * 60
     private var resumedBackendJobIds: Set<String> = []
@@ -48,6 +51,7 @@ final class GenerationService {
         fileExtension: String,
         projectURL: URL?,
         editor: EditorViewModel,
+        videoBudget: VideoGenerationBudget? = nil,
         onComplete: (@MainActor (MediaAsset) -> Void)? = nil,
         onFailure: (@MainActor () -> Void)? = nil,
         onQueued: (@MainActor () -> Void)? = nil
@@ -97,6 +101,17 @@ final class GenerationService {
                 self.preSubmitBatchIds.remove(primaryId)
             }
             do {
+                try Task.checkCancellation()
+                if assetType == .video {
+                    guard catalog.isLoaded, let model = catalog.video.first(where: { $0.id == genInput.model }),
+                          ModelPreferences.shared.isEnabled(model.id) else {
+                        throw ToolError("The selected video model is unavailable or Models is still loading. Refresh Models and select an available model.")
+                    }
+                    if let error = model.validate(duration: genInput.duration, aspectRatio: genInput.aspectRatio, resolution: genInput.resolution, validateDuration: !model.requiresSourceVideo) {
+                        throw ToolError(error)
+                    }
+                    try VideoGenerationBudget.requireIfNeeded(model: genInput.model, resolution: genInput.resolution, budget: videoBudget)
+                }
                 if assetType == .video,
                    let error = CameraTrajectory.validate(genInput.cameraTrajectory, modelID: genInput.model) {
                     throw ToolError(error)
@@ -138,6 +153,7 @@ final class GenerationService {
                     params: params,
                     genInput: finalGenInput,
                     editor: editor,
+                    videoBudget: videoBudget,
                     onComplete: onComplete,
                     onFailure: onFailure,
                     onQueued: fireQueued
@@ -150,9 +166,9 @@ final class GenerationService {
                     }
                 } else {
                     let message = error.localizedDescription
-                    Log.generation.error("upload failed model=\(genInput.model) error=\(message)")
+                    Log.generation.error("generation preparation failed model=\(genInput.model) error=\(message)")
                     for placeholder in placeholders {
-                        updateGenerationMetadata(placeholder, editor: editor, status: .failed("Upload failed: \(message)"))
+                        updateGenerationMetadata(placeholder, editor: editor, status: .failed(message))
                     }
                 }
                 fireQueued?()
@@ -540,6 +556,7 @@ final class GenerationService {
         params: BackendGenerationParams,
         genInput: GenerationInput,
         editor: EditorViewModel,
+        videoBudget: VideoGenerationBudget? = nil,
         onComplete: (@MainActor (MediaAsset) -> Void)?,
         onFailure: (@MainActor () -> Void)?,
         onQueued: (@MainActor () -> Void)? = nil
@@ -554,6 +571,7 @@ final class GenerationService {
                 model: genInput.model,
                 params: params,
                 projectId: editor.projectId,
+                videoBudget: videoBudget
             )
         } catch {
             let message = error.localizedDescription

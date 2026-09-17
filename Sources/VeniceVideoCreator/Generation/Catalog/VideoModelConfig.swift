@@ -69,6 +69,9 @@ struct VideoModelConfig: Identifiable, Sendable {
         resolution: String?,
         validateDuration: Bool = true
     ) -> String? {
+        if id == VideoModelCapabilities.multiAngleID, resolution?.isEmpty != false, automaticResolution == nil {
+            return "Automatic Multi-Angle resolution is unavailable. Select 1080P explicitly and set a spending cap, or refresh Models for 768P/480P."
+        }
         if validateDuration, durations.isEmpty, duration > 0 {
             return "\(displayName) does not support duration."
         }

@@ -49,8 +49,15 @@ final class ModelCatalog {
     @ObservationIgnored private var didConfigure = false
     @ObservationIgnored private var keyObserver: NSObjectProtocol?
     @ObservationIgnored private var reloadTask: Task<Void, Never>?
+    @ObservationIgnored private var reloadID = UUID()
+    @ObservationIgnored private let load: () async throws -> VeniceCatalog?
 
-    private init() {}
+    init(load: @escaping () async throws -> VeniceCatalog? = {
+        guard let api = VeniceAPI.fromKeychain() else { return nil }
+        return try await api.fetchCatalog()
+    }) {
+        self.load = load
+    }
 
     /// Loads the model catalog from Venice and reloads it whenever the key changes.
     func configure() {
@@ -60,32 +67,37 @@ final class ModelCatalog {
         keyObserver = NotificationCenter.default.addObserver(
             forName: .veniceAPIKeyChanged, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.reload() }
+            MainActor.assumeIsolated { _ = self?.reload() }
         }
         reload()
     }
 
-    func reload() {
+    @discardableResult
+    func reload() -> Task<Void, Never> {
         reloadTask?.cancel()
-        guard let api = VeniceAPI.fromKeychain() else {
-            isLoaded = false
-            lastError = nil
-            return
-        }
-        reloadTask = Task { [weak self] in
+        reloadID = UUID()
+        let id = reloadID
+        isLoaded = false
+        lastError = nil
+        let task = Task { [weak self, load] in
             do {
-                let catalog = try await api.fetchCatalog()
-                guard !Task.isCancelled else { return }
-                self?.apply(catalog.entries)
-                self?.textModels = catalog.textModels
-                self?.editModels = catalog.editModels
-                self?.embeddingModels = catalog.embeddingModels
-                Log.generation.notice("venice catalog loaded: video=\(self?.video.count ?? 0) image=\(self?.image.count ?? 0) audio=\(self?.audio.count ?? 0) upscale=\(self?.upscale.count ?? 0) edit=\(catalog.editModels.count) text=\(catalog.textModels.count) entries=\(catalog.entries.count)")
+                let result = try await load()
+                guard let self, self.reloadID == id, !Task.isCancelled else { return }
+                let catalog = result ?? VeniceCatalog()
+                self.apply(catalog.entries)
+                self.textModels = catalog.textModels
+                self.editModels = catalog.editModels
+                self.embeddingModels = catalog.embeddingModels
+                self.isLoaded = result != nil
+                Log.generation.notice("venice catalog loaded: video=\(self.video.count) image=\(self.image.count) audio=\(self.audio.count) upscale=\(self.upscale.count) edit=\(catalog.editModels.count) text=\(catalog.textModels.count) entries=\(catalog.entries.count)")
             } catch {
+                guard let self, self.reloadID == id, !Task.isCancelled else { return }
                 Log.generation.error("Venice catalog load failed: \(error.localizedDescription)")
-                self?.lastError = error.localizedDescription
+                self.lastError = error.localizedDescription
             }
         }
+        reloadTask = task
+        return task
     }
 
     private func apply(_ entries: [CatalogEntry]) {

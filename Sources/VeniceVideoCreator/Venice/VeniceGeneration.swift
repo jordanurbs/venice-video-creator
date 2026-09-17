@@ -14,11 +14,12 @@ enum VeniceGenerationRunner {
         model: String,
         params: BackendGenerationParams,
         api: VeniceAPI,
+        videoBudget: VideoGenerationBudget? = nil,
         onQueue: (@MainActor (String, String?) -> Void)? = nil
     ) async throws -> [String] {
         switch params {
         case .image(let p): return try await runImage(model: model, params: p, api: api)
-        case .video(let p): return try await runVideo(model: model, params: p, api: api, onQueue: onQueue)
+        case .video(let p): return try await runVideo(model: model, params: p, api: api, videoBudget: videoBudget, onQueue: onQueue)
         case .audio(let p): return try await runAudio(model: model, params: p, api: api, onQueue: onQueue)
         case .upscale(let p): return try await runUpscale(model: model, params: p, api: api)
         case .imageEdit(let p): return try await runImageEdit(model: model, params: p, api: api)
@@ -158,9 +159,15 @@ enum VeniceGenerationRunner {
 
     private static func runVideo(
         model: String, params: VideoGenerationParams, api: VeniceAPI,
+        videoBudget: VideoGenerationBudget? = nil,
         onQueue: (@MainActor (String, String?) -> Void)? = nil
     ) async throws -> [String] {
-        let body = try videoRequestBody(model: model, params: params, catalogModel: videoModel(for: model))
+        _ = try videoRequestBody(model: model, params: params, catalogModel: availableVideoModel(for: model))
+        try await VideoGenerationBudget.authorize(model: model, params: params, budget: videoBudget) {
+            await api.videoQuote(model: model, duration: params.duration, resolution: params.resolution, aspectRatio: params.aspectRatio)
+        }
+        try Task.checkCancellation()
+        let body = try videoRequestBody(model: model, params: params, catalogModel: availableVideoModel(for: model))
         let queued = try await api.postJSON(path: "video/queue", body: body, forModel: model)
         guard let queueId = queued["queue_id"] as? String else {
             throw VeniceAPI.VeniceError.decode("missing queue_id")
@@ -177,8 +184,9 @@ enum VeniceGenerationRunner {
         if let error = CameraTrajectory.validate(params.cameraTrajectory, modelID: model) {
             throw ToolError(error)
         }
+        let resolution = params.resolution ?? (MiniMaxVideoContract.lanes.contains(model) ? (catalogModel?.automaticResolution ?? "768P") : nil)
         if let catalogModel,
-           let error = catalogModel.validate(duration: params.duration, aspectRatio: params.aspectRatio, resolution: params.resolution, validateDuration: !catalogModel.requiresSourceVideo) {
+           let error = catalogModel.validate(duration: params.duration, aspectRatio: params.aspectRatio, resolution: resolution, validateDuration: !catalogModel.requiresSourceVideo) {
             throw ToolError(error)
         }
         try MiniMaxVideoContract.validate(model: model, params: params)
@@ -197,7 +205,7 @@ enum VeniceGenerationRunner {
         if supportsVideoDuration(params.duration, model: catalogModel) {
             body["duration"] = "\(max(1, params.duration))s"
         }
-        if let resolution = params.resolution,
+        if let resolution,
            supports(resolution, allowed: catalogModel?.resolutions, knownModel: catalogModel != nil) {
             body["resolution"] = resolution
         }
@@ -247,6 +255,13 @@ enum VeniceGenerationRunner {
         }
 
         return body
+    }
+
+    private static func availableVideoModel(for id: String) throws -> VideoModelConfig {
+        guard ModelCatalog.shared.isLoaded, let model = videoModel(for: id), ModelPreferences.shared.isEnabled(id) else {
+            throw ToolError("Video model '\(id)' is unavailable or Models is still loading. Refresh Models before generating.")
+        }
+        return model
     }
 
     /// Polls `/video/retrieve` until the video is ready, returning a downloadable URL.

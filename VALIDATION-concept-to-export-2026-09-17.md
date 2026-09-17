@@ -1,7 +1,7 @@
 # Concept-to-export implementation validation
 
 Date: 2026-09-17
-Status: first implementation slice compiled and regression-tested; related-only commit preparation in progress. Not E2E-ready.
+Status: first slice committed as `c36247d`; catalog/1080P follow-up compiled and regression-tested. Not E2E-ready.
 
 ## Permissions and spending
 
@@ -16,7 +16,7 @@ Status: first implementation slice compiled and regression-tested; related-only 
 - F02: resolve selected shot/default IDs before automatic routing; reject unavailable selections; storyboard/chained frames route to I2V, references to R2V, no visuals to T2V when automatic. Inherited MiniMax I2V aspect is omitted from provider requests/quotes. Ready frames are not yet revision-approved frames: approval gates remain open.
 - Shared Codable camera array and validator, shot/generation/recipe/import persistence, agent schema and patch support, six accessible endpoint controls, and final request serialization. Advanced interior keyframes survive endpoint edits; reset deliberately replaces the path. Durable operations and full project recovery still require Phase 2.
 - Exact Multi-Angle capability handling, automatic 768P, simple prompts, optional Multi-Angle prompt, and no camera grouping. Max simple-prompt grouping is disabled. Full-plan adjacency blocks grouping a subset across omitted shots.
-- Strict six-lane MiniMax request contract: duration/resolution, image/reference lanes, inherited aspect, omitted native-audio toggle, and early invalid-input rejection. Explicit 1080P has UI quote refresh but not yet a mandatory fresh-quote/budget gate on every submission path.
+- Strict six-lane MiniMax request contract: duration/resolution, image/reference lanes, inherited aspect, omitted native-audio toggle, and early invalid-input rejection. Follow-up adds a mandatory fresh-quote/budget gate at the final video runner for explicit Multi-Angle 1080P, with pre-preparation budget checks in the shared service.
 - Manifest adds the local Multi-Angle specification without replacing global defaults or supplementing absent live picker entries. Additive schema-1 flag policy is documented, not a coordinated harness release.
 
 ## Regression coverage added (executed in continuation)
@@ -45,8 +45,8 @@ Status: first implementation slice compiled and regression-tested; related-only 
 
 ## Next slice and open gates
 
-1. Inspect the staged diff and commit the validated related first slice. Normal build/test execution is established; preserve the unrelated Seedance bitrate block outside the commit.
-2. Finish Phase 1 validation: model/catalog load races, native verification of the unsupported-camera clear path, required fresh 1080P quote authorization, six-lane fixtures, inspector undo/retake/save/reopen, and explicit revision-approved storyboard routing.
+1. Review and commit the validated catalog/1080P follow-up, again excluding the unrelated Seedance bitrate block. Normal build/test execution is established and first-slice commit `c36247d` exists.
+2. Finish Phase 1: explicit revision-approved storyboard routing, native verification of all six camera controls and unsupported-camera clear path, inspector/retake/save-reopen acceptance. Native 1080P budget controls have source implementation but no native acceptance evidence.
 3. Phase 2: durable shot-to-clip/source-range/linked-audio bindings, stable pre-wait operation and line IDs, exactly-once live/recovered finalization. Replace asset-only retake/reset/dialogue lookup and linked-group mutation before claiming production recovery.
 4. Phases 3–5 remain open: revisioned QA/approval and dependency invalidation, attempt/quote ledger and stricter decoded-output validation, idempotent measured audio and exact-speech ownership, readiness, retained export jobs and verified immutable delivery.
 5. Run the audit's valid-media 35–50s deterministic workflow and native manual-tweak acceptance before asking for a paid live budget. No exact-speech or live E2E claims until those lanes actually pass.
@@ -55,11 +55,26 @@ The original handoff remains the historical input. Continue from this report and
 
 ## Commit status
 
-Historical attempt: staging using an explicit 47-file path list plus a related-only patch for `VeniceGeneration.swift` was rejected before execution by the approval reviewer (`ZodError`). No alternate index or indirect Git write was used. Continuation: build and tests now pass; related-only staging and commit are being prepared in the functioning environment.
+Historical attempt: staging using an explicit 47-file path list plus a related-only patch for `VeniceGeneration.swift` was rejected before execution by the approval reviewer (`ZodError`). No alternate index or indirect Git write was used. Continuation: normal Git writes work; committed first slice as `c36247d`, `feat(production): implement status and MiniMax camera routing contracts` (48 files).
 
 Prepared staging inputs (outside the repository): `/tmp/venice-concept-to-export-paths` and `/tmp/venice-concept-to-export-request.patch`. The request patch passed `git apply --check --cached` before the permission request; that check does not write the index. Reinspect/regenerate those inputs if the tree changes. They intentionally omit the Seedance bitrate hunk from the proposed commit while retaining it in the working tree.
 
-Next action: stage explicit reviewed paths plus a refreshed request-builder patch including the compiler fix and excluding the bitrate block; inspect the complete staged diff, then commit. Do not label it full concept-to-export completion.
+The first commit used 47 explicit whole-file paths and a refreshed request-builder patch; `git diff --cached --check` passed. Post-staging working diff contained only the unchanged Seedance bitrate block. The second catalog/1080P slice is validated and awaiting its own related-only commit.
+
+## Catalog/1080P follow-up validation
+
+- `ModelCatalog` now has an injected async loader. Superseded successful and failed loads cannot overwrite the latest state; a missing key clears the catalog. Reloading marks the catalog unavailable for new video submissions until it finishes.
+- Native video selection uses model identity instead of an array index. Reordered lists keep the selected model; removed selections retain their visible identity and fail preflight. Current catalog constraints are consulted without silently choosing a different model.
+- Automatic Multi-Angle resolution is 768P, or 480P when 768P is absent. An only-1080P catalog requires an explicit selection and cap. Nil-resolution requests serialize an allowed lower tier instead of relying on the provider's default.
+- `VideoGenerationBudget` is per-request, in-memory authorization, deliberately absent from Codable recipes. Direct UI single/batch requests and production runs pass the same cap through submission/service/backend to the final runner. `generate_video`, `produce_shots`, and `regenerate_shot` expose `maxCostUSD`; native generation settings and the Production panel expose a USD cap field.
+- Each 1080P send attempt obtains a new quote, checks finite positive cost and task cancellation, then atomically reserves within the shared cap. Parallel attempts/retries cannot each spend the full cap. Reservations are retained after attempted sends because billing on transport failure may be unknown. All new video sends recheck loaded/enabled catalog state after the quote. Resuming a known queue ID continues polling rather than making a new paid submission.
+- Unbudgeted generic reruns fail in the shared service before reference preparation. Inspector actions with no new cap direct the user to the Production panel. Native UI operation, quote presentation, all-path valid-media integration, and save/reopen acceptance still require the dated manual/integration gates.
+- This cap covers **only explicit Multi-Angle 1080P attempts**, not other lanes in a mixed production. It is not a durable operation ledger, billing reconciliation, or cancellation/restart proof. Production callbacks still have the pre-existing recovery limitations; ready panels still lack revision approval.
+- Build iterations found and fixed the `reload()` return-value mismatch in the key observer and missing main-actor isolation on the test loader. These were compiler failures, followed by successful compilation.
+- `swift test --filter 'ModelCatalogRaceTests|VideoGenerationBudgetTests|MiniMaxRequestTests|CameraTrajectoryTests|ProductionStatusTests|ProductionRoutingTests'`: passed, 32 tests in seven suites (0.015s tests; 18.28s build).
+- `swift test`: passed, reported 1,070 tests in 167 suites (1.715s tests; 1.75s incremental build); same six model-dependent skips as the first full run. Combined captured output: `/Users/venetian42069/.local/share/opencode/tool-output/tool_0b0291a22001AsjI2MyXwwq9KB`.
+- `git diff --check`: passed after the follow-up. No paid/API/live catalog probes or native UI operation occurred.
+- Additional files: `Generation/Catalog/ModelCatalog.swift`, `Generation/Catalog/VideoModelSelection.swift`, `Generation/GenerationBackend.swift`, `Generation/VideoGenerationBudget.swift`, `Generation/UI/VideoBudgetControl.swift`, and `Tests/VeniceVideoCreatorTests/Generation/{ModelCatalogRaceTests,VideoGenerationBudgetTests}.swift`; other follow-up edits are in the first-slice inventory below.
 
 ## Changed-file inventory
 

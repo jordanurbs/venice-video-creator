@@ -9,7 +9,7 @@ struct GenerationView: View {
     @Bindable private var account = AccountService.shared
     @State private var prompt = ""
     @State private var selectedType: GenerationType = .video
-    @State private var selectedVideoModelIndex = 0
+    @State private var videoSelection = VideoModelSelection()
     @State private var selectedImageModelIndex = 0
     @State private var selectedAudioModelIndex = 0
     @State private var cameraTrajectory: CameraTrajectory?
@@ -27,6 +27,7 @@ struct GenerationView: View {
     @Bindable private var styleCatalog = ImageStyleCatalog.shared
     /// Live USD cost estimate (Venice quote for video/audio, static for image).
     @State private var estimatedUSD: Double?
+    @State private var maximumVideoUSD = 0.0
 
     // Audio extras
     @State private var selectedVoice = ""
@@ -146,7 +147,7 @@ struct GenerationView: View {
     private var imageModels: [ImageModelConfig] { ModelCatalog.shared.image }
     private var audioModels: [AudioModelConfig] { ModelCatalog.shared.audio }
 
-    private var videoModel: VideoModelConfig { selectedModel(videoModels, at: selectedVideoModelIndex) }
+    private var videoModel: VideoModelConfig { videoSelection.resolve(in: videoModels)! }
     private var imageModel: ImageModelConfig { selectedModel(imageModels, at: selectedImageModelIndex) }
     private var audioModel: AudioModelConfig { selectedModel(audioModels, at: selectedAudioModelIndex) }
 
@@ -181,7 +182,10 @@ struct GenerationView: View {
 
     private func normalizeModelSelection() {
         switch selectedType {
-        case .video: selectedVideoModelIndex = enabledIndex(selectedVideoModelIndex, in: videoModels.map(\.id))
+        case .video:
+            if videoSelection.selected == nil {
+                videoSelection.selected = enabledVideoModels.first?.model ?? videoModels.first
+            }
         case .image: selectedImageModelIndex = enabledIndex(selectedImageModelIndex, in: imageModels.map(\.id))
         case .audio: selectedAudioModelIndex = enabledIndex(selectedAudioModelIndex, in: audioModels.map(\.id))
         }
@@ -206,6 +210,11 @@ struct GenerationView: View {
 
     private var canSubmit: Bool {
         if videoBatchProgress != nil { return false }
+        if selectedType == .video {
+            if videoSelection.validationError(in: videoModels, isLoaded: ModelCatalog.shared.isLoaded) != nil { return false }
+            if !ModelPreferences.shared.isEnabled(videoModel.id) { return false }
+            if requiresVideoBudget && (!maximumVideoUSD.isFinite || maximumVideoUSD <= 0) { return false }
+        }
         if selectedType == .video && videoModel.requiresSourceVideo {
             guard sourceVideo != nil else { return false }
             if videoModel.requiresReferenceImage && imageReferences.isEmpty { return false }
@@ -648,7 +657,7 @@ struct GenerationView: View {
             editor.pendingEditTrimmedSource = nil
             editor.pendingEditAudioPlacement = nil
         }
-        .onChange(of: selectedVideoModelIndex) { _, _ in
+        .onChange(of: videoSelection.selected?.id) { _, _ in
             guard !isPopulatingPanel else { return }
             if selectedType == .video {
                 selectedResolution = videoModel.automaticResolution ?? ""
@@ -932,7 +941,7 @@ struct GenerationView: View {
 
     /// Changes to any of these re-fetch the cost estimate.
     private var costSignature: String {
-        "\(selectedType.rawValue)|\(currentModelId)|\(effectiveVideoSeconds)|\(effectiveResolution ?? "")|\(selectedAspectRatio)|\(selectedNumImages)|\(effectiveVideoCount)|\(selectedAudioDuration)|\(String(describing: cameraTrajectory))"
+        "\(ModelCatalog.shared.isLoaded)|\(selectedType.rawValue)|\(currentModelId)|\(effectiveVideoSeconds)|\(effectiveResolution ?? "")|\(selectedAspectRatio)|\(selectedNumImages)|\(effectiveVideoCount)|\(selectedAudioDuration)|\(String(describing: cameraTrajectory))"
     }
 
     /// Live USD estimate: Venice quote for video/audio, static per-image price for images.
@@ -942,6 +951,8 @@ struct GenerationView: View {
         guard let api = VeniceAPI.fromKeychain() else { estimatedUSD = nil; return }
         switch selectedType {
         case .video:
+            guard videoSelection.validationError(in: videoModels, isLoaded: ModelCatalog.shared.isLoaded) == nil else { return }
+            guard preflightValidation(audioDuration: 0) == nil else { return }
             guard CameraTrajectory.validate(cameraTrajectory, modelID: videoModel.id) == nil else {
                 estimatedUSD = nil
                 return
@@ -952,14 +963,15 @@ struct GenerationView: View {
                 resolution: effectiveResolution,
                 aspectRatio: selectedAspectRatio
             )
-            guard signature == costSignature else { return }
-            estimatedUSD = unit.map { $0 * Double(effectiveVideoCount) }
+            guard !Task.isCancelled, signature == costSignature,
+                  let unit, unit.isFinite, unit >= 0 else { return }
+            estimatedUSD = unit * Double(effectiveVideoCount)
         case .audio:
             let secs: Int? = audioModel.durations?.isEmpty == false
                 ? selectedAudioDuration
                 : (audioModel.inputs.contains(.video) && audioVideoSource != nil ? effectiveAudioVideoSeconds : nil)
             let quote = await api.audioQuote(model: currentModelId, durationSeconds: secs, characterCount: nil)
-            guard signature == costSignature else { return }
+            guard !Task.isCancelled, signature == costSignature else { return }
             estimatedUSD = quote
         case .image:
             if let cents = imageModel.creditsPerImage[""], cents > 0 {
@@ -1682,7 +1694,7 @@ struct GenerationView: View {
             switch selectedType {
             case .video:
                 ForEach(enabledVideoModels, id: \.index) { item in
-                    Button(item.model.displayName) { selectedVideoModelIndex = item.index }
+                    Button(item.model.displayName) { videoSelection.selected = item.model }
                 }
             case .image:
                 ForEach(enabledImageModels, id: \.index) { item in
@@ -1767,6 +1779,7 @@ struct GenerationView: View {
             if let resolutions = currentResolutions {
                 settingsPicker("Resolution", selection: $selectedResolution, options: resolutions) { resolutionLabel($0) }
             }
+            if requiresVideoBudget { VideoBudgetControl(maximumUSD: $maximumVideoUSD) }
             if let qualities = currentQualities {
                 settingsPicker("Quality", selection: $selectedQuality, options: qualities) { $0.capitalized }
             }
@@ -1879,6 +1892,10 @@ struct GenerationView: View {
 
     // MARK: - Actions
 
+    private var requiresVideoBudget: Bool {
+        selectedType == .video && VideoGenerationBudget.isRequired(model: videoModel.id, resolution: effectiveResolution)
+    }
+
     private func videoInputAssets(for model: VideoModelConfig) -> VideoGenerationSubmission.InputAssets {
         if model.requiresSourceVideo {
             return VideoGenerationSubmission.InputAssets(
@@ -1959,6 +1976,7 @@ struct GenerationView: View {
     private func sendVideoBatch(
         submission: VideoGenerationSubmission,
         count: Int,
+        videoBudget: VideoGenerationBudget?,
         onComplete: (@MainActor (MediaAsset) -> Void)?,
         onFailure: (@MainActor () -> Void)?,
         autoOpenPreview: @escaping (String) -> Void
@@ -1974,6 +1992,7 @@ struct GenerationView: View {
                         service: editor.generationService,
                         projectURL: editor.projectURL,
                         editor: editor,
+                        videoBudget: videoBudget,
                         onComplete: onComplete,
                         onFailure: onFailure,
                         onQueued: { if resumedOnce.fire() { continuation.resume() } }
@@ -1988,6 +2007,11 @@ struct GenerationView: View {
     }
 
     private func submitGeneration() {
+        if selectedType == .video,
+           let error = videoSelection.validationError(in: videoModels, isLoaded: ModelCatalog.shared.isLoaded) {
+            flashDropError(error)
+            return
+        }
         let audioDuration: Int = {
             guard selectedType == .audio else { return 0 }
             if audioModel.inputs.contains(.video) { return effectiveAudioVideoSeconds }
@@ -1995,6 +2019,13 @@ struct GenerationView: View {
         }()
         if let err = preflightValidation(audioDuration: audioDuration) {
             flashDropError(err)
+            return
+        }
+        let videoBudget: VideoGenerationBudget?
+        do {
+            videoBudget = requiresVideoBudget ? try VideoGenerationBudget(maximumUSD: maximumVideoUSD) : nil
+        } catch {
+            flashDropError(error.localizedDescription)
             return
         }
         var genInput = GenerationInput(
@@ -2097,6 +2128,7 @@ struct GenerationView: View {
                 sendVideoBatch(
                     submission: submission,
                     count: count,
+                    videoBudget: videoBudget,
                     onComplete: videoOnComplete,
                     onFailure: onFailure,
                     autoOpenPreview: autoOpenPreview
@@ -2106,6 +2138,7 @@ struct GenerationView: View {
                     service: editor.generationService,
                     projectURL: editor.projectURL,
                     editor: editor,
+                    videoBudget: videoBudget,
                     onComplete: videoOnComplete,
                     onFailure: onFailure
                 )
@@ -2181,6 +2214,7 @@ struct GenerationView: View {
             }
         }
         editor.pendingEditTrimmedSource = nil
+        maximumVideoUSD = 0
         lyrics = ""
         styleInstructions = ""
         prompt = ""
@@ -2206,10 +2240,10 @@ struct GenerationView: View {
     private func populatePanel(asset: MediaAsset, stored: GenerationInput) {
         switch ModelRegistry.byId[stored.model] {
         case .video:
-            guard let idx = videoModels.firstIndex(where: { $0.id == stored.model }) else { return }
+            guard let model = videoModels.first(where: { $0.id == stored.model }) else { return }
             isPopulatingPanel = true
             selectedType = .video
-            selectedVideoModelIndex = idx
+            videoSelection.selected = model
         case .image:
             guard let idx = imageModels.firstIndex(where: { $0.id == stored.model }) else { return }
             isPopulatingPanel = true
@@ -2229,6 +2263,7 @@ struct GenerationView: View {
         prompt = stored.prompt
         if !stored.aspectRatio.isEmpty { selectedAspectRatio = stored.aspectRatio }
         if let r = stored.resolution { selectedResolution = r }
+        else if selectedType == .video { selectedResolution = videoModel.automaticResolution ?? "" }
         if let q = stored.quality { selectedQuality = q }
         if stored.duration > 0 {
             selectedDuration = stored.duration
@@ -2301,7 +2336,7 @@ struct GenerationView: View {
             selectedAspectRatio = currentAspectRatios.first ?? "16:9"
         }
         if let resolutions = currentResolutions, !resolutions.contains(selectedResolution) {
-            selectedResolution = selectedType == .video ? (videoModel.automaticResolution ?? resolutions.first ?? "1080p") : (resolutions.first ?? "1080p")
+            selectedResolution = selectedType == .video ? (videoModel.automaticResolution ?? "") : (resolutions.first ?? "1080p")
         }
         if let qualities = currentQualities, !qualities.contains(selectedQuality) {
             selectedQuality = qualities.last ?? "high"

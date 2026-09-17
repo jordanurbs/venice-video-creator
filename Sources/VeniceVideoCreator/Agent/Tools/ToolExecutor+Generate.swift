@@ -165,6 +165,8 @@ extension ToolExecutor {
             prompt: prompt, model: model.id, duration: duration,
             aspectRatio: aspectRatio, resolution: resolution, cameraTrajectory: trajectory
         )
+        let videoBudget = try Self.videoBudget(args)
+        try VideoGenerationBudget.requireIfNeeded(model: model.id, resolution: resolution, budget: videoBudget)
 
         let folderId = try resolveFolderId(
             args, editor: editor, fallbackReferences: inputAssets.textToVideoReferences
@@ -180,12 +182,19 @@ extension ToolExecutor {
         ).submit(
             service: editor.generationService,
             projectURL: editor.projectURL,
-            editor: editor
+            editor: editor,
+            videoBudget: videoBudget
         )
         let refSummary = totalRefs > 0
             ? ", refs: \(imageRefCount)img/\(videoRefCount)vid/\(audioRefCount)aud"
             : ""
         return .ok("Generation started. Placeholder asset ID: \(placeholderId). Model: \(model.displayName), duration: \(duration)s, aspect: \(aspectRatio)\(refSummary)")
+    }
+
+    static func videoBudget(_ args: [String: Any]) throws -> VideoGenerationBudget? {
+        guard args["maxCostUSD"] != nil else { return nil }
+        guard let value = args.double("maxCostUSD") else { throw ToolError("maxCostUSD must be a positive USD amount.") }
+        return try VideoGenerationBudget(maximumUSD: value)
     }
 
     private func generateImage(

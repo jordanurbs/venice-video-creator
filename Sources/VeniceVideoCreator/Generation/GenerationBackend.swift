@@ -40,12 +40,14 @@ enum GenerationBackend {
     static func submit(
         model: String,
         params: BackendGenerationParams,
-        projectId: String? = nil
+        projectId: String? = nil,
+        videoBudget: VideoGenerationBudget? = nil
     ) async throws -> String {
         guard let api = VeniceAPI.fromKeychain() else {
             throw GenerationBackendError.notConfigured
         }
-        return store.start(model: model, params: params, api: api)
+        try Task.checkCancellation()
+        return store.start(model: model, params: params, api: api, videoBudget: videoBudget)
     }
 
     /// Re-polls a queued Venice job by its persisted queue id and returns a fresh local id.
@@ -157,7 +159,7 @@ final class VeniceJobStore {
         subjects[jobId]?.eraseToAnyPublisher()
     }
 
-    func start(model: String, params: BackendGenerationParams, api: VeniceAPI) -> String {
+    func start(model: String, params: BackendGenerationParams, api: VeniceAPI, videoBudget: VideoGenerationBudget? = nil) -> String {
         let jobId = UUID().uuidString
         let subject = CurrentValueSubject<BackendGenerationJob?, Never>(
             BackendGenerationJob(id: jobId, status: .queued)
@@ -167,7 +169,7 @@ final class VeniceJobStore {
         tasks[jobId] = Task { @MainActor in
             subject.send(BackendGenerationJob(id: jobId, status: .running))
             await self.settle(jobId: jobId, subject: subject) {
-                try await VeniceGenerationRunner.run(model: model, params: params, api: api) { queueId, downloadURL in
+                try await VeniceGenerationRunner.run(model: model, params: params, api: api, videoBudget: videoBudget) { queueId, downloadURL in
                     subject.send(BackendGenerationJob(id: jobId, status: .running,
                                                       queueId: queueId, queueDownloadURL: downloadURL))
                 }

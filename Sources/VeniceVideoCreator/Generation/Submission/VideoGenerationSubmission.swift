@@ -18,6 +18,7 @@ struct VideoGenerationSubmission {
         service: GenerationService,
         projectURL: URL?,
         editor: EditorViewModel,
+        videoBudget: VideoGenerationBudget? = nil,
         onComplete: (@MainActor (MediaAsset) -> Void)? = nil,
         onFailure: (@MainActor () -> Void)? = nil,
         onQueued: (@MainActor () -> Void)? = nil
@@ -36,6 +37,7 @@ struct VideoGenerationSubmission {
             fileExtension: "mp4",
             projectURL: projectURL,
             editor: editor,
+            videoBudget: videoBudget,
             onComplete: onComplete,
             onFailure: onFailure,
             onQueued: onQueued
@@ -54,6 +56,7 @@ struct VideoGenerationSubmission {
         generateAudio: Bool
     ) -> VideoGenerationSubmission {
         var genInput = baseInput
+        if genInput.resolution == nil { genInput.resolution = model.automaticResolution }
         if model.requiresSourceVideo {
             let references = inputAssets.editReferences
             genInput.imageURLAssetIds = assetIds(references)

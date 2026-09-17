@@ -1,12 +1,12 @@
 # Concept-to-export implementation validation
 
 Date: 2026-09-17
-Status: first slice `c36247d` and catalog/1080P follow-up `fa3e067` committed; storyboard approval slice compiled and regression-tested. Not E2E-ready.
+Status: routing `c36247d`, catalog/1080P `fa3e067`, and storyboard approval `563608c` committed. Native fixture package round trip and launch verified; native control acceptance remains blocked. Not E2E-ready.
 
 ## Permissions and spending
 
 - The user explicitly authorized normal Swift build/tests (including compiler-cache writes) and Git staging/commit. Earlier retries were rejected before execution by the automatic approval reviewer (`ZodError`). The continuation environment now executes normal `swift build` and `swift test` successfully. No alternate caches, indirect builds, or tests were used to bypass a denial.
-- No paid requests, fresh live catalog/quote probes, or native UI runs. Existing local export regression tests ran as part of the full suite; the dated concept-to-export acceptance fixture has not run.
+- No paid requests or fresh live quote/lane probes. Native fixture launch made normal free catalog/capability requests; it does not establish live lane availability. Existing local export regression tests ran as part of the full suite; the dated concept-to-export acceptance fixture has not run.
 - Sibling harness was read only. Its uncommitted Multi-Angle contract is local evidence, not evidence of publication. No sibling files were changed.
 
 ## Preserved work and implemented scope
@@ -45,8 +45,8 @@ Status: first slice `c36247d` and catalog/1080P follow-up `fa3e067` committed; s
 
 ## Next slice and open gates
 
-1. Review and commit the validated storyboard slice, excluding the unrelated Seedance bitrate block. First-slice `c36247d` and catalog/1080P `fa3e067` commits exist.
-2. Finish Phase 1 native verification of all six camera controls, unsupported-camera clear path, approval controls, inspector/retake/save-reopen, and 1080P budget presentation. UI prerequisites are available; the dated native acceptance has not run.
+1. Retain the validated native fixture and evidence in a separate commit, excluding the unrelated Seedance bitrate block. Routing `c36247d`, catalog/1080P `fa3e067`, and storyboard approval `563608c` commits exist.
+2. Finish Phase 1 native verification of all six camera controls, unsupported-camera clear path, approval controls, inspector/retake/save-reopen, and 1080P budget presentation. The fixture rendered, but its background window on another Space exposes only menu-bar accessibility elements. Do not change the user's foreground app/Space to bypass this limitation.
 3. Phase 2: durable shot-to-clip/source-range/linked-audio bindings, stable pre-wait operation and line IDs, exactly-once live/recovered finalization. Replace asset-only retake/reset/dialogue lookup and linked-group mutation before claiming production recovery.
 4. Phases 3–5 remain open: revisioned QA/approval and dependency invalidation, attempt/quote ledger and stricter decoded-output validation, idempotent measured audio and exact-speech ownership, readiness, retained export jobs and verified immutable delivery.
 5. Run the audit's valid-media 35–50s deterministic workflow and native manual-tweak acceptance before asking for a paid live budget. No exact-speech or live E2E claims until those lanes actually pass.
@@ -59,7 +59,7 @@ Historical attempt: staging using an explicit 47-file path list plus a related-o
 
 Prepared staging inputs (outside the repository): `/tmp/venice-concept-to-export-paths` and `/tmp/venice-concept-to-export-request.patch`. The request patch passed `git apply --check --cached` before the permission request; that check does not write the index. Reinspect/regenerate those inputs if the tree changes. They intentionally omit the Seedance bitrate hunk from the proposed commit while retaining it in the working tree.
 
-The first commit used 47 explicit whole-file paths and a refreshed request-builder patch; `git diff --cached --check` passed. The second catalog/1080P slice is committed as `fa3e067`, `fix(generation): guard catalog refreshes and budget 1080P attempts` (20 files), after staged-diff inspection. Each commit excluded the unchanged Seedance bitrate block. The storyboard slice is validated and awaiting its own commit.
+The first commit used 47 explicit whole-file paths and a refreshed request-builder patch; `git diff --cached --check` passed. The second catalog/1080P slice is committed as `fa3e067`, `fix(generation): guard catalog refreshes and budget 1080P attempts` (20 files), after staged-diff inspection. Storyboard approval is committed as `563608c`, `feat(production): bind storyboard approval to reviewed revisions` (20 files). Each commit excluded the unchanged Seedance bitrate block.
 
 ## Catalog/1080P follow-up validation
 
@@ -88,6 +88,16 @@ The first commit used 47 explicit whole-file paths and a refreshed request-build
 - Regression cases use a decodable PNG and real dispatcher/editor mutations: legacy approval rejection, camera/override undo, selective canonical invalidation, failed QA/manual override, QA transport failure, stale async result, changed panel bytes, panel replacement/undo, and final-runner guard invocation before provider access. Codable round trip is not native save/reopen acceptance.
 - `which cua-driver`, `cua-driver status`, `cua-driver check_permissions '{"prompt":false}'`: driver installed, daemon running, Accessibility and Screen Recording granted. `cua-driver list_apps` showed no running Venice app. No app was launched or native control driven in these prerequisite checks.
 - Remaining scope: revision-bound **take** reviews and every grouped source range; failed/unavailable auto-QA placement; durable operations/recovery; revision protection for non-storyboard requests; decoded expected aspect; valid-media integrated workflow and actual native UI acceptance. Canonical-reference metadata/selection changes are fingerprinted; external same-ID replacement of canonical reference file bytes still needs dependency media revision tracking.
+
+## Native fixture validation
+
+- Added `Tests/VeniceVideoCreatorTests/Project/NativeCameraFixtureTests.swift`. The normal test writes/reads through `VideoProject` package I/O, checks the retained interior camera keyframe, and decodes the packaged image. An opt-in writer produces a retained fixture and refuses an existing destination.
+- `VENICE_NATIVE_FIXTURE_PATH=/var/folders/sw/rpnndcqn6nlcdtbknm36s0fh0000gn/T/opencode/concept-to-export-native.venice swift test --filter NativeCameraFixtureTests`: passed, two tests. The package contains a valid 640×360 PNG, one image timeline clip, and a Multi-Angle shot with endpoints `(10,5,1)` and `(90,20,1.2)` plus the interior `(time:0.5,45,15,0.8)` keyframe.
+- `swift test`: passed, reported 1,081 tests in 169 suites (1.714s tests, 2.02s incremental build). The six existing model-dependent tests and the opt-in retained fixture writer were skipped. Captured output: `/Users/venetian42069/.local/share/opencode/tool-output/tool_0b053ff8d001m6x4VR4CxTngz3`.
+- `bash scripts/bundle.sh debug`: built, bundled, and ad-hoc-signed `.build/Venice Video Creator.app`. Registered the bundle with LaunchServices and launched the retained project through `cua-driver launch_app`, bundle ID `ai.venice.studio`.
+- App PID `12301`, fixture window `8800`, title `concept-to-export-native`: package restored one asset without missing media; screenshot showed the image and timeline. Screenshot: `/var/folders/sw/rpnndcqn6nlcdtbknm36s0fh0000gn/T/opencode/native-camera-initial.png`. Launch OSLog: `/Users/venetian42069/.local/share/opencode/tool-output/tool_0b0514370001L41uiJbwgWT00c`.
+- Native interaction remains blocked: the fixture window was on Space `1`, while the current Space was `154`; `on_current_space=false`, `is_on_screen=false`. `get_window_state` exposed only 17 menu-bar AX elements. No camera/approval/budget control interaction, undo, retake, or native save/reopen was completed. The user's foreground app/Space was preserved.
+- Launch performed normal free catalog/capability requests. No paid generation, fresh live lane probe, or verified live model availability is claimed. This small package is not the dated 35–50s integration film.
 
 ## Changed-file inventory
 

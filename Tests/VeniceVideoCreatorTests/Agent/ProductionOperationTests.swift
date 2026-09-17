@@ -24,6 +24,7 @@ struct ProductionOperationTests {
             h.editor.productionOrchestrator.availableModels = { [model] in [model] }
             h.editor.productionOrchestrator.quoteVideo = { [weak self] _, _, _, _ in self?.quotes += 1; return 0.15 }
             h.editor.productionOrchestrator.validateVideo = { _, _, _ in .pass }
+            h.editor.productionOrchestrator.digestVideo = { $0.id }
             h.editor.productionOrchestrator.generateVideo = { [weak self] input in
                 guard let self else { return nil }
                 let asset = self.h.addAsset(duration: 5, hasAudio: true)
@@ -158,7 +159,7 @@ struct ProductionOperationTests {
         let driver = try Driver()
         var gate: CheckedContinuation<VisionQA.Result?, Never>?
         var calls = 0
-        driver.h.editor.productionOrchestrator.evaluateVideoQA = { _, _, _ in
+        driver.h.editor.productionOrchestrator.evaluateVideoQA = { _, _, _, _ in
             calls += 1
             if calls == 1 { return await withCheckedContinuation { gate = $0 } }
             return .init(score: 1, pass: true, issues: [], summary: "Current take")
@@ -184,7 +185,7 @@ struct ProductionOperationTests {
     func failedOrUnavailableQADoesNotPlaceAtRetryLimit(unavailable: Bool) async throws {
         let driver = try Driver()
         defer { driver.stop() }
-        driver.h.editor.productionOrchestrator.evaluateVideoQA = { _, _, _ in
+        driver.h.editor.productionOrchestrator.evaluateVideoQA = { _, _, _, _ in
             unavailable ? nil : .init(score: 0, pass: false, issues: ["Wrong character"], summary: "Wrong character")
         }
         driver.start(autoQA: true)
@@ -239,6 +240,13 @@ struct ProductionOperationTests {
         #expect(persisted?.entries.contains { $0.id == placeholderId } == true)
         #expect(driver.h.editor.mediaAssets.first { $0.id == placeholderId }?.generationInput?.backendJobId == nil)
         #expect(driver.h.editor.productionOperation(id: operationId)?.attempts.last?.failureReason?.contains("checkpoint failure") == true)
+        failed = false
+        let replayId = VideoGenerationSubmission.make(genInput: input, model: driver.model, placeholderDuration: 5, generateAudio: true)
+            .submit(service: service, projectURL: nil, editor: driver.h.editor, onFailure: { failed = true })
+        try await waitFor { failed }
+        #expect(replayId != placeholderId)
+        #expect(driver.h.editor.productionOperation(id: operationId)?.attempts.last?.placeholderId == placeholderId)
+        #expect(driver.h.editor.mediaAssets.first { $0.id == replayId }?.generationInput?.backendJobId == nil)
     }
 
     @Test func interruptedPackageRetainsOperationWithoutRebuyingOrAutoPlacing() async throws {
@@ -292,5 +300,23 @@ struct ProductionOperationTests {
         try await waitFor { !driver.h.editor.productionOrchestrator.isRunning }
         #expect(driver.h.editor.timeline == snapshot.timeline)
         #expect(driver.h.editor.shotPlan == snapshot.mediaManifest.shotPlan)
+    }
+
+    @Test func liveFinalCheckpointFailureIsNotCountedAsSuccess() async throws {
+        let driver = try Driver()
+        defer { driver.stop() }
+        var saves = 0
+        driver.h.editor.persistProductionState = {
+            saves += 1
+            if saves == 4 { throw ToolError("Fixture final checkpoint failed") }
+        }
+        driver.start()
+        try await waitFor { driver.requests.count == 1 }
+        driver.finish(0)
+        try await waitFor { !driver.h.editor.productionOrchestrator.isRunning }
+        #expect(driver.h.editor.productionOrchestrator.completedCount == 0)
+        #expect(driver.h.editor.productionOrchestrator.failedCount == 1)
+        #expect(driver.h.editor.mediaManifest.productionOperations.first?.stage == .placed)
+        #expect(driver.h.editor.mediaManifest.productionOperations.first?.failureReason == "Fixture final checkpoint failed")
     }
 }

@@ -53,6 +53,9 @@ enum OutputValidator {
         minFileSizeBytes: Int64 = 10_000,
         durationFloorFraction: Double = 0.8
     ) -> Result {
+        guard displayWidth.isFinite, displayHeight.isFinite, durationSeconds.isFinite, durationSeconds > 0 else {
+            return .fail("output has invalid decoded dimensions or duration")
+        }
         if fileSizeBytes < minFileSizeBytes {
             return .fail("output file is only \(fileSizeBytes) bytes — likely truncated or empty")
         }
@@ -76,10 +79,6 @@ enum OutputValidator {
         return .pass
     }
 
-    /// Load the facts from a downloaded file and validate. Returns `.pass` when
-    /// the file can't be probed at all rather than blocking a placement on a
-    /// transient read error — the goal is to catch the two known failure modes
-    /// (portrait/truncated), not to gate on I/O flakiness.
     static func validate(
         url: URL,
         requestedDurationSeconds: Double,
@@ -98,7 +97,7 @@ enum OutputValidator {
         guard let naturalSize = try? await track.load(.naturalSize),
               let transform = try? await track.load(.preferredTransform),
               let duration = try? await asset.load(.duration) else {
-            return .pass   // couldn't probe — don't block on a read hiccup
+            return .fail("could not decode video properties — retry validation before placement")
         }
         let rect = CGRect(origin: .zero, size: naturalSize).applying(transform)
         return validate(

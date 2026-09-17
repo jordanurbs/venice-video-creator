@@ -175,6 +175,7 @@ final class ToolExecutor {
         case .produceShots:    return try produceShots(editor, args)
         case .regenerateShot:  return try regenerateShot(editor, args)
         case .productionStatus: return productionStatus(editor)
+        case .resumeProduction: return try resumeProduction(editor, args)
         case .produceAudio:    return try await produceAudio(editor, args)
         case .readSkill:     return readSkill(args)
         case .getProjects, .openProject, .newProject:

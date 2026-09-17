@@ -9,6 +9,7 @@ struct ProductionPanel: View {
     @State private var confirmingShotReset: String?
     @State private var maximumVideoUSD = 0.0
     @State private var approvingStoryboardID: String?
+    @State private var approvingTakeOperationID: String?
     @State private var storyboardApprovalReason = ""
 
     private var plan: ShotPlan? { editor.shotPlan }
@@ -27,19 +28,23 @@ struct ProductionPanel: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .alert("Approve Storyboard", isPresented: Binding(
-            get: { approvingStoryboardID != nil }, set: { if !$0 { approvingStoryboardID = nil } }
+        .alert(approvingTakeOperationID == nil ? "Approve Storyboard" : "Approve Take", isPresented: Binding(
+            get: { approvingStoryboardID != nil || approvingTakeOperationID != nil },
+            set: { if !$0 { approvingStoryboardID = nil; approvingTakeOperationID = nil } }
         )) {
             TextField("Approval note", text: $storyboardApprovalReason)
             Button("Approve") {
-                guard let id = approvingStoryboardID else { return }
-                do { try editor.approveStoryboard(shotID: id, reason: storyboardApprovalReason) }
+                do {
+                    if let id = approvingTakeOperationID { try orchestrator.resumeProduction(operationId: id, approvalReason: storyboardApprovalReason) }
+                    else if let id = approvingStoryboardID { try editor.approveStoryboard(shotID: id, reason: storyboardApprovalReason) }
+                }
                 catch { editor.editorToast = MediaPanelToast(message: error.localizedDescription) }
                 approvingStoryboardID = nil
+                approvingTakeOperationID = nil
             }
-            Button("Cancel", role: .cancel) { approvingStoryboardID = nil }
+            Button("Cancel", role: .cancel) { approvingStoryboardID = nil; approvingTakeOperationID = nil }
         } message: {
-            Text("Record why this panel is ready for video, including any QA override.")
+            Text(approvingTakeOperationID == nil ? "Record why this panel is ready for video, including any QA override." : "Review every beat in this take. Record why it is approved, including any QA override.")
         }
     }
 
@@ -92,7 +97,10 @@ struct ProductionPanel: View {
                 if orchestrator.isRunning {
                     Button { orchestrator.cancel() } label: { controlLabel("Stop", "stop.fill") }
                         .buttonStyle(.plain)
-                    if orchestrator.isPaused {
+                    if orchestrator.isFinalizingExistingTake {
+                        Text("Finalizing take")
+                            .font(.system(size: AppTheme.FontSize.xs))
+                    } else if orchestrator.isPaused {
                         Button { orchestrator.unpause() } label: { controlLabel("Resume", "play.fill") }
                             .buttonStyle(.plain)
                     } else {
@@ -167,6 +175,23 @@ struct ProductionPanel: View {
                     .font(.system(size: AppTheme.FontSize.xxs))
                     .foregroundStyle(AppTheme.Status.errorColor)
                     .lineLimit(2)
+            }
+            if !orchestrator.isRunning, let operation = editor.mediaManifest.productionOperations.last(where: { operation in
+                (operation.stage != .placed || operation.failureReason != nil) && operation.attempts.last?.placeholderId != nil
+                    && operation.destinations.allSatisfy { editor.shot(id: $0.shotId)?.activeProductionOperationId == operation.id }
+            }) {
+                Menu("Finish existing take") {
+                    Button("Validate and Finish") {
+                        do { try orchestrator.resumeProduction(operationId: operation.id) }
+                        catch { editor.editorToast = MediaPanelToast(message: error.localizedDescription) }
+                    }
+                    Button("Approve Take…") {
+                        storyboardApprovalReason = ""
+                        approvingTakeOperationID = operation.id
+                    }
+                }
+                .font(.system(size: AppTheme.FontSize.xs))
+                .help("Finish the retained video without submitting another generation")
             }
         }
         .padding(.horizontal, AppTheme.Spacing.md)

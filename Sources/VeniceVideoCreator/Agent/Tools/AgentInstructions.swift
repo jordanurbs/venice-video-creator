@@ -317,8 +317,8 @@ enum AgentInstructions {
         - Multi-shot grouping (Settings → Models → Production, ON by default): produce_shots \
           renders consecutive same-location shots with shared characters as ONE generation \
           with internal camera cuts, then splits it back into per-shot timeline clips — \
-          consistency is maximal because the frames come from a single render and physically \
-          cannot drift. The window is sized to the routed family: up to 30s on Seedance 2.5, \
+          each beat still needs its own identity and continuity review when autoQA is enabled. \
+          The window is sized to the routed family: up to 30s on Seedance 2.5, \
           15s otherwise (≤6 shots standard, more on 2.5), cut-like transitions, no VO-only \
           shots. Set allowMultiShot=false on a shot to keep it out of any group, or turn the \
           Settings toggle off. regenerate_shot always renders a single shot — it never \
@@ -326,8 +326,12 @@ enum AgentInstructions {
         - produce_shots and regenerate_shot run in the background: they return immediately, \
           post progress into chat, and flip shot status (generating → placed/failed). Poll \
           get_shot_plan or production_status; don't block waiting. regenerate_shot makes a new \
-          take and swaps the timeline clip in place. One shot generates at a time; \
-          calls made mid-run queue behind the active shot (production_status.queuedCount).
+          take and swaps the timeline clip in place. Independent units generate concurrently; \
+          additional requests join the pending queue (production_status.queuedCount).
+        - Finish retained takes with resume_production and an operationId from production_status. \
+          It validates the saved video, retries QA on the same take, and places each reviewed \
+          range without submitting video generation. approvalReason records an explicit user \
+          approval of every affected beat; only pass it after the user reviews the take.
         - Dialogue/VO: put spoken lines on the shot (voiceOver=true for narration/off-screen). \
           The video prompt automatically suppresses model narration for VO shots; produce_audio \
           speaks the lines in the character's locked voice. Run produce_shots BEFORE produce_audio: \

@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 /// Drives background video production from a `ShotPlan`: for each shot it routes a model,
@@ -41,10 +42,13 @@ final class ProductionOrchestrator {
     @ObservationIgnored var quoteVideo: ((String, Int, String?, String) async -> Double?)?
     @ObservationIgnored var generateVideo: ((GenerationInput) async -> MediaAsset?)?
     @ObservationIgnored var validateVideo: ((MediaAsset, Double, String) async -> OutputValidator.Result)?
-    @ObservationIgnored var evaluateVideoQA: ((String, MediaAsset, ShotPlan) async -> VisionQA.Result?)?
+    @ObservationIgnored var evaluateVideoQA: ((String, MediaAsset, ShotPlan, ShotSourceRange) async -> VisionQA.Result?)?
+    @ObservationIgnored var digestVideo: ((MediaAsset) async throws -> String)?
     @ObservationIgnored private var runID = UUID()
     @ObservationIgnored private var runTask: Task<Void, Never>?
     @ObservationIgnored private var unitTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored var finalizingAttemptIds: Set<String> = []
+    @ObservationIgnored private var recoveryOperationId: String?
     @ObservationIgnored private var cancelRequested = false
     /// Generation units waiting to produce, drained in order by the run loop.
     /// A unit is one shot (normal) or a grouped multi-shot window (opt-in).
@@ -82,6 +86,7 @@ final class ProductionOrchestrator {
 
     func acceptsSubmissions(runId: UUID) -> Bool { isRunning && !cancelRequested && runID == runId }
     var currentRunId: UUID { runID }
+    var isFinalizingExistingTake: Bool { recoveryOperationId != nil }
 
     private func cancelUnitTasks() {
         for task in unitTasks.values { task.cancel() }
@@ -134,10 +139,17 @@ final class ProductionOrchestrator {
         return await VeniceAPI.fromKeychain()?.videoQuote(model: model, duration: duration, resolution: resolution, aspectRatio: aspect)
     }
 
-    private func validate(asset: MediaAsset, duration: Double, aspect: String) async -> OutputValidator.Result {
+    func validate(asset: MediaAsset, duration: Double, aspect: String) async -> OutputValidator.Result {
         if let validateVideo { return await validateVideo(asset, duration, aspect) }
         guard let url = editor?.mediaResolver.resolveURL(for: asset.id) else { return .fail("Generated video cannot be resolved.") }
-        return await OutputValidator.validate(url: url, requestedDurationSeconds: duration, targetAspectRatio: aspect)
+        let result = await OutputValidator.validate(url: url, requestedDurationSeconds: duration, targetAspectRatio: aspect)
+        guard result.ok else { return result }
+        guard let measured = try? await AVURLAsset(url: url).load(.duration), measured.seconds.isFinite, measured.seconds > 0 else {
+            return .fail("Could not measure the retained video's duration.")
+        }
+        asset.duration = measured.seconds
+        editor?.updateManifestMetadata(for: asset)
+        return result
     }
 
     var progressText: String {
@@ -150,6 +162,8 @@ final class ProductionOrchestrator {
 
     /// Cancels the in-memory loop (Venice jobs already queued keep running server-side).
     func detachAll() {
+        if let recoveryOperationId { editor?.mutateProductionOperation(recoveryOperationId) { if !$0.stage.isTerminal { $0.stage = .interrupted } } }
+        recoveryOperationId = nil
         editor?.settleProductionOperations(runId: runID, stage: .interrupted)
         cancelledCount += max(0, totalCount - settledCount)
         runID = UUID()
@@ -255,6 +269,67 @@ final class ProductionOrchestrator {
     func pause() { isPaused = true }
     func unpause() { isPaused = false }
 
+    @discardableResult
+    func resumeProduction(operationId: String, approvalReason: String? = nil) throws -> Bool {
+        guard !isRunning, let editor else { throw ToolError("Wait for the current production to finish.") }
+        guard let operation = editor.productionOperation(id: operationId), let attempt = operation.attempts.last,
+              let assetId = attempt.placeholderId, editor.mediaAssets.contains(where: { $0.id == assetId }) else {
+            throw ToolError("Operation has no retained video attempt to finalize.")
+        }
+        guard !finalizingAttemptIds.contains(attempt.id) else { throw ToolError("The previous finalization is still settling. Retry when it finishes.") }
+        if operation.stage == .placed {
+            guard hasCurrentFinalizedPlacement(operation) else { throw ToolError("The finalized placement was edited or removed. Reconcile the shot before restoring this take.") }
+            if operation.failureReason == nil { return false }
+        } else {
+            _ = try editor.requireProductionDestination(operationId)
+        }
+        if let approvalReason, approvalReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw ToolError("Record a reason for approving this take.")
+        }
+        runID = UUID()
+        let id = runID
+        recoveryOperationId = operationId
+        cancelRequested = false
+        isRunning = true
+        isPaused = false
+        currentShotId = operation.destinations.first?.shotId
+        totalCount = operation.destinations.count
+        completedCount = 0
+        failedCount = 0
+        cancelledCount = 0
+        runningUSD = 0
+        lastError = nil
+        editor.mutateProductionOperation(operationId) { if $0.stage != .placed { $0.stage = .validating }; $0.failureReason = nil }
+        editor.generationService.resumePendingGenerations(editor: editor, assetIds: [assetId])
+        runTask = Task { @MainActor in
+            while acceptsSubmissions(runId: id), let asset = editor.mediaAssets.first(where: { $0.id == assetId }),
+                  asset.isGenerating {
+                try? await Task.sleep(for: .seconds(1))
+            }
+            guard acceptsSubmissions(runId: id) else { return }
+            let outcome = await finalizeAttempt(operationId: operationId, runId: id, approvalReason: approvalReason)
+            guard acceptsSubmissions(runId: id) else { return }
+            if outcome == .placed {
+                completedCount = totalCount
+                postNotice("Finished the retained take. No video generation was submitted.")
+            } else {
+                failedCount = totalCount
+                let reason = outcome == .stopped ? "Shot settings or destination changed during finalization." : finalizationFailure(operationId)
+                lastError = reason
+                if editor.productionOperation(id: operationId)?.stage != .placed {
+                    editor.mutateProductionOperation(operationId) { $0.stage = .failed; $0.failureReason = reason }
+                    for destination in operation.destinations where editor.shot(id: destination.shotId)?.activeProductionOperationId == operationId {
+                        failShot(destination.shotId, reason: reason)
+                    }
+                }
+            }
+            recoveryOperationId = nil
+            currentShotId = nil
+            isRunning = false
+        }
+        return true
+    }
+
     /// Stops the run NOW. The loop is usually parked awaiting a generation —
     /// task cancellation can't reach that continuation, so it's resumed
     /// explicitly and run state is reset immediately (not when the in-flight
@@ -262,6 +337,8 @@ final class ProductionOrchestrator {
     /// `generating` to their pre-run status so per-shot Generate stays usable.
     func cancel() {
         guard isRunning else { return }
+        if let recoveryOperationId { editor?.mutateProductionOperation(recoveryOperationId) { if !$0.stage.isTerminal { $0.stage = .cancelled } } }
+        recoveryOperationId = nil
         editor?.settleProductionOperations(runId: runID, stage: .cancelled)
         cancelledCount += max(0, totalCount - settledCount)
         runID = UUID()
@@ -295,6 +372,7 @@ final class ProductionOrchestrator {
     /// in-flight shot instead of being refused.
     @discardableResult
     func produceShots(ids requestedIds: [String], options: Options = Options()) -> Bool {
+        guard recoveryOperationId == nil else { lastError = "Wait for take finalization to finish before starting another production."; return false }
         guard let editor, let plan = editor.shotPlan else { return false }
 
         // Resolve to plan order; if none requested, produce everything not yet placed.
@@ -469,7 +547,9 @@ final class ProductionOrchestrator {
                 generatingShotIds.subtract(finishedIds)
                 if finishedIds.contains(currentUnitShotIds.first ?? "") { currentUnitShotIds = [] }
                 for shotId in finishedIds {
-                    if editor?.shotPlan?.shot(id: shotId)?.status == .placed {
+                    let shot = editor?.shotPlan?.shot(id: shotId)
+                    let operation = shot?.activeProductionOperationId.flatMap { editor?.productionOperation(id: $0) }
+                    if shot?.status == .placed && (operation == nil || (operation?.stage == .placed && operation?.failureReason == nil)) {
                         completedCount += 1
                     } else {
                         failedCount += 1
@@ -582,7 +662,7 @@ final class ProductionOrchestrator {
             )
             guard operationIsCurrent(operationId) else { return }
 
-            guard let asset else {
+            guard let asset, asset.id == editor.productionOperation(id: operationId)?.attempts.last?.placeholderId else {
                 lastFailure = editor.productionOperation(id: operationId)?.attempts.last?.failureReason ?? "generation failed"
                 editor.recordProductionAttemptFailure(operationId, reason: lastFailure)
                 if attempt < options.maxRetries {
@@ -594,79 +674,25 @@ final class ProductionOrchestrator {
                 break
             }
 
-            editor.mutateProductionOperation(operationId) { $0.stage = .validating }
-            let check = await validate(asset: asset, duration: Double(duration), aspect: aspect)
+            let outcome = await finalizeAttempt(operationId: operationId, runId: runId)
+            guard acceptsSubmissions(runId: runId) else { return }
+            if outcome == .placed {
+                if let quoted { runningUSD += quoted }
+                postNotice("Placed \(label) on the timeline as \(window.count) clips from one take.")
+                return
+            }
+            lastFailure = finalizationFailure(operationId)
+            lastError = lastFailure
             guard operationIsCurrent(operationId) else { return }
-            do {
-                if !check.ok {
-                    lastFailure = check.reason ?? "output failed validation"
-                    editor.recordProductionAttemptFailure(operationId, reason: lastFailure)
-                    if attempt < options.maxRetries {
-                        postNotice("\(label) output rejected (\(lastFailure)) — regenerating.")
-                        try? await Task.sleep(for: .seconds(options.retryBaseDelay))
-                        continue
-                    }
-                    break
-                }
+            editor.recordProductionAttemptFailure(operationId, reason: lastFailure)
+            if outcome == .rejected && attempt < options.maxRetries {
+                try? await Task.sleep(for: .seconds(options.retryBaseDelay))
+                continue
             }
-
-            let segments: [ShotSourceRange]
-            do { segments = try unitSourceRanges(window: window, asset: asset) }
-            catch { lastFailure = error.localizedDescription; break }
-            let unitId = operationId
-            for (shot, segment) in zip(window, segments) {
-                recordTake(shotId: shot.id, asset: asset, model: route.model.id, unitId: unitId, sourceRange: segment, operationId: operationId)
-            }
-
-            if options.autoQA, let firstId = window.first?.id {
-                let result = await runAutoQA(shotId: firstId, asset: asset, plan: plan, operationId: operationId)
-                guard operationIsCurrent(operationId) else { return }
-                guard let result else { lastFailure = "QA is unavailable. Review the retained take before placement."; break }
-                if !result.pass {
-                    lastFailure = "Take failed QA: \(result.summary)"
-                    editor.recordProductionAttemptFailure(operationId, reason: lastFailure)
-                    if attempt < options.maxRetries {
-                        postNotice("\(label) failed QA (score \(String(format: "%.2f", result.score))) — regenerating.")
-                        try? await Task.sleep(for: .seconds(options.retryBaseDelay))
-                        continue
-                    }
-                    break
-                }
-            }
-
-            guard operationIsCurrent(operationId) else { return }
-            do { try placeUnitClips(window: window, segments: segments, asset: asset, editor: editor) }
-            catch { lastFailure = error.localizedDescription; break }
-            editor.mutateProductionOperation(operationId) { $0.stage = .placed }
-            editor.reorderProductionClipsToPlanOrder()
-            if let quoted { runningUSD += quoted }
-            postNotice("Placed \(label) on the timeline as \(window.count) clips from one take.")
-            return
+            break
         }
 
         for shot in window { failShot(shot.id, reason: lastFailure) }
-    }
-
-    /// Splits the unit's single video into per-shot timeline clips at the
-    /// planned beat boundaries. The last shot absorbs any surplus (ladder
-    /// snapping can make the render longer than the planned sum).
-    private func unitSourceRanges(window: [Shot], asset: MediaAsset) throws -> [ShotSourceRange] {
-        let actual = asset.duration
-        guard actual.isFinite, actual > 0 else { throw ToolError("Generated take has no measured duration.") }
-        var ranges: [ShotSourceRange] = []
-        var cursor = 0.0
-        for (index, shot) in window.enumerated() {
-            let isLast = index == window.count - 1
-            let end = isLast ? actual : min(actual, cursor + shot.durationSeconds)
-            guard end > cursor else { throw ToolError("Generated take does not cover every grouped shot.") }
-            ranges.append(.init(startSeconds: cursor, endSeconds: end))
-            cursor = end
-        }
-        return ranges
-    }
-
-    private func placeUnitClips(window: [Shot], segments: [ShotSourceRange], asset: MediaAsset, editor: EditorViewModel) throws {
-        try editor.placeProductionUnit(asset: asset, segments: zip(window, segments).map { (shotId: $0.id, sourceRange: $1) })
     }
 
     /// Routes a grouped window: pure reference mode on a reference-capable
@@ -847,7 +873,7 @@ final class ProductionOrchestrator {
 
             guard operationIsCurrent(operationId) else { return }
 
-            guard let asset else {
+            guard let asset, asset.id == editor.productionOperation(id: operationId)?.attempts.last?.placeholderId else {
                 lastFailure = editor.productionOperation(id: operationId)?.attempts.last?.failureReason ?? "generation failed"
                 editor.recordProductionAttemptFailure(operationId, reason: lastFailure)
                 if attempt < options.maxRetries {
@@ -859,49 +885,22 @@ final class ProductionOrchestrator {
                 break
             }
 
-            editor.mutateProductionOperation(operationId) { $0.stage = .validating }
-            let check = await validate(asset: asset, duration: Double(duration), aspect: aspect)
-            guard operationIsCurrent(operationId) else { return }
-            do {
-                if !check.ok {
-                    lastFailure = check.reason ?? "output failed validation"
-                    editor.recordProductionAttemptFailure(operationId, reason: lastFailure)
-                    if attempt < options.maxRetries {
-                        postNotice("\(label) output rejected (\(lastFailure)) — regenerating.")
-                        try? await Task.sleep(for: .seconds(options.retryBaseDelay))
-                        continue
-                    }
-                    break
-                }
+            let outcome = await finalizeAttempt(operationId: operationId, runId: runId)
+            guard acceptsSubmissions(runId: runId) else { return }
+            if outcome == .placed {
+                if let quoted { runningUSD += quoted }
+                postNotice("Placed \(label) on the timeline.")
+                return
             }
-
-            recordTake(shotId: shotId, asset: asset, model: route.model.id, operationId: operationId)
-
-            // Optional auto-QA: a hard fail with retries left triggers another take.
-            if options.autoQA {
-                let result = await runAutoQA(shotId: shotId, asset: asset, plan: plan, operationId: operationId)
-                guard operationIsCurrent(operationId) else { return }
-                guard let result else { lastFailure = "QA is unavailable. Review the retained take before placement."; break }
-                if !result.pass {
-                    lastFailure = "Take failed QA: \(result.summary)"
-                    editor.recordProductionAttemptFailure(operationId, reason: lastFailure)
-                    if attempt < options.maxRetries {
-                        postNotice("\(label) failed QA (score \(String(format: "%.2f", result.score))) — regenerating.")
-                        try? await Task.sleep(for: .seconds(options.retryBaseDelay))
-                        continue
-                    }
-                    break
-                }
-            }
-
+            lastFailure = finalizationFailure(operationId)
+            lastError = lastFailure
             guard operationIsCurrent(operationId) else { return }
-            do { try editor.placeProductionShot(asset: asset, shotId: shotId) }
-            catch { failShot(shotId, reason: error.localizedDescription); return }
-            editor.mutateProductionOperation(operationId) { $0.stage = .placed }
-            editor.reorderProductionClipsToPlanOrder()
-            if let quoted { runningUSD += quoted }
-            postNotice("Placed \(label) on the timeline.")
-            return
+            editor.recordProductionAttemptFailure(operationId, reason: lastFailure)
+            if outcome == .rejected && attempt < options.maxRetries {
+                try? await Task.sleep(for: .seconds(options.retryBaseDelay))
+                continue
+            }
+            break
         }
 
         failShot(shotId, reason: lastFailure)
@@ -959,28 +958,28 @@ final class ProductionOrchestrator {
         }
     }
 
-    private func runAutoQA(shotId: String, asset: MediaAsset, plan: ShotPlan, operationId: String) async -> VisionQA.Result? {
-        guard operationIsCurrent(operationId) else { return nil }
+    func runAutoQA(shotId: String, asset: MediaAsset, plan: ShotPlan, operationId: String, runId: UUID, sourceRange: ShotSourceRange, qaModel: String?) async -> VisionQA.Result? {
+        guard finalizationIsCurrent(operationId, runId: runId) else { return nil }
         if let evaluateVideoQA {
             editor?.mutateProductionOperation(operationId) { $0.stage = .reviewing }
-            let result = await evaluateVideoQA(shotId, asset, plan)
-            guard operationIsCurrent(operationId) else { return nil }
+            let result = await evaluateVideoQA(shotId, asset, plan, sourceRange)
+            guard finalizationIsCurrent(operationId, runId: runId) else { return nil }
             if let result { recordQAResult(result, shotId: shotId) }
             return result
         }
         guard let editor,
               let api = VeniceAPI.fromKeychain(),
-              let model = VisionQA.selectModel(),
+              let model = qaModel,
               let url = editor.mediaResolver.resolveURL(for: asset.id),
               let shot = editor.shotPlan?.shot(id: shotId) else { return nil }
-        var frames = await VisionQA.videoFrames(url: url, count: 3)
-        guard operationIsCurrent(operationId) else { return nil }
+        var frames = await VisionQA.videoFrames(url: url, count: 3, sourceRange: sourceRange)
+        guard finalizationIsCurrent(operationId, runId: runId) else { return nil }
         guard !frames.isEmpty else { return nil }
         // Spatial drift guard (harness qa-storyboard): append the nearest earlier
         // same-location frame so the reviewer can catch mirrored geography /
         // side-swaps against real prior coverage, not the stated layout alone.
         let priorFrame = await priorSameLocationQAFrame(for: shot, plan: plan, editor: editor)
-        guard operationIsCurrent(operationId) else { return nil }
+        guard finalizationIsCurrent(operationId, runId: runId) else { return nil }
         if let priorFrame { frames.append(priorFrame) }
         let rubric = ProductionOrchestrator.qaRubric(for: shot, plan: plan, comparePriorPanel: priorFrame != nil)
         let result: VisionQA.Result
@@ -988,7 +987,7 @@ final class ProductionOrchestrator {
         do {
             result = try await VisionQA.evaluate(images: frames, rubric: rubric, api: api, model: model)
         } catch {
-            guard operationIsCurrent(operationId) else { return nil }
+            guard finalizationIsCurrent(operationId, runId: runId) else { return nil }
             // Errored QA is NOT a silent pass (harness rule 46b): stamp the shot
             // UNCHECKED so no auto-approve path reads the missing verdict as "all
             // clear". Returning nil keeps the retry path from treating it as a
@@ -999,13 +998,16 @@ final class ProductionOrchestrator {
             }
             return nil
         }
-        guard operationIsCurrent(operationId) else { return nil }
+        guard finalizationIsCurrent(operationId, runId: runId) else { return nil }
         recordQAResult(result, shotId: shotId)
         return result
     }
 
     private func recordQAResult(_ result: VisionQA.Result, shotId: String) {
-        editor?.mutateShotPlan(actionName: "QA Shot") { plan in
+        guard let editor else { return }
+        editor.undoManager?.beginUndoGrouping()
+        defer { editor.undoManager?.endUndoGrouping() }
+        editor.mutateShotPlan(actionName: "QA Shot") { plan in
             guard let idx = plan.shots.firstIndex(where: { $0.id == shotId }) else { return }
             plan.shots[idx].qaSummary = result.summary
             if let last = plan.shots[idx].takes.indices.last {
@@ -1045,13 +1047,16 @@ final class ProductionOrchestrator {
 
     // MARK: - Plan mutations
 
-    private func recordTake(shotId: String, asset: MediaAsset, model: String, unitId: String? = nil, sourceRange: ShotSourceRange? = nil, operationId: String) {
+    func recordTake(shotId: String, asset: MediaAsset, model: String, unitId: String? = nil, sourceRange: ShotSourceRange? = nil, operationId: String) {
         // The produced asset carries the fully-resolved submitted call (final
         // prompt, reference asset ids, negative prompt, seed) — snapshot it as the
         // take's replayable recipe (harness rule 39).
         let recipe = asset.generationInput
-        guard let takeId = editor?.productionOperation(id: operationId)?.attempts.last?.takeIds[shotId] else { return }
-        editor?.mutateShotPlan(actionName: "Shot Take") { plan in
+        guard let editor, let takeId = editor.productionOperation(id: operationId)?.attempts.last?.takeIds[shotId],
+              editor.shot(id: shotId)?.takes.contains(where: { $0.id == takeId }) != true else { return }
+        editor.undoManager?.beginUndoGrouping()
+        defer { editor.undoManager?.endUndoGrouping() }
+        editor.mutateShotPlan(actionName: "Shot Take") { plan in
             guard let idx = plan.shots.firstIndex(where: { $0.id == shotId }) else { return }
             guard !plan.shots[idx].takes.contains(where: { $0.id == takeId }) else { return }
             var take = ShotTake(

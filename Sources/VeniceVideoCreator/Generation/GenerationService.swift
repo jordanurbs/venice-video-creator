@@ -103,9 +103,9 @@ final class GenerationService {
             do {
                 try Task.checkCancellation()
                 if genInput.productionOperationId != nil {
-                    try editor.validateProductionAttempt(genInput)
+                    try editor.validateProductionAttempt(genInput, placeholderId: primaryId)
                     try await editor.checkpointProductionState()
-                    try editor.validateProductionAttempt(genInput)
+                    try editor.validateProductionAttempt(genInput, placeholderId: primaryId)
                 }
                 for binding in genInput.storyboardBindings ?? [] { try editor.validateStoryboardSubmission(binding) }
                 if assetType == .video {
@@ -378,7 +378,7 @@ final class GenerationService {
         }
     }
 
-    func resumePendingGenerations(editor: EditorViewModel) {
+    func resumePendingGenerations(editor: EditorViewModel, assetIds: Set<String>? = nil) {
         func sorted(_ assets: [MediaAsset]) -> [MediaAsset] {
             assets.sorted {
                 let left = $0.generationInput?.outputIndex ?? 0
@@ -387,7 +387,11 @@ final class GenerationService {
             }
         }
 
-        let pending = editor.mediaAssets.filter(\.isRecoveringGeneration)
+        let pending = editor.mediaAssets.filter { asset in
+            guard assetIds?.contains(asset.id) ?? true, generationTasks[asset.id] == nil else { return false }
+            return asset.isRecoveringGeneration || (assetIds != nil && asset.canResumeGeneration
+                && !asset.isGenerating && asset.generationStatus != .none && asset.generationInput?.queueId != nil)
+        }
 
         let byBackendJob = Dictionary(grouping: pending.compactMap { asset -> (String, MediaAsset)? in
             guard let backendJobId = asset.generationInput?.backendJobId, !backendJobId.isEmpty else { return nil }
@@ -396,10 +400,15 @@ final class GenerationService {
 
         for (backendJobId, group) in byBackendJob where !resumedBackendJobIds.contains(backendJobId) {
             let placeholders = sorted(group.map { $0.1 })
+            let needsQueueRecovery = placeholders.contains { asset in
+                if case .failed = asset.generationStatus { return true }
+                return asset.generationStatus == .cancelled || asset.generationInput?.resultURLs?.isEmpty == false
+            }
             resumedBackendJobIds.insert(backendJobId)
+            for placeholder in placeholders { updateGenerationMetadata(placeholder, editor: editor, status: .generating) }
             Task { @MainActor [weak self, weak editor] in
                 guard let self, let editor else { return }
-                if GenerationBackend.subscribe(jobId: backendJobId) != nil {
+                if !needsQueueRecovery, GenerationBackend.subscribe(jobId: backendJobId) != nil {
                     await self.monitorBackendJob(
                         backendJobId: backendJobId,
                         placeholders: placeholders,
@@ -583,7 +592,7 @@ final class GenerationService {
                 videoBudget: videoBudget,
                 validateSubmission: { [weak editor] in
                     guard let editor else { throw ToolError("The project closed before submission.") }
-                    try editor.validateProductionAttempt(genInput)
+                    try editor.validateProductionAttempt(genInput, placeholderId: placeholders.first?.id)
                     for binding in genInput.storyboardBindings ?? [] { try editor.validateStoryboardSubmission(binding) }
                 }
             )

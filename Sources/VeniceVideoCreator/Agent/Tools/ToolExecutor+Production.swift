@@ -155,6 +155,13 @@ extension ToolExecutor {
 
     // MARK: - production_status
 
+    func resumeProduction(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
+        let operationId = try args.requireString("operationId")
+        let reason = args["approvalReason"] == nil ? nil : try args.requireString("approvalReason")
+        let started = try editor.productionOrchestrator.resumeProduction(operationId: operationId, approvalReason: reason)
+        return .ok(Self.jsonString(["operationId": operationId, "started": started, "hint": "Poll production_status for validation, review, and placement. No video generation is submitted."] as [String: Any]) ?? "{}")
+    }
+
     func productionStatus(_ editor: EditorViewModel) -> ToolResult {
         let o = editor.productionOrchestrator
         var status = ProductionStatus(

@@ -24,6 +24,8 @@ struct ProductionStatus: Encodable {
         let placeholderId: String?
         let queueId: String?
         let failureReason: String?
+        let contentDigest: String?
+        let reviews: [ProductionFinalization.Review]
 
         init(_ operation: ProductionOperation) {
             id = operation.id
@@ -34,6 +36,8 @@ struct ProductionStatus: Encodable {
             placeholderId = operation.attempts.last?.placeholderId
             queueId = operation.attempts.last?.queueId
             failureReason = operation.failureReason ?? operation.attempts.last?.failureReason
+            contentDigest = operation.attempts.last?.finalization?.contentDigest
+            reviews = operation.attempts.last?.finalization?.reviews ?? []
         }
     }
 

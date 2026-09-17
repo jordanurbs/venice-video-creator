@@ -8,7 +8,7 @@ extension ToolExecutor {
     private nonisolated static let idPrefixFloor = 8
 
     private static let scalarIdKeys: Set<String> = [
-        "clipId", "sourceClipId", "referenceClipId", "targetClipId", "placedClipId",
+        "clipId", "sourceClipId", "referenceClipId", "targetClipId", "placedClipId", "operationId",
         "mediaRef", "startFrameMediaRef", "endFrameMediaRef",
         "sourceVideoMediaRef", "videoSourceMediaRef",
         "folderId", "parentFolderId", "captionGroupId",
@@ -41,6 +41,7 @@ extension ToolExecutor {
         }
         for asset in editor.mediaAssets { ids.insert(asset.id) }
         for folder in editor.folders { ids.insert(folder.id) }
+        for operation in editor.mediaManifest.productionOperations { ids.insert(operation.id) }
         // Shot-plan entities: their ids appear in get_shot_plan output and come
         // back as characterId/locationId/shotId arguments. Excluding them meant
         // shortened entity ids couldn't round-trip.

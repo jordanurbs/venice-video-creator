@@ -78,15 +78,17 @@ enum VisionQA {
     // MARK: - Frame extraction
 
     /// Samples up to `count` frames evenly across a video, downscaled to `maxEdge`, as JPEG.
-    static func videoFrames(url: URL, count: Int = 3, maxEdge: CGFloat = 768) async -> [Data] {
+    static func videoFrames(url: URL, count: Int = 3, maxEdge: CGFloat = 768, sourceRange: ShotSourceRange? = nil) async -> [Data] {
         let asset = AVURLAsset(url: url)
         guard let durationTime = try? await asset.load(.duration) else { return [] }
         let duration = durationTime.seconds
-        guard duration > 0 else { return [] }
+        let start = sourceRange?.startSeconds ?? 0
+        let end = sourceRange?.endSeconds ?? duration
+        guard duration.isFinite, start.isFinite, end.isFinite, start >= 0, end > start, end <= duration else { return [] }
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: maxEdge, height: maxEdge)
-        let tolerance = CMTime(seconds: 0.5, preferredTimescale: 600)
+        let tolerance = sourceRange == nil ? CMTime(seconds: 0.5, preferredTimescale: 600) : .zero
         generator.requestedTimeToleranceBefore = tolerance
         generator.requestedTimeToleranceAfter = tolerance
 
@@ -94,7 +96,7 @@ enum VisionQA {
         // Even samples avoiding exact 0 and end.
         let times: [CMTime] = (0..<n).map { i in
             let frac = (Double(i) + 0.5) / Double(n)
-            return CMTime(seconds: duration * frac, preferredTimescale: 600)
+            return CMTime(seconds: start + (end - start) * frac, preferredTimescale: 600)
         }
         var out: [Data] = []
         for await result in generator.images(for: times) {

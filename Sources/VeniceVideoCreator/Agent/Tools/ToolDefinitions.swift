@@ -73,6 +73,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case produceShots = "produce_shots"
     case regenerateShot = "regenerate_shot"
     case productionStatus = "production_status"
+    case resumeProduction = "resume_production"
     case produceAudio = "produce_audio"
     case readSkill = "read_skill"
     case getProjects = "get_projects"
@@ -1292,7 +1293,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .produceShots,
-            description: "Start background production in plan order. Explicit models are honored; approved storyboard frames route to I2V, references to R2V, and no visuals to T2V. Every existing storyboard must have approval for its current revision. Jobs run concurrently where dependencies allow. Returns immediately; poll production_status and get_shot_plan. Explicit Multi-Angle 1080P requires maxCostUSD and fresh quotes; submit its budget in a new run.",
+            description: "Start background production in plan order. Explicit models are honored; approved storyboard frames route to I2V, references to R2V, and no visuals to T2V. Every existing storyboard must have approval for its current revision. Jobs run concurrently where dependencies allow. Returns immediately; poll production_status and get_shot_plan. Use resume_production to finish an existing take without buying another video. Explicit Multi-Angle 1080P requires maxCostUSD and fresh quotes; submit its budget in a new run.",
             inputSchema: objectSchema(
                 properties: [
                     "shotIds": ["type": "array", "items": ["type": "string"], "description": "Shots to produce (in plan order). Omit to produce every shot not already placed."],
@@ -1319,8 +1320,16 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .productionStatus,
-            description: "Return the current production run state: whether it's running/paused, the current shot, completed/total counts, running USD spend, and the last error. Use to monitor a produce_shots run.",
+            description: "Return production progress and the latest 50 operation summaries, including retained attempt IDs, per-beat reviews, and failures. Use resume_production with an operation ID to finish a retained take without generating another video.",
             inputSchema: objectSchema()
+        ),
+        AgentTool(
+            name: .resumeProduction,
+            description: "Validate, review, and place the latest retained attempt of an existing production operation. Never submits video generation. Reuses valid review evidence; retries unavailable QA on the same video. Returns immediately; poll production_status. The saved shot revision and destination must still match. Repeating a completed operation does not duplicate clips. Pass approvalReason only when the user has explicitly reviewed and approved every affected beat despite failed or unavailable QA.",
+            inputSchema: objectSchema(properties: [
+                "operationId": ["type": "string", "description": "Operation ID from production_status."],
+                "approvalReason": ["type": "string", "description": "User's explicit reason for approving every beat in this retained take. Recorded with the current video digest and each source range."],
+            ], required: ["operationId"])
         ),
         AgentTool(
             name: .produceAudio,

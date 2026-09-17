@@ -34,7 +34,7 @@ extension ToolExecutor {
             guard editor.timeline.totalFrames > 0 else {
                 throw ToolError("export_project: timeline is empty")
             }
-            return try exportVideo(editor, format: format, resolution: resolution, outputURL: outputURL)
+            return try await exportVideo(editor, format: format, resolution: resolution, outputURL: outputURL)
         case .xml:
             return try await exportXML(editor, outputURL: outputURL)
         case .fcpxml:
@@ -58,14 +58,16 @@ extension ToolExecutor {
         format: ExportFormat,
         resolution: ExportResolution,
         outputURL: URL
-    ) throws -> ToolResult {
+    ) async throws -> ToolResult {
+        guard !ExportCoordinator.isExportActive else { throw ToolError("export_project: Another export is already in progress.") }
+        let snapshot = try await editor.prepareVideoExport()
         guard ExportCoordinator.beginExportIfIdle() else {
             throw ToolError("export_project: Another export is already in progress.")
         }
 
-        let timeline = editor.timeline
-        let resolver = editor.mediaResolver
-        let missingMediaRefs = editor.missingMediaRefs
+        let timeline = snapshot.timeline
+        let resolver = snapshot.resolver
+        let warnings = snapshot.readiness.issues.filter { $0.severity == .warning }.map(\.message)
         let name = outputURL.lastPathComponent
 
         Task { @MainActor in
@@ -76,7 +78,7 @@ extension ToolExecutor {
                 resolver: resolver,
                 format: format,
                 resolution: resolution,
-                missingMediaRefs: missingMediaRefs,
+                missingMediaRefs: [],
                 outputURL: outputURL,
                 acquireSlot: false
             )
@@ -84,7 +86,7 @@ extension ToolExecutor {
                 AppNotifications.exportFailed(name: name, reason: error)
             } else {
                 let report = service.lastReport
-                let warningCount = (report?.offlineMediaRefs.count ?? 0) + (report?.unprocessableMediaRefs.count ?? 0)
+                let warningCount = (report?.offlineMediaRefs.count ?? 0) + (report?.unprocessableMediaRefs.count ?? 0) + warnings.count
                 AppNotifications.exportComplete(
                     name: name,
                     outputURL: outputURL,
@@ -100,9 +102,11 @@ extension ToolExecutor {
             "path": outputURL.path,
             "codec": format.displayName,
             "resolution": resolution.rawValue,
-            "durationFrames": editor.timeline.totalFrames,
-            "durationSeconds": Double(editor.timeline.totalFrames) / Double(max(1, editor.timeline.fps)),
-            "fps": editor.timeline.fps,
+            "durationFrames": timeline.totalFrames,
+            "durationSeconds": Double(timeline.totalFrames) / Double(max(1, timeline.fps)),
+            "fps": timeline.fps,
+            "revision": snapshot.revision,
+            "warnings": warnings,
             "note": "Rendering in the background. A system notification will report completion or failure.",
         ])
     }

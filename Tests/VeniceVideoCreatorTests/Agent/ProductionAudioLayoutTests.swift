@@ -8,7 +8,7 @@ import Testing
 @MainActor
 struct ProductionAudioLayoutTests {
     @MainActor
-    private final class Fixture {
+    final class Fixture {
         let driver = ProductionAudioTests()
         let h: ToolHarness
         var ids: [String] = []

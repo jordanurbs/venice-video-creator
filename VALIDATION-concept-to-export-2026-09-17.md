@@ -1,7 +1,7 @@
 # Concept-to-export implementation validation
 
 Date: 2026-09-17
-Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c`, native fixture `d9f2975`, placement bindings `f3542fb`, operation lifecycle `d0b4bc9`, shared video finalization `8d3e3e8`, durable audio `9c91687`, and native mix/decibel ducking `b89fcf1` committed. Explicit retained-audio layout reconciliation compiled and regression-tested. Native control acceptance remains unverified. Not E2E-ready.
+Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c`, native fixture `d9f2975`, placement bindings `f3542fb`, operation lifecycle `d0b4bc9`, shared video finalization `8d3e3e8`, durable audio `9c91687`, native mix/decibel ducking `b89fcf1`, and retained audio layout `21f388a` committed. Shared readiness and frozen video-export mappings compiled and regression-tested. Native control acceptance remains unverified. Not E2E-ready.
 
 ## Permissions and spending
 
@@ -45,7 +45,7 @@ Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c
 
 ## Next slice and open gates
 
-1. Readiness/lifecycle/export continuation: turn the shared audio layout checks into a read-only readiness report and enforce explicit reconciliation before delivery. `reconcile_audio` and a native action now reconcile existing output after edits; automatic edit/reopen hooks are still open. Preserve undo-safe timing metadata rather than adding untracked asynchronous timeline writes. Explicit legacy audio adoption, source-byte revisions, and native acceptance also remain open.
+1. Retained export continuation: stable job IDs with status/wait, terminal artifact decoding, source-byte change detection during render, and failure on offline/unprocessable composition output. Readiness and frozen timeline/media mappings are now shared by native/agent video export, but the tool still returns “started” and relies on notifications. Preserve explicit audio reconciliation and undo-safe metadata; automatic edit/reopen hooks remain open.
 2. Finish Phase 1 native verification of all six camera controls, unsupported-camera clear path, approval controls, inspector/retake/save-reopen, and 1080P budget presentation. The fixture rendered, but its background window on another Space exposes only menu-bar accessibility elements. Do not change the user's foreground app/Space to bypass this limitation.
 3. Finish Phase 2 placement ownership: selection preview source windows, manually split descendants, arbitrary source replacement, and keep/duck/mute restoration. Exact retake/reset/dialogue addressing and linked replacement/reorder are covered below; these do not establish full production recovery.
 4. Phases 3–5 remain open: revisioned QA/approval and dependency invalidation, attempt/quote ledger and stricter decoded-output validation, idempotent measured audio and exact-speech ownership, readiness, retained export jobs and verified immutable delivery.
@@ -72,6 +72,19 @@ Shared video finalization is committed as `8d3e3e8`, `feat(production): finalize
 Durable audio is committed as `9c91687`, `fix(production): retain audio attempts and finish measured takes` (18 files), with the unrelated bitrate block excluded.
 
 Native mix and decibel ducking are committed as `b89fcf1`, `fix(audio): restore native mix and apply decibel ducking` (15 files), with the unrelated bitrate block excluded.
+
+Retained audio layout is committed as `21f388a`, `feat(audio): reconcile retained audio with timeline edits` (13 files), with the unrelated bitrate block excluded.
+
+## Read-only readiness and frozen export inputs
+
+- Added `Production/ProductionReadiness.swift`: `production_readiness` reports a revision, `canExport`, blockers/warnings, and check time. It validates pending generation/finalization, safe clip timing/properties/identity, source presence and known decode errors, source coverage, picture tails, current storyboard/operation/take/range reviews, and changed validated-video bytes. Voice-over presence and scalar/track/envelope mute are checked; native speech remains explicitly unverified. QA-disabled and legacy-unversioned review states are warnings, not silent certification.
+- Split audio layout proposal from its apply step. Readiness detects required reflow/ducking/FPS metadata changes without changing timeline, plan, ownership, or undo state. The revision includes audio layout metadata as well as timeline, plan, media file stamps/status/duration, and production summaries; changes during asynchronous video hashing invalidate the check.
+- Native and agent video export call the same `prepareVideoExport` gate. Failed preflight leaves an existing output untouched. Native preflight can be cancelled; unresolved issues are shown through the existing error surface. Interchange/project-package exports remain working-project transfers rather than final-video certification.
+- `MediaResolver.snapshot()` freezes manifest/project values and resolved source URLs. An export cannot switch to a later same-ID manifest path or use late fallback healing. The agent's started response now includes the checked revision and warnings. The filesystem itself is not frozen: detecting source-byte changes during render and reporting verified terminal results remain the next export milestone.
+- Added ten `ProductionReadinessTests` using real local H.264/WAV files and injected generation/QA: read-only dispatcher/revision stability, frozen resolver behavior, pending/missing media, unplaced shots/missing or muted speech, reviewed source windows/video bytes, QA-disabled policy, stale settings, edits during hashing, nonmutating audio preflight, protected destinations, and malformed timing/duplicate IDs. Assertions also cover a fully silent dB voice-over envelope and metadata-only audio ownership revision changes.
+- `swift build` passed (14.08s). Final `swift test --filter 'ProductionReadinessTests|ProductionAudioLayoutTests|ExportProjectToolTests|MediaResolverTests'`: **34 tests / five suites passed**. Final `swift test`: **1,165 tests / 176 suites passed**, same seven skips. Final combined output: `/Users/venetian42069/.local/share/opencode/tool-output/tool_0b199a162001NtRCqhvsFxSAjH`. No paid requests, native launch, or foreground changes.
+- Snapshot capture also rechecks the revision after awaiting readiness, closing the continuation boundary before freezing inputs. After that final guard, the focused 34-test run passed again (0.373s tests, 10.19s build).
+- Remaining: retained export jobs/status/wait, strict decoded output verification and source stability during rendering; current audio/canonical-reference byte provenance; re-reviewing externally changed placed takes; actual native/export/listening and dated E2E acceptance. A passing preflight is permission to render, not proof the movie has been delivered.
 
 ## Retained audio layout reconciliation
 

@@ -1,7 +1,7 @@
 # Concept-to-export remediation plan
 
 Date: 2026-09-17
-Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c`, native fixture `d9f2975`, placement bindings `f3542fb`, operation lifecycle `d0b4bc9`, shared video finalization `8d3e3e8`, durable audio `9c91687`, and native mix/decibel ducking `b89fcf1` committed. Explicit retained-audio layout reconciliation compiled and regression-tested. Native control acceptance remains unverified after the background-window accessibility blocker. No phase exit or dated E2E acceptance has passed.
+Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c`, native fixture `d9f2975`, placement bindings `f3542fb`, operation lifecycle `d0b4bc9`, shared video finalization `8d3e3e8`, durable audio `9c91687`, native mix/decibel ducking `b89fcf1`, and retained audio layout `21f388a` committed. Shared read-only readiness and frozen video-export mappings compiled and regression-tested. Native control acceptance remains unverified after the background-window accessibility blocker. No phase exit or dated E2E acceptance has passed.
 Evidence and detailed acceptance cases: `AUDIT-concept-to-export-2026-09-17.md`.
 Session instructions: `HANDOFF-concept-to-export-2026-09-17.md`.
 
@@ -137,9 +137,10 @@ Exit: intelligible, untruncated, intentionally timed speech; no duplicate lines;
 
 ## Phase 5 — Readiness and verified delivery (F07)
 
-- [ ] Add a shared final-readiness report covering pending jobs, stale approvals, media errors, missing bindings, and audio/timeline issues.
+- [x] Add a shared video-export preflight report covering pending jobs, stale approvals, known media errors, missing bindings, and audio/timeline issues. Native and agent video export use this read-only gate; warnings preserve explicit QA-disabled and unverified speech state. A passing preflight permits rendering, not verified delivery.
 - [ ] Retain export jobs with stable IDs and query/wait tools; report terminal success/failure through the agent, not just OS notifications.
 - [ ] Export an immutable project/timeline revision and report which revision was delivered.
+  - [x] Capture timeline/manifest values plus a frozen resolved URL map and revision hash after readiness. Source resolution cannot silently follow later manifest edits or late fallback healing. Input-byte changes during render and verified terminal delivery still require the retained export layer.
 - [ ] Verify decoded artifact tracks, dimensions, duration, audio, and intended timeline coverage; expose actionable errors rather than file-existence success.
 - [ ] Complete deterministic integration and native manual-tweak acceptance before live spending.
 
@@ -188,3 +189,5 @@ Advanced camera curve editor/presets, unrelated model-family parity, deferred `e
 - Native mix slice: persisted base/applied volume state per bound clip; shared atomic keep/duck/mute, linked-source restoration, and undo; mix-only changes excluded from storyboard/video destination identity. Corrected bed ducking from linear gain values to dB envelopes and asserted actual playback gain. Eight new mix regressions plus the updated measured-audio test pass: targeted 60 tests in five suites; full 1,145 tests in 174 suites (seven skips). Next: shared reconciliation after arbitrary timeline edits and retained export/readiness.
 - Native mix/ducking committed as `b89fcf1` (`fix(audio): restore native mix and apply decibel ducking`), excluding the unrelated bitrate hunk.
 - Retained layout slice: shared explicit native/agent reconciliation, picture-bound reflow, bed fitting, manual timing/curve ownership, FPS rebasing, and undo-safe layout metadata without generation. Eight valid-WAV layout tests exposed two additional duck ramp defects, now fixed with two scheduler regressions. Targeted 56 tests in five suites and full 1,155 tests in 175 suites pass (seven skips). Next: read-only readiness, lifecycle/export gates, and retained verified export; automatic edit hooks and native acceptance remain open.
+- Retained audio layout committed as `21f388a` (`feat(audio): reconcile retained audio with timeline edits`), excluding the unrelated bitrate hunk.
+- Readiness slice: nonmutating production/media/audio layout preflight, current take byte hashes and source-range reviews, readiness revision race checks, shared native/agent video gate, and immutable timeline/manifest/source mapping capture. Ten new regressions pass: targeted 34 tests in five suites; full 1,165 tests in 176 suites (seven skips). Next: retained export IDs/status/wait and decoded terminal artifact verification, including source changes during render and composition failures.

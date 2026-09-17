@@ -345,6 +345,9 @@ enum AgentInstructions {
           run reconcile_audio before export. It updates retained automatic timing and ducking \
           without generation, preserves manual edits, and reports coverage/overlap conflicts. \
           Resolve any conflict before claiming the audio is ready.
+        - Run production_readiness before final video export. Resolve blockers; report remaining \
+          warnings, including unverified on-screen speech. Passing preflight permits rendering, \
+          not a completed delivery. Video export uses a frozen timeline/media mapping revision.
         - Voice consistency across shots: lock_voice also locks a voice REFERENCE (an audio \
           sample of the character speaking) — pass voiceReferenceMediaRef with the winning \
           audition sample, or let it auto-generate one. Shots that include the character then \

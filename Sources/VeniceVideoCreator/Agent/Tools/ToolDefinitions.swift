@@ -73,6 +73,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case produceShots = "produce_shots"
     case regenerateShot = "regenerate_shot"
     case productionStatus = "production_status"
+    case productionReadiness = "production_readiness"
     case resumeProduction = "resume_production"
     case produceAudio = "produce_audio"
     case reconcileAudio = "reconcile_audio"
@@ -1331,6 +1332,11 @@ enum ToolDefinitions {
                 "operationId": ["type": "string", "description": "Operation ID from production_status."],
                 "approvalReason": ["type": "string", "description": "User's explicit reason for approving every beat in this retained take. Recorded with the current video digest and each source range."],
             ], required: ["operationId"])
+        ),
+        AgentTool(
+            name: .productionReadiness,
+            description: "Read-only video-export preflight. Reports project revision, canExport, blockers and warnings for pending work, current storyboard/take/range reviews, video byte changes, media/binding failures, source coverage, missing/muted voice-over, picture tails, and audio needing reconciliation. Makes no provider requests. A passing preflight permits rendering; it is not proof of a verified delivery. Exact on-screen speech remains explicitly unverified.",
+            inputSchema: objectSchema()
         ),
         AgentTool(
             name: .produceAudio,

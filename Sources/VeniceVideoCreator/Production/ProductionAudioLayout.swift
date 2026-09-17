@@ -1,7 +1,7 @@
 import Foundation
 
 extension ProductionAudioCoordinator {
-    struct LayoutState: Equatable {
+    struct LayoutState: Encodable, Equatable {
         var placedClip: Clip?
         var placementFPS: Int?
         var pictureEndFrame: Int?
@@ -19,6 +19,23 @@ extension ProductionAudioCoordinator {
 
     @discardableResult
     func reconcilePlacedAudio() throws -> Int {
+        let proposal = try audioLayoutProposal()
+        guard proposal.hasChanges, let editor else { return 0 }
+        editor.undoManager?.beginUndoGrouping()
+        applyLayout(timeline: proposal.timeline, states: proposal.states)
+        editor.undoManager?.setActionName("Reconcile Audio")
+        editor.undoManager?.endUndoGrouping()
+        return proposal.changedClipCount
+    }
+
+    struct LayoutProposal {
+        var timeline: Timeline
+        var states: [String: LayoutState]
+        var hasChanges: Bool
+        var changedClipCount: Int
+    }
+
+    func audioLayoutProposal() throws -> LayoutProposal {
         guard let editor, let plan = editor.shotPlan else { throw ToolError("No shot plan yet.") }
         guard !isFinishing, !editor.productionOrchestrator.isRunning else { throw ToolError("Wait for production to settle before reconciling audio.") }
         try requireLineBindings()
@@ -27,7 +44,7 @@ extension ProductionAudioCoordinator {
             return record.key.role != .dialogue || editor.clipFor(id: record.clipId) != nil
                 || record.key.shotId.flatMap { plan.shot(id: $0) }?.dialogue.contains { $0.id == record.key.lineId && $0.voiceOver } == true
         }
-        guard !records.isEmpty else { return 0 }
+        guard !records.isEmpty else { return .init(timeline: editor.timeline, states: [:], hasChanges: false, changedClipCount: 0) }
         let before = editor.timeline
         var after = before
         var prepared: [ProductionAudioOperation] = []
@@ -85,15 +102,10 @@ extension ProductionAudioCoordinator {
             states[record.id] = state
         }
         let priorStates = Dictionary(uniqueKeysWithValues: records.map { ($0.id, LayoutState($0)) })
-        guard after != before || states != priorStates else { return 0 }
         let changed = prepared.filter { record in
             editor.clipFor(id: record.clipId) != states[record.id]?.placedClip
         }.count
-        editor.undoManager?.beginUndoGrouping()
-        applyLayout(timeline: after, states: states)
-        editor.undoManager?.setActionName("Reconcile Audio")
-        editor.undoManager?.endUndoGrouping()
-        return changed
+        return .init(timeline: after, states: states, hasChanges: after != before || states != priorStates, changedClipCount: changed)
     }
 
     private func applyLayout(timeline: Timeline, states: [String: LayoutState]) {

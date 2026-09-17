@@ -4,24 +4,37 @@ import Foundation
 final class MediaResolver: @unchecked Sendable {
     private let manifest: () -> MediaManifest
     private let projectURL: () -> URL?
+    private let frozenURLs: [String: URL]?
 
-    init(manifest: @escaping () -> MediaManifest, projectURL: @escaping () -> URL?) {
+    init(manifest: @escaping () -> MediaManifest, projectURL: @escaping () -> URL?, frozenURLs: [String: URL]? = nil) {
         self.manifest = manifest
         self.projectURL = projectURL
+        self.frozenURLs = frozenURLs
+    }
+
+    func snapshot() -> MediaResolver {
+        if frozenURLs != nil { return self }
+        let manifest = manifest()
+        let projectURL = projectURL()
+        let urls = Self.expectedURLMap(entries: manifest.entries, projectURL: projectURL)
+        return MediaResolver(manifest: { manifest }, projectURL: { projectURL }, frozenURLs: urls)
     }
 
     func resolveURL(for assetId: String) -> URL? {
+        if let frozenURLs { return frozenURLs[assetId].flatMap { Self.isRegularFile($0) ? $0 : nil } }
         guard let entry = entry(for: assetId) else { return nil }
         return Self.existingURL(for: entry, projectURL: projectURL())
     }
 
     func expectedURL(for assetId: String) -> URL? {
+        if let frozenURLs { return frozenURLs[assetId] }
         guard let entry = entry(for: assetId) else { return nil }
         return Self.expectedURL(for: entry, projectURL: projectURL())
     }
 
     func expectedURLMap() -> [String: URL] {
-        Self.expectedURLMap(entries: manifest().entries, projectURL: projectURL())
+        if let frozenURLs { return frozenURLs }
+        return Self.expectedURLMap(entries: manifest().entries, projectURL: projectURL())
     }
 
     /// Resolved URLs preferring files that actually exist on disk (healing stale
@@ -76,6 +89,7 @@ final class MediaResolver: @unchecked Sendable {
     }
 
     func isMissing(for assetId: String) -> Bool {
+        if frozenURLs != nil { return resolveURL(for: assetId) == nil }
         guard let entry = entry(for: assetId) else { return true }
         return Self.existingURL(for: entry, projectURL: projectURL()) == nil
     }

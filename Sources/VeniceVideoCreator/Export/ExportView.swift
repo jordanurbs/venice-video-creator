@@ -63,6 +63,8 @@ struct ExportView: View {
     @State private var resultNote: String?
     @State private var veniceSummary: (collect: Int, missing: Int, bytes: Int64) = (0, 0, 0)
     @State private var includeAIHistory = false
+    @State private var isCheckingReadiness = false
+    @State private var exportTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -80,7 +82,8 @@ struct ExportView: View {
         // Esc mirrors the Cancel button: cancel an in-progress export (stop, discard the
         // partial file, show "Export cancelled"); otherwise dismiss the sheet.
         .onExitCommand {
-            if service.isExporting {
+            if service.isExporting || isCheckingReadiness {
+                exportTask?.cancel()
                 service.cancel()
             } else {
                 editor.showExportDialog = false
@@ -90,6 +93,7 @@ struct ExportView: View {
         // which would leave the detached export rendering with an orphaned partial file.
         // Cancelling on disappear guarantees a mid-export dismissal aborts and cleans up.
         .onDisappear {
+            exportTask?.cancel()
             if service.isExporting { service.cancel() }
         }
     }
@@ -231,7 +235,7 @@ struct ExportView: View {
             }
 
             if !editor.missingMediaRefs.isEmpty {
-                offlineMediaWarning("Their clips render black.")
+                offlineMediaWarning("Relink them before exporting video.")
             }
         }
     }
@@ -362,16 +366,17 @@ struct ExportView: View {
             Spacer()
 
             Button(service.isExporting ? "Cancel Export" : "Cancel") {
-                if service.isExporting {
+                if service.isExporting || isCheckingReadiness {
+                    exportTask?.cancel()
                     service.cancel()
                 } else {
                     editor.showExportDialog = false
                 }
             }
-            Button("Export") { startExport() }
+            Button(isCheckingReadiness ? "Checking…" : "Export") { startExport() }
                 .buttonStyle(.glassProminent)
                 .buttonBorderShape(.capsule)
-                .disabled(service.isExporting)
+                .disabled(service.isExporting || isCheckingReadiness)
                 .keyboardShortcut(.defaultAction)
         }
         .padding(.horizontal, AppTheme.Spacing.xl)
@@ -534,7 +539,9 @@ struct ExportView: View {
     private func startExport() {
         if destination == .veniceProject { startVeniceExport(); return }
         resultNote = nil
+        service.error = nil
         let format = exportFormat
+        let isVideo = destination == .video
         let panel = NSSavePanel()
         let contentType: UTType = switch format {
         case .xml:
@@ -551,15 +558,27 @@ struct ExportView: View {
 
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
-            Task {
+            exportTask = Task { @MainActor in
+                let snapshot: VideoExportSnapshot?
+                if isVideo {
+                    isCheckingReadiness = true
+                    do { snapshot = try await editor.prepareVideoExport() }
+                    catch {
+                        isCheckingReadiness = false
+                        service.error = Task.isCancelled ? "Export cancelled" : error.localizedDescription
+                        return
+                    }
+                    isCheckingReadiness = false
+                } else { snapshot = nil }
+                guard !Task.isCancelled else { return }
                 await service.export(
-                    timeline: editor.timeline,
-                    resolver: editor.mediaResolver,
+                    timeline: snapshot?.timeline ?? editor.timeline,
+                    resolver: snapshot?.resolver ?? editor.mediaResolver.snapshot(),
                     format: format,
                     resolution: resolution,
                     fcpxmlVersion: fcpxmlVersion,
                     fcpxmlTarget: fcpxmlTarget,
-                    missingMediaRefs: editor.missingMediaRefs,
+                    missingMediaRefs: snapshot == nil ? editor.missingMediaRefs : [],
                     outputURL: url
                 )
                 if let error = service.error {
@@ -571,17 +590,20 @@ struct ExportView: View {
                 }
                 let offline = service.lastReport?.offlineMediaRefs.count ?? 0
                 let unprocessable = service.lastReport?.unprocessableMediaRefs.count ?? 0
+                let readinessWarnings = snapshot?.readiness.issues.filter { $0.severity == .warning } ?? []
                 if !NSApp.isActive {
                     AppNotifications.exportComplete(
                         name: url.lastPathComponent,
                         outputURL: url,
                         size: service.lastReport?.outputSize,
-                        warningCount: offline + unprocessable
+                        warningCount: offline + unprocessable + readinessWarnings.count
                     )
                 }
                 if offline + unprocessable > 0 {
                     // Keep the dialog open so the user sees what shipped incomplete.
                     resultNote = exportProblemsNote(offline: offline, unprocessable: unprocessable)
+                } else if !readinessWarnings.isEmpty {
+                    resultNote = "Exported. " + readinessWarnings.prefix(3).map(\.message).joined(separator: " ")
                 } else {
                     editor.showExportDialog = false
                 }

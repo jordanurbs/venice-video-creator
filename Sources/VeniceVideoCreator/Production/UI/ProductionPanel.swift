@@ -165,6 +165,15 @@ struct ProductionPanel: View {
                     .font(.system(size: AppTheme.FontSize.xxs))
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
             }
+            if !editor.mediaManifest.productionAudioOperations.isEmpty {
+                Button {
+                    do { try editor.productionAudioCoordinator.reconcilePlacedAudio() }
+                    catch { editor.editorToast = MediaPanelToast(message: error.localizedDescription) }
+                } label: { controlLabel("Reconcile audio", "waveform") }
+                .buttonStyle(.plain)
+                .disabled(orchestrator.isRunning || editor.productionAudioCoordinator.isFinishing)
+                .help("Fit retained audio and ducking to the current edit without generating new media")
+            }
             if plan.shots.contains(where: {
                 VideoGenerationBudget.isRequired(model: $0.modelOverride ?? plan.defaultModel ?? "", resolution: plan.resolution)
             }), !orchestrator.isRunning {

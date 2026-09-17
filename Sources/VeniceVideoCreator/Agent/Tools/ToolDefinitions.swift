@@ -75,6 +75,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case productionStatus = "production_status"
     case resumeProduction = "resume_production"
     case produceAudio = "produce_audio"
+    case reconcileAudio = "reconcile_audio"
     case readSkill = "read_skill"
     case getProjects = "get_projects"
     case openProject = "open_project"
@@ -1347,6 +1348,11 @@ enum ToolDefinitions {
                     "ambientModel": ["type": "string", "description": "Model slug for the ambient bed."],
                 ]
             )
+        ),
+        AgentTool(
+            name: .reconcileAudio,
+            description: "Reflow already-placed production voice-over and refit owned music/ambient beds after picture/dialogue moves, trims, reorders, retakes, native mix changes, or FPS changes. Recompute automatic ducking from current speech windows; preserve manual timing/fades/envelopes. Atomic and undoable. Reject missing/stale/pending media, overruns, short coverage, and track overlaps before mutation. Never generates, quotes, or downloads media. Run after timeline edits and before export.",
+            inputSchema: objectSchema()
         ),
     ]
 

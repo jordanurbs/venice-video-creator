@@ -44,7 +44,7 @@ final class ProductionAudioCoordinator {
         if let previous, !regenerate, Self.recipe(previous.recipe) == Self.recipe(request.input),
            previous.line == line, previous.lockedVoiceId == character?.lockedVoiceId,
            previous.voiceModel == character?.voiceModel,
-           previous.key.role == .dialogue || (previous.requestedFrames == request.estimatedFrames && previous.fps == editor.timeline.fps) {
+           previous.key.role == .dialogue || ((previous.pictureEndFrame ?? previous.requestedFrames) == request.estimatedFrames && (previous.placementFPS ?? previous.fps) == editor.timeline.fps) {
             if let placed = previous.placedClip {
                 guard editor.clipFor(id: placed.id)?.mediaRef == placed.mediaRef else {
                     throw ToolError("Audio placement was removed or replaced. Reconcile the clip before producing again.")
@@ -159,7 +159,16 @@ final class ProductionAudioCoordinator {
         guard !detached, let editor, let record = operation(id), latest(for: record.key)?.id == id else {
             throw ToolError("Audio attempt was superseded or the project closed.")
         }
-        guard editor.timeline.fps == record.fps else { throw ToolError("Timeline frame rate changed. Reconcile audio timing before finishing.") }
+        guard editor.timeline.fps == (record.placementFPS ?? record.fps) else { throw ToolError("Timeline frame rate changed. Reconcile audio timing before finishing.") }
+        try requireCurrentLine(record)
+        if record.key.role != .dialogue {
+            guard pictureEnd == (record.pictureEndFrame ?? record.requestedFrames) else { throw ToolError("Picture duration changed. Reconcile the bed with the current cut.") }
+        }
+        return record
+    }
+
+    func requireCurrentLine(_ record: ProductionAudioOperation) throws {
+        guard let editor, !detached else { throw ToolError("The project is closed.") }
         if record.key.role == .dialogue {
             guard let shotId = record.key.shotId, let shot = editor.shotPlan?.shot(id: shotId),
                   let line = shot.dialogue.first(where: { $0.id == record.key.lineId }), line == record.line,
@@ -170,13 +179,10 @@ final class ProductionAudioCoordinator {
             guard character?.lockedVoiceId == record.lockedVoiceId, character?.voiceModel == record.voiceModel else {
                 throw ToolError("The locked voice changed. Produce the current line revision.")
             }
-        } else {
-            guard pictureEnd == record.requestedFrames else { throw ToolError("Picture duration changed. Reconcile the bed with the current cut.") }
         }
-        return record
     }
 
-    private func requireLineBindings() throws {
+    func requireLineBindings() throws {
         guard let editor else { return }
         for asset in editor.mediaAssets where asset.type == .audio && asset.generationInput != nil && asset.generationInput?.productionAudioOperationId == nil {
             let legacy = asset.name.hasPrefix("Dialogue ·") || asset.name == "Add Music" || asset.name == "Add Ambient"
@@ -280,7 +286,10 @@ final class ProductionAudioCoordinator {
         for item in records {
             guard let placed = after.tracks.flatMap(\.clips).first(where: { $0.id == item.clipId }) else { continue }
             if item.id == id {
-                mutate(item.id) { $0.placedClip = placed; $0.stage = .placed; $0.failureReason = nil }
+                mutate(item.id) {
+                    $0.placedClip = placed; $0.stage = .placed; $0.failureReason = nil
+                    $0.placementFPS = after.fps; $0.pictureEndFrame = pictureEnd
+                }
             } else if let baseline = item.placedClip, let old = before.tracks.flatMap(\.clips).first(where: { $0.id == item.clipId }) {
                 mutate(item.id) {
                     var updated = baseline
@@ -296,8 +305,9 @@ final class ProductionAudioCoordinator {
         try await editor.checkpointProductionState()
     }
 
-    private func reconcile(_ timeline: inout Timeline, candidate: ProductionAudioOperation) throws {
+    func reconcile(_ timeline: inout Timeline, candidate: ProductionAudioOperation? = nil, records: [ProductionAudioOperation]? = nil) throws {
         guard let editor, let plan = editor.shotPlan else { throw ToolError("No shot plan yet.") }
+        let records = records ?? editor.mediaManifest.productionAudioOperations.filter { latest(for: $0.key)?.id == $0.id }
         let gap = max(1, secondsToFrame(seconds: 0.12, fps: timeline.fps))
         var windows: [ClosedRange<Int>] = []
         let shots = try plan.shots.compactMap { shot -> (Shot, Clip)? in
@@ -309,7 +319,7 @@ final class ProductionAudioCoordinator {
             var cursor = max(picture.startFrame, globalEnd)
             for line in shot.dialogue where line.voiceOver {
                 let key = ProductionAudioOperation.Key(role: .dialogue, shotId: shot.id, lineId: line.id)
-                guard let record = latest(for: key) else { continue }
+                guard let record = records.first(where: { $0.key == key }) else { continue }
                 guard record.line == line else { throw ToolError("A generated dialogue line is stale. Produce its current revision before finishing audio.") }
                 let location = timeline.tracks.indices.compactMap { ti -> (Int, Int)? in
                     timeline.tracks[ti].clips.firstIndex { $0.id == record.clipId }.map { (ti, $0) }
@@ -321,7 +331,7 @@ final class ProductionAudioCoordinator {
                     continue
                 }
                 var clip = timeline.tracks[ti].clips[ci]
-                let owned = record.ownsTiming && (record.id == candidate.id || (record.placedClip ?? record.destination).map { Self.sameTiming($0, clip) } == true)
+                let owned = record.ownsTiming && (record.id == candidate?.id || (record.placedClip ?? record.destination).map { Self.sameTiming($0, clip) } == true)
                 if owned { clip.startFrame = cursor }
                 guard clip.startFrame >= cursor, clip.endFrame <= picture.endFrame else {
                     throw ToolError("Dialogue for \(shot.slug ?? shot.id) exceeds its picture window or overlaps a manual edit. Shorten the line or extend the shot; audio was not moved into the next shot.")
@@ -335,11 +345,11 @@ final class ProductionAudioCoordinator {
                 windows.append(picture.startFrame...picture.endFrame)
             }
         }
-        for record in editor.mediaManifest.productionAudioOperations where record.key.role != .dialogue && latest(for: record.key)?.id == record.id {
+        for record in records where record.key.role != .dialogue {
             for ti in timeline.tracks.indices {
                 guard let ci = timeline.tracks[ti].clips.firstIndex(where: { $0.id == record.clipId }) else { continue }
                 var clip = timeline.tracks[ti].clips[ci]
-                let baseline = record.id == candidate.id ? candidate.destination : record.placedClip
+                let baseline = record.id == candidate?.id ? candidate?.destination : record.placedClip
                 guard record.ownsDucking, baseline == nil || baseline?.volumeTrack == clip.volumeTrack else { continue }
                 let relative = windows.filter { $0.upperBound > clip.startFrame && $0.lowerBound < clip.endFrame }
                     .map { max(0, $0.lowerBound - clip.startFrame)...min(clip.durationFrames, $0.upperBound - clip.startFrame) }
@@ -354,7 +364,7 @@ final class ProductionAudioCoordinator {
         for ti in timeline.tracks.indices { timeline.tracks[ti].clips.sort { $0.startFrame < $1.startFrame } }
     }
 
-    private func mutate(_ id: String, _ body: (inout ProductionAudioOperation) -> Void) {
+    func mutate(_ id: String, _ body: (inout ProductionAudioOperation) -> Void) {
         guard let editor, let index = editor.mediaManifest.productionAudioOperations.firstIndex(where: { $0.id == id }) else { return }
         let before = editor.mediaManifest.productionAudioOperations[index]
         body(&editor.mediaManifest.productionAudioOperations[index])
@@ -370,7 +380,7 @@ final class ProductionAudioCoordinator {
         return value
     }
 
-    private static func sameTiming(_ a: Clip, _ b: Clip) -> Bool {
+    static func sameTiming(_ a: Clip, _ b: Clip) -> Bool {
         a.startFrame == b.startFrame && a.durationFrames == b.durationFrames && a.trimStartFrame == b.trimStartFrame
             && a.trimEndFrame == b.trimEndFrame && a.speed == b.speed && a.mediaRef == b.mediaRef
     }

@@ -7,7 +7,7 @@ import Testing
 @Suite("Durable production audio")
 @MainActor
 struct ProductionAudioTests {
-    private func fixture(lines: Int = 2) -> ToolHarness {
+    func fixture(lines: Int = 2) -> ToolHarness {
         let h = ToolHarness()
         let picture = h.addAsset(id: "picture-asset", duration: 10)
         h.editor.timeline = Fixtures.timeline(tracks: [.init(type: .video, clips: [Fixtures.clip(id: "picture", mediaRef: picture.id, start: 0, duration: 300)])])
@@ -30,7 +30,7 @@ struct ProductionAudioTests {
         return h
     }
 
-    private func request(_ h: ToolHarness, line index: Int = 0, role: ProductionAudioOperation.Role = .dialogue, prompt: String? = nil) throws -> ProductionAudioCoordinator.Request {
+    func request(_ h: ToolHarness, line index: Int = 0, role: ProductionAudioOperation.Role = .dialogue, prompt: String? = nil) throws -> ProductionAudioCoordinator.Request {
         let entry = try JSONDecoder().decode(CatalogEntry.self, from: Data(#"{"id":"fixture-audio","kind":"audio","displayName":"Fixture","allowedEndpoints":[],"responseShape":"audio","uiCapabilities":{"category":"tts","supportsLyrics":false,"supportsInstrumental":true,"supportsStyleInstructions":false,"minPromptLength":1}}"#.utf8))
         guard case .audio(let caps) = entry.uiCapabilities else { throw ToolError("Invalid fixture") }
         let model = AudioModelConfig(entry: entry, caps: caps)
@@ -42,12 +42,12 @@ struct ProductionAudioTests {
                      name: "Fixture", estimatedFrames: role == .dialogue ? 30 : 300)
     }
 
-    private func asset(_ h: ToolHarness, _ id: String) throws -> MediaAsset {
+    func asset(_ h: ToolHarness, _ id: String) throws -> MediaAsset {
         let assetId = try #require(h.editor.productionAudioCoordinator.operation(id)?.placeholderId)
         return try #require(h.editor.mediaAssets.first { $0.id == assetId })
     }
 
-    private func settled(_ h: ToolHarness) async throws {
+    func settled(_ h: ToolHarness) async throws {
         for _ in 0..<20_000 {
             if !h.editor.productionAudioCoordinator.isFinishing { return }
             await Task.yield()
@@ -55,7 +55,7 @@ struct ProductionAudioTests {
         try #require(!h.editor.productionAudioCoordinator.isFinishing)
     }
 
-    private func complete(_ h: ToolHarness, _ id: String, seconds: Double) async throws {
+    func complete(_ h: ToolHarness, _ id: String, seconds: Double) async throws {
         let output = try asset(h, id)
         output.duration = seconds
         output.generationStatus = .none

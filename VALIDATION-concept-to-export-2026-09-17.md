@@ -1,7 +1,7 @@
 # Concept-to-export implementation validation
 
 Date: 2026-09-17
-Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c`, native fixture `d9f2975`, placement bindings `f3542fb`, operation lifecycle `d0b4bc9`, shared video finalization `8d3e3e8`, and durable audio `9c91687` committed. Linked native mix restoration and decibel-correct ducking compiled and regression-tested. Native control acceptance remains unverified. Not E2E-ready.
+Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c`, native fixture `d9f2975`, placement bindings `f3542fb`, operation lifecycle `d0b4bc9`, shared video finalization `8d3e3e8`, durable audio `9c91687`, and native mix/decibel ducking `b89fcf1` committed. Explicit retained-audio layout reconciliation compiled and regression-tested. Native control acceptance remains unverified. Not E2E-ready.
 
 ## Permissions and spending
 
@@ -45,7 +45,7 @@ Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c
 
 ## Next slice and open gates
 
-1. Phase 4 continuation: shared reconciliation after manual/agent trim, move, picture retake/reorder, and FPS/cut changes; explicit legacy audio adoption. Durable audio attempts, live/recovered measured finishing, and linked native-audio keep/duck/mute are implemented below. Completed-placement resume currently verifies identity/saves without continuously reflowing later timeline edits.
+1. Readiness/lifecycle/export continuation: turn the shared audio layout checks into a read-only readiness report and enforce explicit reconciliation before delivery. `reconcile_audio` and a native action now reconcile existing output after edits; automatic edit/reopen hooks are still open. Preserve undo-safe timing metadata rather than adding untracked asynchronous timeline writes. Explicit legacy audio adoption, source-byte revisions, and native acceptance also remain open.
 2. Finish Phase 1 native verification of all six camera controls, unsupported-camera clear path, approval controls, inspector/retake/save-reopen, and 1080P budget presentation. The fixture rendered, but its background window on another Space exposes only menu-bar accessibility elements. Do not change the user's foreground app/Space to bypass this limitation.
 3. Finish Phase 2 placement ownership: selection preview source windows, manually split descendants, arbitrary source replacement, and keep/duck/mute restoration. Exact retake/reset/dialogue addressing and linked replacement/reorder are covered below; these do not establish full production recovery.
 4. Phases 3–5 remain open: revisioned QA/approval and dependency invalidation, attempt/quote ledger and stricter decoded-output validation, idempotent measured audio and exact-speech ownership, readiness, retained export jobs and verified immutable delivery.
@@ -70,6 +70,18 @@ Operation lifecycle is committed as `d0b4bc9`, `fix(production): persist attempt
 Shared video finalization is committed as `8d3e3e8`, `feat(production): finalize retained takes with per-beat review` (17 files), with the unrelated bitrate block excluded.
 
 Durable audio is committed as `9c91687`, `fix(production): retain audio attempts and finish measured takes` (18 files), with the unrelated bitrate block excluded.
+
+Native mix and decibel ducking are committed as `b89fcf1`, `fix(audio): restore native mix and apply decibel ducking` (15 files), with the unrelated bitrate block excluded.
+
+## Retained audio layout reconciliation
+
+- Added `Production/ProductionAudioLayout.swift`, `reconcile_audio`, and the Production panel's Reconcile audio action. The shared service computes changes on copies, checks current script/voice and clip/file bindings, fits automatic beds to picture, reflows automatic dialogue, updates owned ducking, and refuses pending production, missing/stale assets, picture overruns, insufficient source/fades, and track overlaps before applying anything. It generates, quotes, and downloads nothing.
+- Added optional placement FPS and fitted picture-end metadata to audio attempts. Reconciliation rebases the saved layout to the timeline FPS before distinguishing manual edits from automatic timing. Manually trimmed/moved speech and intentionally short beds keep their timing; manual dB envelopes and fades survive. Existing-placement resume accepts the reconciled FPS/cut metadata without a new attempt.
+- Undo restores both timeline and only the affected layout/ownership metadata, retaining generation history. The next move after redo still recognizes automatic timing. Agent instructions require reconciliation after edits and before export; automatic lifecycle hooks and an enforced export gate are not yet implemented.
+- Real two-line layout tests exposed two additional ducking bugs: overlapping ramp anchors raised the bed during speech, and restoration at the final clip frame caused a full-window rise when speech reached the cut. Nearby windows now merge across overlapping ramps; a window reaching the cut stays ducked. This also corrects prior owned envelopes when explicit reconciliation recomputes them.
+- Added eight `ProductionAudioLayoutTests`, using valid local 8kHz WAVs with injected generation/measurement: dispatcher-driven picture move, bed extent/playback attenuation, manual trims/envelopes/fades, metadata undo/redo, 30→24 FPS rebasing and retained resume, native speech-window changes, missing-file/stale-line refusal, and atomic overrun/coverage failure. Added two scheduler regressions. Initial fixture compilation required explicit `@MainActor` on its nested helper class; corrected before execution. Two initial playback assertions reproduced the ramp defects above.
+- `swift test --filter 'ProductionAudioLayoutTests|ProductionAudioTests|NativeAudioMixTests|ProductionFinalizationTests|DialogueSchedulerTests'`: **56 tests / five suites passed** (0.242s tests, 10.14s build). `swift test`: **1,155 tests / 175 suites passed** (1.821s tests), same seven skips. Full log: `/Users/venetian42069/.local/share/opencode/tool-output/tool_0b16d46b6001Hx7a8HksZOaHMj`. `git diff --check` passed. No paid/live requests, native launch, or foreground changes.
+- Remaining: automatic lifecycle integration; read-only readiness and immutable verified export; real native interaction, queue/crash recovery, and listening/export acceptance; explicit legacy adoption, arbitrary splits, current audio byte fingerprints, and exact speech. Valid WAV fixtures plus playback math do not certify the full dated film workflow.
 
 ## Native mix and playback ducking correction
 

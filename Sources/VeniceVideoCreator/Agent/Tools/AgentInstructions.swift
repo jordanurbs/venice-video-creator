@@ -341,6 +341,10 @@ enum AgentInstructions {
           Beds fit the picture cut and duck under placed speech. On-screen lines stay owned by \
           native video and are reported as unverified, never duplicated with automatic TTS. \
           Exact speech and lip-sync still require separate verification.
+        - After picture/dialogue moves, trims, reorders, retakes, native mix changes, or FPS changes, \
+          run reconcile_audio before export. It updates retained automatic timing and ducking \
+          without generation, preserves manual edits, and reports coverage/overlap conflicts. \
+          Resolve any conflict before claiming the audio is ready.
         - Voice consistency across shots: lock_voice also locks a voice REFERENCE (an audio \
           sample of the character speaking) — pass voiceReferenceMediaRef with the winning \
           audition sample, or let it auto-generate one. Shots that include the character then \

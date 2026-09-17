@@ -177,6 +177,9 @@ final class ToolExecutor {
         case .productionStatus: return productionStatus(editor)
         case .resumeProduction: return try resumeProduction(editor, args)
         case .produceAudio:    return try await produceAudio(editor, args)
+        case .reconcileAudio:
+            let changed = try editor.productionAudioCoordinator.reconcilePlacedAudio()
+            return .ok(Self.jsonString(["changedClipCount": changed, "hint": "Retained audio reconciled with the current edit. No generation was submitted."]) ?? "{}")
         case .readSkill:     return readSkill(args)
         case .getProjects, .openProject, .newProject:
             return await runProjectTool(tool, args)

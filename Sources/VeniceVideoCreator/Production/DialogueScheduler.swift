@@ -85,7 +85,14 @@ enum DialogueScheduler {
         rampFrames: Int,
         clipFrames: Int
     ) -> [(frame: Int, value: Double)] {
-        let merged = mergedWindows(windows, padFrames: 0).filter { $0.upperBound >= 0 && $0.lowerBound <= clipFrames }
+        let windows = mergedWindows(windows, padFrames: 0).filter { $0.upperBound >= 0 && $0.lowerBound <= clipFrames }
+        var merged: [ClosedRange<Int>] = []
+        // Overlapping ramps must not raise the bed during the next spoken line.
+        for window in windows {
+            if let last = merged.last, window.lowerBound - last.upperBound <= max(0, rampFrames) * 2 {
+                merged[merged.count - 1] = last.lowerBound...max(last.upperBound, window.upperBound)
+            } else { merged.append(window) }
+        }
         guard !merged.isEmpty, clipFrames > 0 else { return [] }
         var points: [(frame: Int, value: Double)] = [(0, baseVolume)]
         func add(_ frame: Int, _ value: Double) {
@@ -96,9 +103,9 @@ enum DialogueScheduler {
             add(w.lowerBound - rampFrames, baseVolume)
             add(w.lowerBound, duckVolume)
             add(w.upperBound, duckVolume)
-            add(w.upperBound + rampFrames, baseVolume)
+            if w.upperBound < clipFrames { add(w.upperBound + rampFrames, baseVolume) }
         }
-        add(clipFrames, baseVolume)
+        if merged.last!.upperBound < clipFrames { add(clipFrames, baseVolume) }
         // Collapse to one point per frame, keeping the last write (later windows win).
         var byFrame: [Int: Double] = [:]
         var order: [Int] = []

@@ -74,4 +74,16 @@ struct DialogueSchedulerTests {
         #expect(merged.count == 1)
         #expect(merged[0] == 0...90)
     }
+
+    @Test func closeSpeechWindowsHoldTheDuckAcrossOverlappingRamps() {
+        let points = DialogueScheduler.duckKeyframes(windows: [0...60, 63...123], rampFrames: 9, clipFrames: 300)
+        #expect(points.filter { $0.frame <= 123 }.allSatisfy { $0.value == 0.25 })
+        #expect(points.first { $0.frame == 132 }?.value == 1)
+    }
+
+    @Test func speechAtTheCutDoesNotRampUpAcrossTheEntireClip() {
+        let points = DialogueScheduler.duckKeyframes(windows: [0...300], rampFrames: 9, clipFrames: 300)
+        #expect(points.allSatisfy { $0.value == 0.25 })
+        #expect(points.last?.frame == 300)
+    }
 }

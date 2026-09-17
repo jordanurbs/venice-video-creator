@@ -30,5 +30,7 @@ struct ProductionAudioOperation: Codable, Sendable, Equatable, Identifiable {
     var generationStatus: String?
     var measuredSeconds: Double?
     var placedClip: Clip?
+    var placementFPS: Int?
+    var pictureEndFrame: Int?
     var failureReason: String?
 }

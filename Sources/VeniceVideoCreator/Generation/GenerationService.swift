@@ -102,6 +102,7 @@ final class GenerationService {
             }
             do {
                 try Task.checkCancellation()
+                for binding in genInput.storyboardBindings ?? [] { try editor.validateStoryboardSubmission(binding) }
                 if assetType == .video {
                     guard catalog.isLoaded, let model = catalog.video.first(where: { $0.id == genInput.model }),
                           ModelPreferences.shared.isEnabled(model.id) else {
@@ -571,7 +572,11 @@ final class GenerationService {
                 model: genInput.model,
                 params: params,
                 projectId: editor.projectId,
-                videoBudget: videoBudget
+                videoBudget: videoBudget,
+                validateSubmission: { [weak editor] in
+                    guard let editor else { throw ToolError("The project closed before submission.") }
+                    for binding in genInput.storyboardBindings ?? [] { try editor.validateStoryboardSubmission(binding) }
+                }
             )
         } catch {
             let message = error.localizedDescription

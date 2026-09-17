@@ -71,6 +71,14 @@ extension ToolExecutor {
         let updated = try editor.mutateShotPlanThrowing(actionName: "Update Shots") { plan in
             for (i, op) in ops.enumerated() {
                 try Self.apply(op, to: &plan, path: "operations[\(i)]")
+                if op.bool("approveStoryboard") == true {
+                    let id = try op.requireString("id")
+                    guard let index = plan.shots.firstIndex(where: { $0.id == id }) else { throw ToolError("Shot not found: \(id)") }
+                    plan.shots[index].panelReview = try editor.storyboardApproval(
+                        for: plan.shots[index], plan: plan, reason: op.requireString("approvalReason"), approvedBy: "user via agent"
+                    )
+                    if plan.shots[index].videoAssetId == nil { plan.shots[index].status = .approved }
+                }
             }
         }
         return .ok(Self.jsonString(Self.summary(of: updated)) ?? "{}")
@@ -384,6 +392,7 @@ extension ToolExecutor {
             var merged = incoming
             merged.status = old.status
             merged.storyboardAssetId = old.storyboardAssetId
+            merged.panelReview = old.panelReview
             merged.videoAssetId = old.videoAssetId
             merged.takes = old.takes
             merged.qaSummary = old.qaSummary

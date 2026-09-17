@@ -1,7 +1,7 @@
 # Concept-to-export remediation plan
 
 Date: 2026-09-17
-Status: first implementation slice committed as `c36247d`; catalog/1080P follow-up compiled and regression-tested. No phase exit or dated E2E acceptance has passed.
+Status: first slice `c36247d` and catalog/1080P follow-up `fa3e067` committed; revision-bound storyboard approval compiled and regression-tested. No phase exit or dated E2E acceptance has passed.
 Evidence and detailed acceptance cases: `AUDIT-concept-to-export-2026-09-17.md`.
 Session instructions: `HANDOFF-concept-to-export-2026-09-17.md`.
 
@@ -37,6 +37,7 @@ Exit: build/test baseline is known, new regressions reproduce the defects, and d
 - [x] Resolve explicit model/lane before fallback; reject unknown, unavailable, or incompatible overrides with an actionable error. Never silently substitute a paid model.
 - [x] Guard superseded catalog success/error callbacks and bind native video picker selection to model ID. Block video submissions during catalog reload and when the selected model disappears.
 - [ ] Route approved storyboard frames to I2V, reference slots to R2V, and no image inputs to T2V. Separate inherited output aspect from the omitted API `aspect_ratio` field.
+  - Current storyboard approval now gates production entry, single-shot routing, reference preparation, and final submission (including a post-quote recheck). Expected inherited output aspect still needs decoded-image-derived validation in Phase 3.
 - [ ] Reconcile the app manifest and local harness contract. Coordinate schema policy for `supportsCameraTrajectory`; a manifest refresh must not accidentally activate unrelated capabilities.
 - [ ] Verify live catalog availability before supplementing missing picker models; the bundled capability snapshot is not a catalog.
 - [ ] Introduce one shared Codable trajectory type and validator, with backward-compatible nil defaults. Persist through shot settings, generation inputs, take recipes, durable operations, harness import, and project round trips.
@@ -155,3 +156,5 @@ Advanced camera curve editor/presets, unrelated model-family parity, deferred `e
 - 2026-09-17 continuation: normal build execution restored. Fixed camera-array decoding and Swift 6 transfer of the extracted request dictionary. A targeted regression exposed agent undo ignoring shot-plan-only changes; extended its snapshot guard and added manual-edit protection and malformed-camera regressions. Targeted 115 tests pass; full Swift suite reports 1,058 tests in 165 suites passing (six model-dependent skips). Existing local export tests ran; the dated 35–50s workflow, native UI, recovery, and paid acceptance remain open.
 - First slice committed: `c36247d` (`feat(production): implement status and MiniMax camera routing contracts`), 48 files, after staged-diff review. Only the explicitly excluded Seedance bitrate hunk remained unstaged.
 - Catalog/1080P follow-up: injectable catalog loader, superseded-result guards, key-removal clearing, stable video selection, and loaded/enabled model checks before reference preparation and final queueing. Added an ephemeral 1080P spending cap through UI, agent, production retries, service/backend, and final request runner; reruns cannot inherit approval from recipes. New catalog/budget tests and existing contracts pass: targeted 32 tests in seven suites; full suite reports 1,070 tests in 167 suites passing (same six skips). Native acceptance and revision-approved storyboard routing are next; phases 2–6 remain open.
+- Catalog/1080P follow-up committed as `fa3e067` (`fix(generation): guard catalog refreshes and budget 1080P attempts`), with the unrelated bitrate block still excluded.
+- Storyboard approval slice: added Codable image/settings revision fingerprints, separate panel verdict and reasoned human approval, invalidation through shared plan mutations, explicit `qa_shot` artifact selection with injected evaluator, stale-response rejection, and production recipe bindings rechecked before queueing. Native approval controls added to inspector and Production panel. Targeted 26 tests in four suites pass; full suite reports 1,079 tests in 168 suites passing (six skips). Take QA, grouped range review, post-generation callback safety, durable operations, and native acceptance remain open. CuaDriver is installed/running with Accessibility and Screen Recording grants; this establishes UI-test prerequisites only.

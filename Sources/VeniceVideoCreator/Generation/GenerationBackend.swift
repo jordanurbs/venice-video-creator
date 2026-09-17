@@ -41,13 +41,14 @@ enum GenerationBackend {
         model: String,
         params: BackendGenerationParams,
         projectId: String? = nil,
-        videoBudget: VideoGenerationBudget? = nil
+        videoBudget: VideoGenerationBudget? = nil,
+        validateSubmission: (@MainActor () throws -> Void)? = nil
     ) async throws -> String {
         guard let api = VeniceAPI.fromKeychain() else {
             throw GenerationBackendError.notConfigured
         }
         try Task.checkCancellation()
-        return store.start(model: model, params: params, api: api, videoBudget: videoBudget)
+        return store.start(model: model, params: params, api: api, videoBudget: videoBudget, validateSubmission: validateSubmission)
     }
 
     /// Re-polls a queued Venice job by its persisted queue id and returns a fresh local id.
@@ -159,7 +160,7 @@ final class VeniceJobStore {
         subjects[jobId]?.eraseToAnyPublisher()
     }
 
-    func start(model: String, params: BackendGenerationParams, api: VeniceAPI, videoBudget: VideoGenerationBudget? = nil) -> String {
+    func start(model: String, params: BackendGenerationParams, api: VeniceAPI, videoBudget: VideoGenerationBudget? = nil, validateSubmission: (@MainActor () throws -> Void)? = nil) -> String {
         let jobId = UUID().uuidString
         let subject = CurrentValueSubject<BackendGenerationJob?, Never>(
             BackendGenerationJob(id: jobId, status: .queued)
@@ -169,7 +170,7 @@ final class VeniceJobStore {
         tasks[jobId] = Task { @MainActor in
             subject.send(BackendGenerationJob(id: jobId, status: .running))
             await self.settle(jobId: jobId, subject: subject) {
-                try await VeniceGenerationRunner.run(model: model, params: params, api: api, videoBudget: videoBudget) { queueId, downloadURL in
+                try await VeniceGenerationRunner.run(model: model, params: params, api: api, videoBudget: videoBudget, validateSubmission: validateSubmission) { queueId, downloadURL in
                     subject.send(BackendGenerationJob(id: jobId, status: .running,
                                                       queueId: queueId, queueDownloadURL: downloadURL))
                 }

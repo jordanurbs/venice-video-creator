@@ -11,6 +11,17 @@ extension ToolExecutor {
         guard let plan = editor.shotPlan else { throw ToolError("No shot plan yet.") }
         let shotId = try args.requireString("shotId")
         guard let shot = plan.shot(id: shotId) else { throw ToolError("Shot not found: \(shotId)") }
+        let artifact = args.string("artifact")
+        if let artifact, !["storyboard", "video"].contains(artifact) { throw ToolError("artifact must be storyboard or video.") }
+        if artifact == "video", let ref = args.string("mediaRef"), ref == shot.storyboardAssetId {
+            throw ToolError("The selected media is the storyboard. Set artifact=storyboard to review it.")
+        }
+        let readyVideo = shot.videoAssetId.flatMap { id in editor.mediaAssets.first { $0.id == id && Self.isReady($0, editor: editor) } }
+        if artifact == "storyboard" || (args.string("mediaRef") != nil && args.string("mediaRef") == shot.storyboardAssetId)
+            || (artifact == nil && args.string("mediaRef") == nil && readyVideo == nil) {
+            return try await qaStoryboard(editor, args, shot: shot, plan: plan)
+        }
+        if artifact == "video", readyVideo == nil, args.string("mediaRef") == nil { throw ToolError("Wait for the shot's video before reviewing it.") }
         guard let api = VeniceAPI.fromKeychain() else {
             throw ToolError("QA requires a Venice API key. Tell the user to add it in Settings.")
         }
@@ -105,6 +116,51 @@ extension ToolExecutor {
     }
 
     // MARK: - fix_panel
+
+    private func qaStoryboard(_ editor: EditorViewModel, _ args: [String: Any], shot: Shot, plan: ShotPlan) async throws -> ToolResult {
+        if let ref = args.string("mediaRef"), ref != shot.storyboardAssetId {
+            throw ToolError("Select the shot's current storyboard panel for storyboard approval.")
+        }
+        let revision = try editor.storyboardRevision(for: shot, plan: plan)
+        let panel = try asset(revision.assetID, editor: editor)
+        var images = try await Self.frames(of: panel, editor: editor, frameCount: 1)
+        let priorFrame = (try? await priorSameLocationQAFrame(shot, plan: plan, editor: editor)) ?? nil
+        if let priorFrame { images.append(priorFrame) }
+        let rubric = Self.qaRubric(for: shot, plan: plan, comparePriorPanel: priorFrame != nil)
+        let model = evaluateStoryboardQA == nil ? VisionQA.selectModel() : "injected QA"
+        let result: VisionQA.Result
+        do {
+            if let evaluateStoryboardQA {
+                result = try await evaluateStoryboardQA(images, rubric)
+            } else {
+                guard let model else { throw VisionQA.QAError.noVisionModel }
+                guard let api = VeniceAPI.fromKeychain() else { throw ToolError("QA requires a Venice API key in Settings.") }
+                result = try await VisionQA.evaluate(images: images, rubric: rubric, api: api, model: model)
+            }
+        } catch {
+            let review = StoryboardReview(revision: revision, verdict: .error, reviewer: model ?? "unavailable", summary: "QA error: \(error.localizedDescription)", reviewedAt: Date())
+            _ = try? editor.recordStoryboardReview(shotID: shot.id, review: review)
+            throw ToolError("Storyboard QA is unchecked: \(error.localizedDescription). Retry qa_shot with artifact=storyboard; no video was submitted.")
+        }
+        let review = StoryboardReview(
+            revision: revision, verdict: result.pass ? .passed : .failed, reviewer: model ?? "unavailable",
+            summary: ([result.summary] + result.issues).joined(separator: "; "),
+            approvedBy: result.pass && args.bool("autoApprove") == true ? model : nil,
+            approvedAt: result.pass && args.bool("autoApprove") == true ? Date() : nil, reviewedAt: Date()
+        )
+        guard try editor.recordStoryboardReview(shotID: shot.id, review: review) else {
+            throw ToolError("The storyboard changed during QA. Review its current revision before approving or producing.")
+        }
+        let body: [String: Any] = [
+            "shotId": shot.id, "artifact": "storyboard", "reviewed": "storyboard panel",
+            "revision": Self.encodeAsJSONObject(revision) ?? NSNull(),
+            "pass": result.pass, "score": result.score, "issues": result.issues, "summary": result.summary,
+            "approved": review.approvedBy != nil,
+            "hint": "Review and approve this revision explicitly, or use autoApprove on passing storyboard QA. Failed QA requires a deliberate approvalReason override.",
+        ]
+        return ToolResult(content: [.text(Self.jsonString(body) ?? "{}")]
+            + images.map { .image(base64: $0.base64EncodedString(), mediaType: "image/jpeg") }, isError: false)
+    }
 
     /// Multi-edit correction of a shot's storyboard panel. Uses the shot's QA notes as the
     /// default instruction. The corrected panel replaces the shot's storyboard (async).

@@ -162,6 +162,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
     var attachCastVoiceReference: Bool
     var status: ShotStatus
     var storyboardAssetId: String?
+    var panelReview: StoryboardReview?
     var videoAssetId: String?
     var takes: [ShotTake]
     var qaSummary: String?
@@ -226,7 +227,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         case cameraTrajectory
         case modelOverride, characterIds, locationIds, dialogue, blocking, allowMultiShot, nativeAudio, audioContent, status
         case audioReferenceAssetId, attachCastVoiceReference
-        case storyboardAssetId, videoAssetId, takes, qaSummary, failureReason
+        case storyboardAssetId, panelReview, videoAssetId, takes, qaSummary, failureReason
     }
 
     init(from decoder: Decoder) throws {
@@ -252,6 +253,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         attachCastVoiceReference = try c.decodeIfPresent(Bool.self, forKey: .attachCastVoiceReference) ?? true
         status = try c.decodeIfPresent(ShotStatus.self, forKey: .status) ?? .planned
         storyboardAssetId = try c.decodeIfPresent(String.self, forKey: .storyboardAssetId)
+        panelReview = try c.decodeIfPresent(StoryboardReview.self, forKey: .panelReview)
         videoAssetId = try c.decodeIfPresent(String.self, forKey: .videoAssetId)
         takes = try c.decodeIfPresent([ShotTake].self, forKey: .takes) ?? []
         qaSummary = try c.decodeIfPresent(String.self, forKey: .qaSummary)

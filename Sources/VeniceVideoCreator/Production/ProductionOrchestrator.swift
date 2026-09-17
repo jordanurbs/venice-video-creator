@@ -207,6 +207,14 @@ final class ProductionOrchestrator {
             return false
         }
 
+        do {
+            for shot in orderedShots { _ = try editor.requireApprovedStoryboard(for: shot, plan: plan) }
+        } catch {
+            lastError = error.localizedDescription
+            postNotice(lastError!)
+            return false
+        }
+
         let requiresBudget = orderedShots.contains {
             VideoGenerationBudget.isRequired(model: $0.modelOverride ?? plan.defaultModel ?? "", resolution: plan.resolution)
         }
@@ -442,6 +450,12 @@ final class ProductionOrchestrator {
             model: route.model.id, duration: duration,
             aspectRatio: aspect, resolution: resolution
         )
+        do {
+            genInput.storyboardBindings = try editor.storyboardBindings(for: window, plan: plan)
+        } catch {
+            for shot in window { failShot(shot.id, reason: error.localizedDescription) }
+            return
+        }
         genInput.createdAt = Date()
         if VideoModelCapabilities.supportsNegativePrompt(id: route.model.id) {
             genInput.negativePrompt = ShotPromptBuilder.negativePrompt(forWindow: window)
@@ -689,6 +703,12 @@ final class ProductionOrchestrator {
             genInput.negativePrompt = ShotPromptBuilder.negativePrompt(for: shot)
         }
         genInput.cameraTrajectory = shot.cameraTrajectory
+        do {
+            genInput.storyboardBindings = try editor.storyboardBindings(for: [shot], plan: plan)
+        } catch {
+            failShot(shotId, reason: error.localizedDescription)
+            return
+        }
         // Reproducibility: lock the series seed onto seed-capable families so the
         // recipe replays; nil leaves the queue to pick one (current behavior).
         if let seed = plan.seed, VideoModelCapabilities.supportsSeed(id: route.model.id) {
@@ -1088,6 +1108,7 @@ final class ProductionOrchestrator {
         _ shot: Shot, plan: ShotPlan, editor: EditorViewModel,
         chainFrame: MediaAsset? = nil, availableModels: [VideoModelConfig]? = nil
     ) throws -> Route {
+        _ = try editor.requireApprovedStoryboard(for: shot, plan: plan)
         let enabled = availableModels ?? VideoModelConfig.allModels.filter { ModelPreferences.shared.isEnabled($0.id) }
         let selectedID = shot.modelOverride ?? plan.defaultModel
         let selected = try ProductionModelSelection.resolve(selectedID, in: enabled)

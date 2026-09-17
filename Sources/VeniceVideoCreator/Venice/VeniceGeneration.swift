@@ -15,11 +15,12 @@ enum VeniceGenerationRunner {
         params: BackendGenerationParams,
         api: VeniceAPI,
         videoBudget: VideoGenerationBudget? = nil,
+        validateSubmission: (@MainActor () throws -> Void)? = nil,
         onQueue: (@MainActor (String, String?) -> Void)? = nil
     ) async throws -> [String] {
         switch params {
         case .image(let p): return try await runImage(model: model, params: p, api: api)
-        case .video(let p): return try await runVideo(model: model, params: p, api: api, videoBudget: videoBudget, onQueue: onQueue)
+        case .video(let p): return try await runVideo(model: model, params: p, api: api, videoBudget: videoBudget, validateSubmission: validateSubmission, onQueue: onQueue)
         case .audio(let p): return try await runAudio(model: model, params: p, api: api, onQueue: onQueue)
         case .upscale(let p): return try await runUpscale(model: model, params: p, api: api)
         case .imageEdit(let p): return try await runImageEdit(model: model, params: p, api: api)
@@ -160,13 +161,16 @@ enum VeniceGenerationRunner {
     private static func runVideo(
         model: String, params: VideoGenerationParams, api: VeniceAPI,
         videoBudget: VideoGenerationBudget? = nil,
+        validateSubmission: (@MainActor () throws -> Void)? = nil,
         onQueue: (@MainActor (String, String?) -> Void)? = nil
     ) async throws -> [String] {
+        try validateSubmission?()
         _ = try videoRequestBody(model: model, params: params, catalogModel: availableVideoModel(for: model))
         try await VideoGenerationBudget.authorize(model: model, params: params, budget: videoBudget) {
             await api.videoQuote(model: model, duration: params.duration, resolution: params.resolution, aspectRatio: params.aspectRatio)
         }
         try Task.checkCancellation()
+        try validateSubmission?()
         let body = try videoRequestBody(model: model, params: params, catalogModel: availableVideoModel(for: model))
         let queued = try await api.postJSON(path: "video/queue", body: body, forModel: model)
         guard let queueId = queued["queue_id"] as? String else {

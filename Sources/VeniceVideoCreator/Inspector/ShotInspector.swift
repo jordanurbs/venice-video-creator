@@ -13,6 +13,7 @@ struct ShotInspector: View {
     @State private var draftPrompt: String = ""
     @State private var draftStoryboardPrompt: String = ""
     @State private var isEnhancing = false
+    @State private var storyboardApprovalReason = ""
 
     private var plan: ShotPlan? { editor.shotPlan }
     private var supportsCameraMove: Bool {
@@ -28,6 +29,28 @@ struct ShotInspector: View {
                 header
                 promptSection
                 storyboardPromptSection
+                if shot.storyboardAssetId != nil {
+                    section("Storyboard Approval") {
+                        TextField("Approval note", text: $storyboardApprovalReason)
+                            .font(.system(size: AppTheme.FontSize.xs, weight: AppTheme.FontWeight.regular))
+                            .accessibilityIdentifier("storyboard.approvalReason")
+                        Button("Approve Storyboard") {
+                            do {
+                                try editor.approveStoryboard(shotID: shot.id, reason: storyboardApprovalReason)
+                                storyboardApprovalReason = ""
+                            } catch {
+                                editor.editorToast = MediaPanelToast(message: error.localizedDescription)
+                            }
+                        }
+                        .disabled(storyboardApprovalReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier("storyboard.approve")
+                        if let review = shot.panelReview {
+                            Text(review.approvedBy == nil ? "Review: \(review.verdict.rawValue)" : "Storyboard approved")
+                                .font(.system(size: AppTheme.FontSize.xxs, weight: AppTheme.FontWeight.regular))
+                                .foregroundStyle(AppTheme.Text.secondaryColor)
+                        }
+                    }
+                }
                 generationSection
                 if supportsCameraMove || shot.cameraTrajectory != nil {
                     CameraMoveControls(trajectory: Binding(

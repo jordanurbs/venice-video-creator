@@ -19,20 +19,29 @@ struct ProductionRoutingTests {
         defer { try? FileManager.default.removeItem(at: frame.url) }
         let i2v = try MiniMaxRequestTests.model("minimax-h3-max-turbo-image-to-video")
         let r2v = try MiniMaxRequestTests.model("minimax-h3-max-reference-to-video")
-        let shot = Shot(modelOverride: i2v.id, storyboardAssetId: frame.id)
-        let route = try h.editor.productionOrchestrator.route(shot, plan: ShotPlan(), editor: h.editor, availableModels: [r2v, i2v])
+        var shot = Shot(modelOverride: i2v.id, storyboardAssetId: frame.id)
+        h.editor.upsertShot(shot)
+        try h.editor.approveStoryboard(shotID: shot.id, reason: "Fixture panel reviewed")
+        shot = try #require(h.editor.shot(id: shot.id))
+        let route = try h.editor.productionOrchestrator.route(shot, plan: h.editor.shotPlan!, editor: h.editor, availableModels: [r2v, i2v])
         #expect(route.model.id == i2v.id)
         #expect(route.inputAssets.frames.map(\.id) == [frame.id])
         #expect(route.inputAssets.imageRefs.isEmpty)
         #expect(i2v.validate(duration: 5, aspectRatio: "16:9", resolution: "768P") == nil)
         var automatic = shot
         automatic.modelOverride = nil
-        let autoRoute = try h.editor.productionOrchestrator.route(automatic, plan: ShotPlan(), editor: h.editor, availableModels: [r2v, i2v])
+        h.editor.upsertShot(automatic)
+        try h.editor.approveStoryboard(shotID: automatic.id, reason: "Automatic routing panel reviewed")
+        automatic = try #require(h.editor.shot(id: automatic.id))
+        let autoRoute = try h.editor.productionOrchestrator.route(automatic, plan: h.editor.shotPlan!, editor: h.editor, availableModels: [r2v, i2v])
         #expect(autoRoute.model.id == i2v.id)
         let t2v = try MiniMaxRequestTests.model("minimax-h3-max-text-to-video")
         automatic.modelOverride = t2v.id
+        h.editor.upsertShot(automatic)
+        try h.editor.approveStoryboard(shotID: automatic.id, reason: "Explicit routing check")
+        automatic = try #require(h.editor.shot(id: automatic.id))
         #expect(throws: ToolError.self) {
-            try h.editor.productionOrchestrator.route(automatic, plan: ShotPlan(), editor: h.editor, availableModels: [t2v, i2v])
+            try h.editor.productionOrchestrator.route(automatic, plan: h.editor.shotPlan!, editor: h.editor, availableModels: [t2v, i2v])
         }
     }
 

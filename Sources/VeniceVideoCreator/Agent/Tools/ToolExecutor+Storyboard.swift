@@ -169,7 +169,7 @@ extension ToolExecutor {
         let body: [String: Any] = [
             "model": model.id,
             "storyboarded": results,
-            "hint": "Panels are generating. Call wait_for_media with the storyboardAssetIds, then inspect_media to review. QA EACH character-bearing panel with qa_shot (fix_panel if it fails) BEFORE produce_shots — a panel with a wrong face or mirrored geography propagates into the paid video. produce_shots warns and auto-QAs when character panels are left unvetted.",
+            "hint": "Wait for the storyboardAssetIds, then review each panel with qa_shot(artifact=storyboard). Use autoApprove for passing QA, or approve the current revision after user review with update_shots(approveStoryboard=true, approvalReason=...). Panel corrections invalidate approval; produce_shots requires current storyboard approvals.",
         ]
         return .ok(Self.jsonString(body) ?? "{}")
     }

@@ -116,7 +116,7 @@ extension EditorViewModel {
         var updated = plan
         updated.updatedAt = Date()
         applyShotPlan(updated, actionName: "Edit Shot Plan")
-        return updated
+        return mediaManifest.shotPlan ?? updated
     }
 
     /// Mutates the current plan in place (creating an empty one if none exists) and persists.
@@ -126,7 +126,7 @@ extension EditorViewModel {
         mutate(&plan)
         plan.updatedAt = Date()
         applyShotPlan(plan, actionName: actionName)
-        return plan
+        return mediaManifest.shotPlan ?? plan
     }
 
     func clearShotPlan() {
@@ -629,6 +629,21 @@ extension EditorViewModel {
 
     private func applyShotPlan(_ plan: ShotPlan, actionName: String) {
         let previous = mediaManifest.shotPlan
+        var plan = plan
+        for index in plan.shots.indices {
+            let shot = plan.shots[index]
+            let replacedPanel = previous?.shot(id: shot.id)?.storyboardAssetId != shot.storyboardAssetId
+            let staleReview = shot.panelReview.map {
+                $0.revision.settingsDigest != (try? StoryboardReviewGate.settingsDigest(shot: shot, plan: plan))
+            } ?? false
+            if staleReview || (replacedPanel && shot.panelReview == nil) {
+                plan.shots[index].panelReview = nil
+                plan.shots[index].qaSummary = nil
+                if shot.status == .approved || shot.status == .placed {
+                    plan.shots[index].status = shot.videoAssetId == nil ? .storyboarded : .qa
+                }
+            }
+        }
         mediaManifest.shotPlan = plan
         undoManager?.registerUndo(withTarget: self) { vm in
             if let previous {

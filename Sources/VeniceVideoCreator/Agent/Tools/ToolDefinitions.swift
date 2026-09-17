@@ -1080,6 +1080,8 @@ enum ToolDefinitions {
                                 "motionLevel": ["type": "string", "enum": ShotMotionLevel.allCases.map(\.rawValue)],
                                 "transition": ["type": "string", "enum": ShotTransition.allCases.map(\.rawValue)],
                                 "cameraTrajectory": cameraTrajectorySchema,
+                                "approveStoryboard": ["type": "boolean", "description": "Approve the current storyboard revision only after the user explicitly reviews it. Requires approvalReason; changing status alone does not approve a storyboard."],
+                                "approvalReason": ["type": "string", "description": "User's reason for accepting this storyboard, including any deliberate failed/unchecked QA override."],
                                 "modelOverride": ["type": "string"],
                                 "characterIds": ["type": "array", "items": ["type": "string"]],
                                 "blocking": ["type": "string", "description": "The shot's authored geometry relative to the location's spatialAnchors and the frame. Pass empty/null to clear."],
@@ -1263,11 +1265,12 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .qaShot,
-            description: "Run vision QA on a shot: reviews its generated video (preferred) or storyboard panel against the shot's intent with a vision model, returns a structured verdict (score, pass/fail, concrete issues) plus the reviewed frames, and annotates the shot's QA notes. Requires the asset to be ready — wait_for_media first. Use before approving a shot; on fail, use fix_panel (panel) or regenerate_shot (video).",
+            description: "Review a shot's storyboard or video against its intent. Set artifact=storyboard after panel corrections so an older video cannot stand in for the new panel. Storyboard verdicts and approval are bound to the reviewed image bytes and shot/reference settings; stale responses cannot approve replacements. Wait for media first. Failed storyboard QA requires correction or a reasoned manual override.",
             inputSchema: objectSchema(
                 properties: [
                     "shotId": ["type": "string", "description": "Shot id from get_shot_plan."],
                     "mediaRef": ["type": "string", "description": "Optional asset id to review instead of the shot's own video/panel."],
+                    "artifact": ["type": "string", "enum": ["storyboard", "video"], "description": "Explicit artifact to review. Use storyboard after panel corrections; video must not accidentally stand in for a new panel."],
                     "frameCount": ["type": "integer", "description": "Frames to sample from a video (1–6, default 3)."],
                     "autoApprove": ["type": "boolean", "description": "If it passes, set the shot to 'approved'. Default false."],
                 ],
@@ -1288,7 +1291,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .produceShots,
-            description: "Start background production of the plan's shots: for each shot it routes a model (character refs → reference-to-video, dissolve/match-cut → chained image-to-video, else text-to-video), quotes the cost, generates, optionally runs vision QA, and lays the finished clip on the timeline in shot order. Returns immediately — progress posts into chat and shot statuses move planned/storyboarded → generating → placed (or failed). Poll get_shot_plan or production_status. One shot generates at a time; shots requested mid-run queue behind the active shot rather than being refused.",
+            description: "Start background production in plan order. Explicit models are honored; approved storyboard frames route to I2V, references to R2V, and no visuals to T2V. Every existing storyboard must have approval for its current revision. Jobs run concurrently where dependencies allow. Returns immediately; poll production_status and get_shot_plan. Explicit Multi-Angle 1080P requires maxCostUSD and fresh quotes; submit its budget in a new run.",
             inputSchema: objectSchema(
                 properties: [
                     "shotIds": ["type": "array", "items": ["type": "string"], "description": "Shots to produce (in plan order). Omit to produce every shot not already placed."],

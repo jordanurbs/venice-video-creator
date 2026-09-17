@@ -8,6 +8,8 @@ struct ProductionPanel: View {
     @State private var confirmingStartOver = false
     @State private var confirmingShotReset: String?
     @State private var maximumVideoUSD = 0.0
+    @State private var approvingStoryboardID: String?
+    @State private var storyboardApprovalReason = ""
 
     private var plan: ShotPlan? { editor.shotPlan }
     private var orchestrator: ProductionOrchestrator { editor.productionOrchestrator }
@@ -25,6 +27,20 @@ struct ProductionPanel: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .alert("Approve Storyboard", isPresented: Binding(
+            get: { approvingStoryboardID != nil }, set: { if !$0 { approvingStoryboardID = nil } }
+        )) {
+            TextField("Approval note", text: $storyboardApprovalReason)
+            Button("Approve") {
+                guard let id = approvingStoryboardID else { return }
+                do { try editor.approveStoryboard(shotID: id, reason: storyboardApprovalReason) }
+                catch { editor.editorToast = MediaPanelToast(message: error.localizedDescription) }
+                approvingStoryboardID = nil
+            }
+            Button("Cancel", role: .cancel) { approvingStoryboardID = nil }
+        } message: {
+            Text("Record why this panel is ready for video, including any QA override.")
+        }
     }
 
     // MARK: - Header
@@ -240,7 +256,14 @@ struct ProductionPanel: View {
                         isAssetInFlight: assetInFlight(for: shot),
                         isQueued: orchestrator.isQueued(shot.id),
                         onSelect: { editor.selectShot(id: shot.id) },
-                        onApprove: { editor.setShotStatus(id: shot.id, .approved) },
+                        onApprove: {
+                            if shot.storyboardAssetId != nil {
+                                storyboardApprovalReason = ""
+                                approvingStoryboardID = shot.id
+                            } else {
+                                editor.setShotStatus(id: shot.id, .approved)
+                            }
+                        },
                         onRegenerate: { produce(ids: [shot.id]) },
                         onStartOver: { confirmingShotReset = shot.id }
                     )

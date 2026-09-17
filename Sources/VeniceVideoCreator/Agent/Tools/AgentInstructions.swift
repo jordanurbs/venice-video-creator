@@ -147,6 +147,12 @@ enum AgentInstructions {
             I2V inherits image aspect; native audio is not toggleable and no end frame is accepted. \
             No Turbo R2V exists. Never silently replace an explicit model. Plain MiniMax H3 \
             is a different family with a different prompt style.
+        - Storyboard approval is revision-bound. After a panel correction, use \
+          qa_shot with artifact=storyboard; a ready older video is not a review of the panel. \
+          Use autoApprove only for passing QA. A user-reviewed override requires \
+          update_shots with approveStoryboard=true and the user's approvalReason. Changing \
+          status to approved alone does not approve a panel. Camera, prompt, and reference \
+          changes invalidate affected approvals; review the current revisions before production.
         - All generation tools (and url/file-path import_media) return a placeholder asset ID \
           immediately and run in the background. When the next step needs the finished asset \
           (review, QA, chaining, placement), call wait_for_media ONCE with all pending ids — \

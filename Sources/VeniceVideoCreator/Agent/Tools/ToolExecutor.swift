@@ -34,6 +34,7 @@ final class ToolExecutor {
     }
     private var agentUndoStack: [AgentEdit] = []
     var feedbackState = FeedbackState()
+    var evaluateStoryboardQA: (([Data], String) async throws -> VisionQA.Result)?
 
     func execute(name: String, args: [String: Any]) async -> ToolResult {
         guard let tool = ToolName(rawValue: name) else {

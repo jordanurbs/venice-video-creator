@@ -1,7 +1,7 @@
 # Concept-to-export implementation validation
 
 Date: 2026-09-17
-Status: first slice committed as `c36247d`; catalog/1080P follow-up compiled and regression-tested. Not E2E-ready.
+Status: first slice `c36247d` and catalog/1080P follow-up `fa3e067` committed; storyboard approval slice compiled and regression-tested. Not E2E-ready.
 
 ## Permissions and spending
 
@@ -13,7 +13,7 @@ Status: first slice committed as `c36247d`; catalog/1080P follow-up compiled and
 
 - Related inherited changes retained: Max/Turbo manifest/capabilities/prompts/tests, harness import and menu/window integration, source metadata, canonical character/location reference selection, and sync policy. Unrelated request-body change flagged for later: the Seedance 2.5 `bitrate_mode: "high"` block in `Venice/VeniceGeneration.swift` is preserved in the working tree and excluded from the proposed commit. Its origin is not established by the continuation summary; no claim is made that it is verified or required by this slice.
 - F01: typed JSON production status with flattened shot IDs, queued shot/unit counts, nullable state, separate success/failure/cancellation/settled/pending accounting, and explicit encoding failure. The injected unit executor supports no-provider dispatcher regression tests. Run identity guards prevent old loop cleanup from replacing new run counters; unstructured in-flight production tasks/callbacks still need cancellation/restart and durable recovery work, so old callbacks are not proven safe against a new run.
-- F02: resolve selected shot/default IDs before automatic routing; reject unavailable selections; storyboard/chained frames route to I2V, references to R2V, no visuals to T2V when automatic. Inherited MiniMax I2V aspect is omitted from provider requests/quotes. Ready frames are not yet revision-approved frames: approval gates remain open.
+- F02: resolve selected shot/default IDs before automatic routing; reject unavailable selections; storyboard/chained frames route to I2V, references to R2V, no visuals to T2V when automatic. Inherited MiniMax I2V aspect is omitted from provider requests/quotes. The later storyboard slice requires current panel approval; decoded-image-derived expected output aspect and native acceptance remain open.
 - Shared Codable camera array and validator, shot/generation/recipe/import persistence, agent schema and patch support, six accessible endpoint controls, and final request serialization. Advanced interior keyframes survive endpoint edits; reset deliberately replaces the path. Durable operations and full project recovery still require Phase 2.
 - Exact Multi-Angle capability handling, automatic 768P, simple prompts, optional Multi-Angle prompt, and no camera grouping. Max simple-prompt grouping is disabled. Full-plan adjacency blocks grouping a subset across omitted shots.
 - Strict six-lane MiniMax request contract: duration/resolution, image/reference lanes, inherited aspect, omitted native-audio toggle, and early invalid-input rejection. Follow-up adds a mandatory fresh-quote/budget gate at the final video runner for explicit Multi-Angle 1080P, with pre-preparation budget checks in the shared service.
@@ -45,8 +45,8 @@ Status: first slice committed as `c36247d`; catalog/1080P follow-up compiled and
 
 ## Next slice and open gates
 
-1. Review and commit the validated catalog/1080P follow-up, again excluding the unrelated Seedance bitrate block. Normal build/test execution is established and first-slice commit `c36247d` exists.
-2. Finish Phase 1: explicit revision-approved storyboard routing, native verification of all six camera controls and unsupported-camera clear path, inspector/retake/save-reopen acceptance. Native 1080P budget controls have source implementation but no native acceptance evidence.
+1. Review and commit the validated storyboard slice, excluding the unrelated Seedance bitrate block. First-slice `c36247d` and catalog/1080P `fa3e067` commits exist.
+2. Finish Phase 1 native verification of all six camera controls, unsupported-camera clear path, approval controls, inspector/retake/save-reopen, and 1080P budget presentation. UI prerequisites are available; the dated native acceptance has not run.
 3. Phase 2: durable shot-to-clip/source-range/linked-audio bindings, stable pre-wait operation and line IDs, exactly-once live/recovered finalization. Replace asset-only retake/reset/dialogue lookup and linked-group mutation before claiming production recovery.
 4. Phases 3–5 remain open: revisioned QA/approval and dependency invalidation, attempt/quote ledger and stricter decoded-output validation, idempotent measured audio and exact-speech ownership, readiness, retained export jobs and verified immutable delivery.
 5. Run the audit's valid-media 35–50s deterministic workflow and native manual-tweak acceptance before asking for a paid live budget. No exact-speech or live E2E claims until those lanes actually pass.
@@ -59,7 +59,7 @@ Historical attempt: staging using an explicit 47-file path list plus a related-o
 
 Prepared staging inputs (outside the repository): `/tmp/venice-concept-to-export-paths` and `/tmp/venice-concept-to-export-request.patch`. The request patch passed `git apply --check --cached` before the permission request; that check does not write the index. Reinspect/regenerate those inputs if the tree changes. They intentionally omit the Seedance bitrate hunk from the proposed commit while retaining it in the working tree.
 
-The first commit used 47 explicit whole-file paths and a refreshed request-builder patch; `git diff --cached --check` passed. Post-staging working diff contained only the unchanged Seedance bitrate block. The second catalog/1080P slice is validated and awaiting its own related-only commit.
+The first commit used 47 explicit whole-file paths and a refreshed request-builder patch; `git diff --cached --check` passed. The second catalog/1080P slice is committed as `fa3e067`, `fix(generation): guard catalog refreshes and budget 1080P attempts` (20 files), after staged-diff inspection. Each commit excluded the unchanged Seedance bitrate block. The storyboard slice is validated and awaiting its own commit.
 
 ## Catalog/1080P follow-up validation
 
@@ -75,6 +75,19 @@ The first commit used 47 explicit whole-file paths and a refreshed request-build
 - `swift test`: passed, reported 1,070 tests in 167 suites (1.715s tests; 1.75s incremental build); same six model-dependent skips as the first full run. Combined captured output: `/Users/venetian42069/.local/share/opencode/tool-output/tool_0b0291a22001AsjI2MyXwwq9KB`.
 - `git diff --check`: passed after the follow-up. No paid/API/live catalog probes or native UI operation occurred.
 - Additional files: `Generation/Catalog/ModelCatalog.swift`, `Generation/Catalog/VideoModelSelection.swift`, `Generation/GenerationBackend.swift`, `Generation/VideoGenerationBudget.swift`, `Generation/UI/VideoBudgetControl.swift`, and `Tests/VeniceVideoCreatorTests/Generation/{ModelCatalogRaceTests,VideoGenerationBudgetTests}.swift`; other follow-up edits are in the first-slice inventory below.
+
+## Storyboard revision validation
+
+- Added `Production/StoryboardReview.swift`: Codable panel revisions bind the asset ID, SHA256 of decodable image bytes, and sorted-JSON settings fingerprint. Panel reviews retain verdict, reviewer, summary, review date, approving identity/date, and override reason separately from the old take QA fields. Legacy `status=approved` is not panel approval.
+- Shared plan mutation invalidates reviews when panel, camera, prompt, cast/location/reference settings, format, effective selected model, or prior same-location panel identity changes. Only dependent shots are invalidated; undo restores the prior matching revision. File-content changes at the same panel ID also fail validation.
+- `qa_shot(artifact=storyboard)` explicitly selects the panel; passing QA can auto-approve that revision. Failed/unavailable QA cannot create panel approval. A deliberate native or user-via-agent approval records a nonblank reason and can override a failed/unchecked verdict. In-flight QA cannot approve an edited/replaced revision. Added an injected storyboard QA evaluator for no-provider dispatcher tests.
+- Storyboard-bearing production checks approval at start/routing; single and grouped requests store revision bindings in `GenerationInput`/take recipes. The shared service checks before reference preparation, and a submission guard reaches the final runner before and after quoting. Already queued jobs continue their existing recovery path; this does not fix stale completion/placement callbacks or take QA.
+- Native approval note/action controls added to `Inspector/ShotInspector.swift` and `Production/UI/ProductionPanel.swift`; `update_shots` supports `approveStoryboard` plus `approvalReason`. Agent instructions and storyboard hints now describe the gate.
+- `swift test --filter 'StoryboardApprovalTests|ProductionRoutingTests|ProductionStatusTests|VideoGenerationBudgetTests'`: passed, 26 tests in four suites (0.028s tests, 19.87s build). An earlier compilation of the test helper needed an inner `try` in `#require`; fixed before successful runs.
+- `swift test`: passed, reported 1,079 tests in 168 suites (1.719s tests, 1.87s incremental build), same six model-dependent skips. Captured combined output: `/Users/venetian42069/.local/share/opencode/tool-output/tool_0b0434f5a001mUo79tahWz1BbU`.
+- Regression cases use a decodable PNG and real dispatcher/editor mutations: legacy approval rejection, camera/override undo, selective canonical invalidation, failed QA/manual override, QA transport failure, stale async result, changed panel bytes, panel replacement/undo, and final-runner guard invocation before provider access. Codable round trip is not native save/reopen acceptance.
+- `which cua-driver`, `cua-driver status`, `cua-driver check_permissions '{"prompt":false}'`: driver installed, daemon running, Accessibility and Screen Recording granted. `cua-driver list_apps` showed no running Venice app. No app was launched or native control driven in these prerequisite checks.
+- Remaining scope: revision-bound **take** reviews and every grouped source range; failed/unavailable auto-QA placement; durable operations/recovery; revision protection for non-storyboard requests; decoded expected aspect; valid-media integrated workflow and actual native UI acceptance. Canonical-reference metadata/selection changes are fingerprinted; external same-ID replacement of canonical reference file bytes still needs dependency media revision tracking.
 
 ## Changed-file inventory
 

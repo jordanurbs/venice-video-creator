@@ -74,6 +74,18 @@ struct CapabilityManifest: Codable, Sendable, Equatable {
         var supportsEndImage: Bool
         var supportsReferenceImages: Bool
         var minAudioInputSec: Double?
+        /// Resolutions in the harness registry's **preference order**, best-value
+        /// first. Venice's live `/models` reports the same set in its own order,
+        /// which is not always the one we want defaulted — MiniMax H3 Max lists
+        /// `480P` first even though `768P` is its finish tier and its ceiling.
+        /// `VeniceModel.videoEntry` reorders the live list to follow this one.
+        var resolutions: [String]?
+        /// `"simple"` on models that want a plain one- or two-sentence prompt
+        /// and stage their own coverage from it (the MiniMax H3 Max family);
+        /// `"directorial"` or absent everywhere else. Absent reads as
+        /// directorial, which is the house style and the safe default.
+        var promptStyle: String?
+        var supportsCameraTrajectory: Bool
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -82,6 +94,9 @@ struct CapabilityManifest: Codable, Sendable, Equatable {
             supportsEndImage = try c.decodeIfPresent(Bool.self, forKey: .supportsEndImage) ?? false
             supportsReferenceImages = try c.decodeIfPresent(Bool.self, forKey: .supportsReferenceImages) ?? false
             minAudioInputSec = try c.decodeIfPresent(Double.self, forKey: .minAudioInputSec)
+            resolutions = try c.decodeIfPresent([String].self, forKey: .resolutions)
+            promptStyle = try c.decodeIfPresent(String.self, forKey: .promptStyle)
+            supportsCameraTrajectory = try c.decodeIfPresent(Bool.self, forKey: .supportsCameraTrajectory) ?? false
         }
     }
 
@@ -110,5 +125,13 @@ struct CapabilityManifest: Codable, Sendable, Equatable {
 
     func minAudioInputSeconds(id: String) -> Double? {
         videoModels.first(where: { $0.id == id })?.minAudioInputSec
+    }
+
+    func promptStyle(id: String) -> String? {
+        videoModels.first(where: { $0.id == id })?.promptStyle
+    }
+
+    func resolutions(id: String) -> [String]? {
+        videoModels.first(where: { $0.id == id })?.resolutions
     }
 }

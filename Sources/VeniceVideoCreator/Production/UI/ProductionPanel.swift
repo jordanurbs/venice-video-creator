@@ -125,7 +125,7 @@ struct ProductionPanel: View {
                 Button("Cancel", role: .cancel) {}
             }
             if orchestrator.isRunning {
-                ProgressView(value: Double(orchestrator.completedCount), total: Double(max(1, orchestrator.totalCount)))
+                ProgressView(value: Double(orchestrator.settledCount), total: Double(max(1, orchestrator.totalCount)))
                     .progressViewStyle(.linear)
                     .tint(AppTheme.Accent.primary)
                 Text(orchestrator.progressText)

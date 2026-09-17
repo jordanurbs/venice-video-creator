@@ -34,6 +34,13 @@ struct ShotPlan: Codable, Sendable, Equatable {
     /// repeatable. Only applied on seed-capable models; nil leaves the queue to
     /// pick a random seed per job (current behavior).
     var seed: Int?
+    /// Absolute path of the venice-video-harness project this plan was imported
+    /// from (File → Import Harness Project…). Enables "Refresh from Harness":
+    /// re-scan the folder and additively merge new clips/shots. Nil for plans
+    /// authored in-app.
+    var harnessSourcePath: String?
+    /// The harness episode number the plan was imported from (1 when absent).
+    var harnessEpisode: Int?
     var updatedAt: Date
 
     init(
@@ -49,6 +56,8 @@ struct ShotPlan: Codable, Sendable, Equatable {
         characters: [CharacterSpec] = [],
         locations: [LocationSpec] = [],
         seed: Int? = nil,
+        harnessSourcePath: String? = nil,
+        harnessEpisode: Int? = nil,
         updatedAt: Date = Date()
     ) {
         self.title = title
@@ -63,11 +72,13 @@ struct ShotPlan: Codable, Sendable, Equatable {
         self.characters = characters
         self.locations = locations
         self.seed = seed
+        self.harnessSourcePath = harnessSourcePath
+        self.harnessEpisode = harnessEpisode
         self.updatedAt = updatedAt
     }
 
     private enum CodingKeys: String, CodingKey {
-        case title, logline, aspectRatio, resolution, defaultModel, referenceImageModel, styleBlock, defaultShotSeconds, shots, characters, locations, seed, updatedAt
+        case title, logline, aspectRatio, resolution, defaultModel, referenceImageModel, styleBlock, defaultShotSeconds, shots, characters, locations, seed, harnessSourcePath, harnessEpisode, updatedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -84,6 +95,8 @@ struct ShotPlan: Codable, Sendable, Equatable {
         characters = try c.decodeIfPresent([CharacterSpec].self, forKey: .characters) ?? []
         locations = try c.decodeIfPresent([LocationSpec].self, forKey: .locations) ?? []
         seed = try c.decodeIfPresent(Int.self, forKey: .seed)
+        harnessSourcePath = try c.decodeIfPresent(String.self, forKey: .harnessSourcePath)
+        harnessEpisode = try c.decodeIfPresent(Int.self, forKey: .harnessEpisode)
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
     }
 
@@ -118,6 +131,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
     var transition: ShotTransition
     /// Optional per-shot video model override (Venice slug); falls back to the plan default.
     var modelOverride: String?
+    var cameraTrajectory: CameraTrajectory?
     var characterIds: [String]
     var locationIds: [String]
     var dialogue: [ShotDialogue]
@@ -163,6 +177,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         motionLevel: ShotMotionLevel = .moderate,
         transition: ShotTransition = .cut,
         modelOverride: String? = nil,
+        cameraTrajectory: CameraTrajectory? = nil,
         characterIds: [String] = [],
         locationIds: [String] = [],
         dialogue: [ShotDialogue] = [],
@@ -188,6 +203,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         self.motionLevel = motionLevel
         self.transition = transition
         self.modelOverride = modelOverride
+        self.cameraTrajectory = cameraTrajectory
         self.characterIds = characterIds
         self.locationIds = locationIds
         self.dialogue = dialogue
@@ -207,6 +223,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, slug, summary, prompt, storyboardPrompt, durationSeconds, motionLevel, transition
+        case cameraTrajectory
         case modelOverride, characterIds, locationIds, dialogue, blocking, allowMultiShot, nativeAudio, audioContent, status
         case audioReferenceAssetId, attachCastVoiceReference
         case storyboardAssetId, videoAssetId, takes, qaSummary, failureReason
@@ -223,6 +240,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         motionLevel = try c.decodeIfPresent(ShotMotionLevel.self, forKey: .motionLevel) ?? .moderate
         transition = try c.decodeIfPresent(ShotTransition.self, forKey: .transition) ?? .cut
         modelOverride = try c.decodeIfPresent(String.self, forKey: .modelOverride)
+        cameraTrajectory = try c.decodeIfPresent(CameraTrajectory.self, forKey: .cameraTrajectory)
         characterIds = try c.decodeIfPresent([String].self, forKey: .characterIds) ?? []
         locationIds = try c.decodeIfPresent([String].self, forKey: .locationIds) ?? []
         dialogue = try c.decodeIfPresent([ShotDialogue].self, forKey: .dialogue) ?? []

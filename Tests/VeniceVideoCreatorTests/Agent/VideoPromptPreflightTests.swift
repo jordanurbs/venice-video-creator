@@ -36,6 +36,38 @@ struct VideoPromptPreflightTests {
         #expect(issue?.contains("words") == true)
     }
 
+    /// Simple-prompt models (MiniMax H3 Max) stage their own camera and cutting,
+    /// so the motion-vocabulary requirement and the 12-word floor would refuse
+    /// exactly the prompts those models are built for. The gate consults the
+    /// routed model — plan default or per-shot override — instead of applying
+    /// one bar to every family.
+    @Test func simplePromptModelsSkipTheMotionAndLengthBars() {
+        // No motion verb, 6 words: refused on a directorial model…
+        let plain = shot(prompt: "Late night ramen shop, neon steam")
+        #expect(ToolExecutor.videoPromptIssue(plain) != nil)
+        #expect(ToolExecutor.videoPromptIssue(plain, defaultModel: "seedance-2-5-reference-to-video") != nil)
+        // …and accepted on H3 Max, via the plan default or a per-shot override.
+        #expect(ToolExecutor.videoPromptIssue(plain, defaultModel: "minimax-h3-max-text-to-video") == nil)
+        #expect(ToolExecutor.videoPromptIssue(plain, defaultModel: "minimax-h3-max-turbo-image-to-video") == nil)
+        var overridden = plain
+        overridden.modelOverride = "minimax-h3-max-reference-to-video"
+        #expect(ToolExecutor.videoPromptIssue(overridden, defaultModel: "seedance-2-5-reference-to-video") == nil)
+        // Base MiniMax H3 is NOT a simple-prompt model — same name, full bar.
+        #expect(ToolExecutor.videoPromptIssue(plain, defaultModel: "minimax-h3-text-to-video") != nil)
+    }
+
+    @Test func simplePromptModelsStillRefuseEmptyAndStoryboardPrompts() {
+        let model = "minimax-h3-max-text-to-video"
+        #expect(ToolExecutor.videoPromptIssue(shot(prompt: ""), defaultModel: model) != nil)
+        #expect(ToolExecutor.videoPromptIssue(shot(prompt: "  "), defaultModel: model) != nil)
+        // A panel prompt is wrong for any video model, cheap or not.
+        #expect(ToolExecutor.videoPromptIssue(
+            shot(prompt: "Cinematic film still of a canyon at golden hour"), defaultModel: model
+        ) != nil)
+        // And a two-word stub is still too thin to name a subject and setting.
+        #expect(ToolExecutor.videoPromptIssue(shot(prompt: "a cat"), defaultModel: model) != nil)
+    }
+
     @Test func properVideoPromptPasses() {
         let prompt = "Low tracking shot alongside the matte-black muscle car as it speeds down the cracked asphalt, dust billowing behind the rear tires, camera slowly pushes in toward the driver as heat haze ripples off the road"
         #expect(ToolExecutor.videoPromptIssue(shot(prompt: prompt)) == nil)

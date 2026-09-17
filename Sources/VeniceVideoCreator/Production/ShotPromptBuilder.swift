@@ -19,9 +19,24 @@ enum ShotPromptBuilder {
     ///   declarations and substitutes character names with their `@ImageN` tag
     ///   throughout, so the model binds each reference to a slot instead of
     ///   guessing (harness rule 42). Nil keeps the name-in-prose path.
-    static func videoPrompt(for shot: Shot, plan: ShotPlan? = nil, slotPlan: ReferenceSlots.Plan? = nil) -> String {
+    /// - Parameter model: the routed video model. Simple-prompt models (the
+    ///   MiniMax H3 Max family) stage their own camera and geometry from a
+    ///   stated intent, and the directorial geometry clauses below — blocking,
+    ///   fixed layout, no-mirroring — flatten what they'd otherwise compose, so
+    ///   those are dropped for them. Identity (style, @ImageN bindings, traits)
+    ///   and the audio rules are model-independent and always kept. Nil keeps
+    ///   the full directorial prompt, which is right for every other family.
+    static func videoPrompt(
+        for shot: Shot,
+        plan: ShotPlan? = nil,
+        slotPlan: ReferenceSlots.Plan? = nil,
+        model: String? = nil
+    ) -> String {
+        if model == VideoModelCapabilities.multiAngleID,
+           shot.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "" }
         var parts: [String] = []
         func tagged(_ text: String) -> String { slotPlan?.substitutingNames(in: text) ?? text }
+        let simplePrompt = model.map { VideoModelCapabilities.wantsSimplePrompt(id: $0) } ?? false
 
         // Locked series style FIRST (harness rule 11): front-loading the visual
         // system prevents per-shot style drift across angles and takes.
@@ -51,14 +66,14 @@ enum ShotPromptBuilder {
 
         // Authored shot geometry: who stands where, relative to the location's
         // named anchors, the frame, and each other — restated verbatim per take.
-        if let blocking = shot.blocking, !blocking.isEmpty {
+        if let blocking = shot.blocking, !blocking.isEmpty, !simplePrompt {
             parts.append("Blocking: \(tagged(blocking))")
         }
 
         // Locked location geography: named landmarks and their fixed relative
         // positions, plus an explicit no-mirroring clause when the shot also
         // places characters (mirrored/reshuffled geography is the failure mode).
-        if let plan {
+        if let plan, !simplePrompt {
             let anchors = shot.locationIds
                 .compactMap { plan.location(id: $0)?.spatialAnchors }
                 .filter { !$0.isEmpty }

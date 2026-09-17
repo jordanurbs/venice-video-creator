@@ -551,7 +551,8 @@ enum ToolDefinitions {
             description: "Starts an async AI video generation. Returns a placeholder asset ID immediately; generation runs in the background and the asset becomes usable in add_clips once ready. Costs real money and is not undoable.",
             inputSchema: objectSchema(
                 properties: [
-                    "prompt": ["type": "string", "description": "Text description of the video to generate"],
+                    "cameraTrajectory": cameraTrajectorySchema,
+                    "prompt": ["type": "string", "description": "Video prompt. Optional only for Multi-Angle with a valid camera move."],
                     "name": ["type": "string", "description": "Display name for the asset in the media library. Defaults to first 30 chars of prompt."],
                     "model": ["type": "string", "description": "Model ID (e.g. 'veo3.1-fast'). Use list_models to see options. Defaults to first available model."],
                     "duration": ["type": "integer", "description": "Duration in seconds. Valid values depend on model."],
@@ -566,7 +567,7 @@ enum ToolDefinitions {
                     "referenceAudioMediaRefs": ["type": "array", "items": ["type": "string"], "description": "A single audio asset ID to drive the video's audio_url — lip-sync / scoring for the audio-capable models (Wan 2.5/2.6/2.7; see maxReferenceAudios in list_models). Clips shorter than the model's minimum (Wan 2.7 requires 3s) are auto-padded with trailing silence before upload. Only the first entry is used."],
                     "folderId": ["type": "string", "description": "Optional. Folder id (from list_folders or create_folder) to place the result in. Omit for the project root."],
                 ],
-                required: ["prompt"]
+                required: []
             )
         ),
         AgentTool(
@@ -1037,7 +1038,7 @@ enum ToolDefinitions {
                 properties: [
                     "title": ["type": "string", "description": "Production title."],
                     "logline": ["type": "string", "description": "One-line premise (optional)."],
-                    "styleBlock": ["type": "string", "description": "ALWAYS author this: the series' locked visual system in ONE sentence — medium, palette, lighting language, and lens character (e.g. 'grainy 16mm docudrama, desaturated teal-and-amber palette, hard low-key key light, 35mm anamorphic shallow focus'). Front-loaded into every storyboard, video, and reference-image prompt so the whole production shares one look instead of drifting per shot. Derive it from the logline and the user's intent."],
+                    "styleBlock": ["type": "string", "description": "ALWAYS author this: the series' locked visual system in ONE sentence — medium, palette, lighting language, and lens character (e.g. 'grainy 16mm docudrama, desaturated teal-and-amber palette, hard low-key key light, 35mm anamorphic shallow focus'). Front-loaded into every storyboard, video, and reference-image prompt so the whole production shares one look instead of drifting per shot. Derive it from the logline and the user's intent. TIME-INVARIANT: never describe a change over the story ('starts sepia, blooms into color') and never name story events or one-scene elements (a celebration, confetti) — they leak into every reference and every shot. Story-driven shifts belong in the affected shots' own prompts; if the look changes mid-story, describe the dominant/opening look only."],
                     "aspectRatio": ["type": "string", "description": "e.g. '16:9', '9:16'. Default '16:9'."],
                     "resolution": ["type": "string", "description": "e.g. '720p', '1080p'. Default '1080p'."],
                     "defaultModel": ["type": "string", "description": "Default video model slug for shots without a modelOverride. Optional — the orchestrator routes a sensible default otherwise."],
@@ -1077,6 +1078,7 @@ enum ToolDefinitions {
                                 "durationSeconds": ["type": "number"],
                                 "motionLevel": ["type": "string", "enum": ShotMotionLevel.allCases.map(\.rawValue)],
                                 "transition": ["type": "string", "enum": ShotTransition.allCases.map(\.rawValue)],
+                                "cameraTrajectory": cameraTrajectorySchema,
                                 "modelOverride": ["type": "string"],
                                 "characterIds": ["type": "array", "items": ["type": "string"]],
                                 "blocking": ["type": "string", "description": "The shot's authored geometry relative to the location's spatialAnchors and the frame. Pass empty/null to clear."],
@@ -1331,6 +1333,19 @@ enum ToolDefinitions {
         ),
     ]
 
+    private static var cameraTrajectorySchema: [String: Any] {
+        [
+            "type": "array", "minItems": 2, "maxItems": 12,
+            "description": "Multi-Angle only. Strictly increasing normalized times; total azimuth travel ≤11520°. Distance is relative (1 unchanged).",
+            "items": objectSchema(properties: [
+                "time": ["type": "number", "minimum": 0, "maximum": 1],
+                "azimuth": ["type": "number"],
+                "elevation": ["type": "number", "minimum": -90, "maximum": 90],
+                "distance": ["type": "number", "exclusiveMinimum": 0],
+            ], required: ["time", "azimuth", "elevation", "distance"]),
+        ]
+    }
+
     private static func shotSchema() -> [String: Any] {
         [
             "type": "object",
@@ -1344,6 +1359,7 @@ enum ToolDefinitions {
                 "durationSeconds": ["type": "number", "description": "Shot length in seconds."],
                 "motionLevel": ["type": "string", "enum": ShotMotionLevel.allCases.map(\.rawValue), "description": "Motion intensity hint."],
                 "transition": ["type": "string", "enum": ShotTransition.allCases.map(\.rawValue), "description": "Transition into the next shot. dissolve/matchCut drive last-frame chaining."],
+                "cameraTrajectory": cameraTrajectorySchema,
                 "modelOverride": ["type": "string", "description": "Per-shot video model slug; falls back to the plan default."],
                 "characterIds": ["type": "array", "items": ["type": "string"], "description": "Character ids appearing in this shot."],
                 "blocking": ["type": "string", "description": "The shot's authored geometry: 1–2 sentences placing each character/object relative to the location's spatialAnchors, the frame (screen left/right, foreground/background), and their facing/eyeline. Injected verbatim into the video prompt so placement never gets re-inferred. Continuity: keep screen sides and relative positions consistent with the previous shot in the same scene unless a movement is written into the action; obey the 180-degree rule."],

@@ -70,6 +70,12 @@ enum MainMenuBuilder {
         importItem.keyEquivalentModifierMask = [.command]
         menu.addItem(importItem)
 
+        let importHarnessItem = NSMenuItem(title: "Import Harness Project…", action: #selector(EditorActions.importHarnessProject(_:)), keyEquivalent: "")
+        menu.addItem(importHarnessItem)
+
+        let refreshHarnessItem = NSMenuItem(title: "Refresh from Harness", action: #selector(EditorActions.refreshFromHarness(_:)), keyEquivalent: "")
+        menu.addItem(refreshHarnessItem)
+
         menu.addItem(NSMenuItem(title: "Remove Unused Media…", action: #selector(EditorActions.removeUnusedMedia(_:)), keyEquivalent: ""))
 
         menu.addItem(.separator())
@@ -280,6 +286,8 @@ enum MainMenuBuilder {
     func deleteSelectedClips(_ sender: Any?)
     func rippleDeleteSelected(_ sender: Any?)
     func importMedia(_ sender: Any?)
+    func importHarnessProject(_ sender: Any?)
+    func refreshFromHarness(_ sender: Any?)
     func removeUnusedMedia(_ sender: Any?)
     func newMediaFolder(_ sender: Any?)
     func playPause(_ sender: Any?)

@@ -135,7 +135,18 @@ enum AgentInstructions {
             automatic default; you rarely name a video model by hand. Use Seedance 2.0 R2V \
             Enhanced when the user needs a 1080p finish (2.5 tops out at 720p). If Seedance \
             errors, retry on Kling v3. Use Grok Imagine only for very simple, fast-turnaround \
-            scenes. Rarely use Veo — only when the user asks or constraints require it.
+            scenes. Rarely use Veo — only when the user asks or constraints require it. \
+            Use MiniMax H3 Max (or H3 Max Turbo) for montages and for beats where the model \
+            should stage the sequence itself: it wants a PLAIN one- or two-sentence prompt and \
+            composes its own framing and cutting, so over-directing it flattens the result. \
+            Max/Turbo support 768P or 480P, integer 5–15s. Refresh quotes before spending. \
+            Multi-Angle (minimax-h3-max-multi-angle) is a separate I2V lane: starting image \
+            plus cameraTrajectory keyframes; prompt is optional. Set start/end azimuth, \
+            elevation and relative distance at time 0 and 1. Automatic resolution is 768P; \
+            quote explicit 1080P separately. Preserve interior keyframes on imported moves. \
+            I2V inherits image aspect; native audio is not toggleable and no end frame is accepted. \
+            No Turbo R2V exists. Never silently replace an explicit model. Plain MiniMax H3 \
+            is a different family with a different prompt style.
         - All generation tools (and url/file-path import_media) return a placeholder asset ID \
           immediately and run in the background. When the next step needs the finished asset \
           (review, QA, chaining, placement), call wait_for_media ONCE with all pending ids — \
@@ -202,7 +213,13 @@ enum AgentInstructions {
           shallow focus'). It is front-loaded into every storyboard panel, video, multi-shot, \
           and reference-image prompt, so the whole production shares one visual system instead \
           of drifting shot to shot. Derive it from the logline and the user's aesthetic \
-          direction; if they're vague, ask one focused look question before committing the plan.
+          direction; if they're vague, ask one focused look question before committing the plan. \
+          The styleBlock is TIME-INVARIANT: it describes the one look every frame shares, so it \
+          must never describe a change over the story ('starts sepia, blooms into color') and \
+          never name story events or one-scene elements (a celebration, confetti, an explosion) — \
+          those leak into every reference sheet and every shot, including scenes they don't \
+          belong in. Story-driven visual shifts go in the affected shots' own prompts; if the \
+          look genuinely changes mid-story, the styleBlock describes the dominant/opening look only.
         - Reproducibility: save_shot_plan locks a series seed once (kept across re-saves). \
           It's applied to reference, panel, and video generations on models that accept a \
           seed, so a run can be replayed; you don't set or manage it by hand.
@@ -364,7 +381,10 @@ enum AgentInstructions {
           from the video prompt. NEVER write still-image captions into 'prompt': \
           produce_shots REFUSES prompts without camera/motion language rather than \
           spend money on static footage — rewrite via update_shots, don't reach for \
-          allowThinPrompts.
+          allowThinPrompts. The one exception is a plan (or shot override) routed to \
+          MiniMax H3 Max: that model stages its own camera and cutting, so the gate only \
+          asks for a stated subject and setting there, and a short plain prompt is CORRECT \
+          rather than thin. Don't pad H3 Max prompts to satisfy a bar that doesn't apply.
         - State dialogue, VO, SFX, and music explicitly in video prompts (tone, volume, pitch \
           when persistent). Silent video is usually a bug, not a feature.
         - Never generate UI screenshots, app interfaces, logo animations, motion graphics, \

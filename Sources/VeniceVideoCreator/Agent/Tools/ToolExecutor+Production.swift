@@ -28,7 +28,7 @@ extension ToolExecutor {
                 ? plan.shots.filter { $0.status != .placed }
                 : plan.shots.filter { shotIds.contains($0.id) }
             let issues = targetsForCheck.compactMap { shot -> String? in
-                guard let issue = Self.videoPromptIssue(shot) else { return nil }
+                guard let issue = Self.videoPromptIssue(shot, defaultModel: plan.defaultModel) else { return nil }
                 return "\(shot.slug ?? String(shot.id.prefix(6))): \(issue)"
             }
             if !issues.isEmpty {
@@ -146,17 +146,18 @@ extension ToolExecutor {
 
     func productionStatus(_ editor: EditorViewModel) -> ToolResult {
         let o = editor.productionOrchestrator
-        let body: [String: Any] = [
-            "isRunning": o.isRunning,
-            "isPaused": o.isPaused,
-            "currentShotId": o.currentShotId as Any,
-            "completedCount": o.completedCount,
-            "totalCount": o.totalCount,
-            "queuedCount": o.pendingQueue.count,
-            "queuedShotIds": o.pendingQueue,
-            "runningUSD": o.runningUSD,
-            "lastError": o.lastError as Any,
-        ]
-        return .ok(Self.jsonString(body) ?? "{}")
+        let status = ProductionStatus(
+            isRunning: o.isRunning, isPaused: o.isPaused, currentShotId: o.currentShotId,
+            succeededCount: o.completedCount, failedCount: o.failedCount,
+            cancelledCount: o.cancelledCount, totalCount: o.totalCount,
+            queuedUnits: o.pendingQueue, generatingShotIds: o.generatingShotIds.sorted(),
+            runningUSD: o.runningUSD, lastError: o.lastError
+        )
+        do {
+            let data = try JSONEncoder().encode(status)
+            return .ok(String(decoding: data, as: UTF8.self))
+        } catch {
+            return .error("Production status could not be encoded: \(error.localizedDescription)")
+        }
     }
 }

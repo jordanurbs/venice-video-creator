@@ -32,6 +32,8 @@ struct VideoModelConfig: Identifiable, Sendable {
     var durations: [Int] { caps.durations }
     var resolutions: [String]? { caps.resolutions }
     var aspectRatios: [String] { caps.aspectRatios }
+    var supportsCameraTrajectory: Bool { VideoModelCapabilities.supportsCameraTrajectory(id: id) }
+    var automaticResolution: String? { VideoModelCapabilities.automaticResolution(id: id, allowed: resolutions) }
     var supportsFirstFrame: Bool { caps.supportsFirstFrame }
     var supportsLastFrame: Bool { caps.supportsLastFrame }
     var maxReferenceImages: Int { caps.maxReferenceImages }
@@ -80,7 +82,7 @@ struct VideoModelConfig: Identifiable, Sendable {
             }
             return message
         }
-        if aspectRatios.isEmpty, !aspectRatio.isEmpty {
+        if aspectRatios.isEmpty, !aspectRatio.isEmpty, !supportsFirstFrame, !requiresSourceVideo {
             return "\(displayName) does not support aspect ratio."
         }
         if !aspectRatios.isEmpty, !aspectRatio.isEmpty, !aspectRatios.contains(aspectRatio) {
@@ -115,6 +117,7 @@ struct VideoGenerationParams: Encodable, Sendable {
     /// Reproducibility seed sent as `seed` on models that accept it
     /// (`VideoModelCapabilities.supportsSeed`); nil lets the queue pick one.
     let seed: Int?
+    let cameraTrajectory: CameraTrajectory?
 
     init(
         prompt: String, duration: Int, aspectRatio: String, resolution: String?,
@@ -125,7 +128,8 @@ struct VideoGenerationParams: Encodable, Sendable {
         referenceAudioURLs: [String] = [],
         generateAudio: Bool = true,
         negativePrompt: String? = nil,
-        seed: Int? = nil
+        seed: Int? = nil,
+        cameraTrajectory: CameraTrajectory? = nil
     ) {
         self.prompt = prompt; self.duration = duration
         self.aspectRatio = aspectRatio; self.resolution = resolution
@@ -137,6 +141,7 @@ struct VideoGenerationParams: Encodable, Sendable {
         self.generateAudio = generateAudio
         self.negativePrompt = negativePrompt
         self.seed = seed
+        self.cameraTrajectory = cameraTrajectory
     }
 
     var hasAnyReferences: Bool {
@@ -146,7 +151,7 @@ struct VideoGenerationParams: Encodable, Sendable {
     enum CodingKeys: String, CodingKey {
         case kind, prompt, duration, aspectRatio, resolution, sourceVideoURL
         case startFrameURL, endFrameURL, referenceImageURLs, referenceVideoURLs
-        case referenceAudioURLs, generateAudio, negativePrompt, seed
+        case referenceAudioURLs, generateAudio, negativePrompt, seed, cameraTrajectory
     }
 
     func encode(to encoder: Encoder) throws {
@@ -165,5 +170,6 @@ struct VideoGenerationParams: Encodable, Sendable {
         try c.encode(generateAudio, forKey: .generateAudio)
         try c.encodeIfPresent(negativePrompt, forKey: .negativePrompt)
         try c.encodeIfPresent(seed, forKey: .seed)
+        try c.encodeIfPresent(cameraTrajectory, forKey: .cameraTrajectory)
     }
 }

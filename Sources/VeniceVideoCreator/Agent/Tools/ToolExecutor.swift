@@ -1,6 +1,10 @@
 import Foundation
 
-struct ToolError: Error { let message: String; init(_ m: String) { self.message = m } }
+struct ToolError: LocalizedError {
+    let message: String
+    init(_ message: String) { self.message = message }
+    var errorDescription: String? { message }
+}
 
 /// Shared by the MCP server and the in-app agent.
 /// Tool implementations live in the `ToolExecutor+*.swift` extension files.
@@ -22,11 +26,11 @@ final class ToolExecutor {
         self.allowsProjectSwitching = allowsProjectSwitching
     }
 
-    /// Post-edit timeline snapshot is the identity check: action names collide
-    /// with user edits ("Add Clips" is "Add Clips" from either hand).
+    // Action names alone cannot distinguish assistant edits from manual edits.
     private struct AgentEdit {
         let actionName: String
         let timelineAfter: Timeline
+        let shotPlanAfter: ShotPlan?
     }
     private var agentUndoStack: [AgentEdit] = []
     var feedbackState = FeedbackState()
@@ -46,6 +50,7 @@ final class ToolExecutor {
 
         guard let editor else { return .error("Editor not available") }
         let before = editor.timeline
+        let planBefore = editor.shotPlan
         let result: ToolResult
         let started = ContinuousClock.now
         Log.agent.notice(
@@ -56,10 +61,9 @@ final class ToolExecutor {
         do {
             let resolved = try expandingIdPrefixes(in: args, editor: editor)
             result = try await run(tool, editor, resolved)
-            // Record any edit that actually changed the timeline so `undo` can revert it.
-            if tool != .undo, !result.isError, editor.timeline != before,
+            if tool != .undo, !result.isError, editor.timeline != before || editor.shotPlan != planBefore,
                let actionName = editor.undoManager?.undoActionName {
-                agentUndoStack.append(AgentEdit(actionName: actionName, timelineAfter: editor.timeline))
+                agentUndoStack.append(AgentEdit(actionName: actionName, timelineAfter: editor.timeline, shotPlanAfter: editor.shotPlan))
             }
         } catch let err as ToolError {
             result = .error(err.message)
@@ -187,7 +191,6 @@ final class ToolExecutor {
         return .ok(body)
     }
 
-    /// Reverts the assistant's most recent timeline edit. Refuses to undo the user's own edits.
     func undo(_ editor: EditorViewModel) throws -> ToolResult {
         guard let expected = agentUndoStack.last else {
             throw ToolError("No assistant edit to undo this session. The user's own edits are theirs to undo.")
@@ -196,12 +199,13 @@ final class ToolExecutor {
             agentUndoStack.removeAll()
             throw ToolError("Nothing to undo.")
         }
-        guard editor.timeline == expected.timelineAfter else {
-            throw ToolError("The timeline changed since the assistant's last edit — not undoing the user's work.")
+        guard editor.timeline == expected.timelineAfter, editor.shotPlan == expected.shotPlanAfter,
+              undoManager.undoActionName == expected.actionName else {
+            throw ToolError("The project changed since the assistant's last edit — not undoing the user's work.")
         }
         undoManager.undo()
         agentUndoStack.removeLast()
-        return .ok("Undid: \(expected.actionName). The timeline is restored to its state before that edit; re-read with get_timeline or get_transcript before editing again.")
+        return .ok("Undid: \(expected.actionName). Re-read get_timeline or get_shot_plan before editing again.")
     }
 
     // Shared helpers used by tool extensions in other files.
@@ -238,11 +242,9 @@ final class ToolExecutor {
         return obj
     }
 
-    /// Decodes a `Decodable` from a JSON object dictionary (e.g. tool args), throwing a
-    /// `ToolError` with `path` context on failure.
-    nonisolated static func decode<T: Decodable>(_ dict: [String: Any], as type: T.Type, path: String) throws -> T {
+    nonisolated static func decode<T: Decodable>(_ value: Any, as type: T.Type, path: String) throws -> T {
         let data: Data
-        do { data = try JSONSerialization.data(withJSONObject: dict) }
+        do { data = try JSONSerialization.data(withJSONObject: value, options: .fragmentsAllowed) }
         catch { throw ToolError("\(path): could not serialize (\(error.localizedDescription))") }
         do { return try JSONDecoder().decode(T.self, from: data) }
         catch { throw ToolError("\(path): \(error.localizedDescription)") }

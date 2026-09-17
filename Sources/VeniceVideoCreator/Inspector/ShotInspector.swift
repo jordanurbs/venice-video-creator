@@ -15,6 +15,9 @@ struct ShotInspector: View {
     @State private var isEnhancing = false
 
     private var plan: ShotPlan? { editor.shotPlan }
+    private var supportsCameraMove: Bool {
+        VideoModelCapabilities.supportsCameraTrajectory(id: shot.modelOverride ?? plan?.defaultModel ?? "")
+    }
     private var shotIndex: Int {
         plan?.shots.firstIndex(where: { $0.id == shot.id }) ?? 0
     }
@@ -26,6 +29,17 @@ struct ShotInspector: View {
                 promptSection
                 storyboardPromptSection
                 generationSection
+                if supportsCameraMove || shot.cameraTrajectory != nil {
+                    CameraMoveControls(trajectory: Binding(
+                        get: { shot.cameraTrajectory },
+                        set: { value in
+                            update("Edit Camera Move") {
+                                $0.cameraTrajectory = value
+                                markStaleIfGenerated(&$0)
+                            }
+                        }
+                    ), supportsCameraMove: supportsCameraMove)
+                }
                 referencesSection
                 audioSection
                 outputSection
@@ -207,7 +221,11 @@ struct ShotInspector: View {
     /// video prompt (the 2026-08-07 static-footage run).
     @ViewBuilder
     private var composedVideoPromptPreview: some View {
-        let composed = ShotPromptBuilder.videoPrompt(for: shot, plan: editor.shotPlan)
+        let composed = ShotPromptBuilder.videoPrompt(
+            for: shot,
+            plan: editor.shotPlan,
+            model: shot.modelOverride ?? editor.shotPlan?.defaultModel
+        )
         if composed != shot.prompt, !composed.isEmpty {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.xxs) {
                 Text("SENT TO VIDEO MODEL")

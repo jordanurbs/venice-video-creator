@@ -298,6 +298,26 @@ extension EditorWindowController: EditorActions {
         editorViewModel.removeUnusedMedia()
     }
 
+    @objc func importHarnessProject(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a venice-video-harness project folder (contains series.json)"
+        panel.prompt = "Import"
+        let viewModel = editorViewModel
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in
+                viewModel.importHarnessProject(from: url)
+            }
+        }
+    }
+
+    @objc func refreshFromHarness(_ sender: Any?) {
+        editorViewModel.refreshFromHarness()
+    }
+
     @objc func newMediaFolder(_ sender: Any?) {
         editorViewModel.mediaPanelVisible = true
         editorViewModel.showMediaPanelMediaTab()

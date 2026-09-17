@@ -64,6 +64,32 @@ struct ShotPromptBuilderSpatialTests {
         #expect(!prompt.contains("Fixed layout"))
     }
 
+    /// On a simple-prompt model the directorial geometry block is what flattens
+    /// the shot: H3 Max stages its own coverage, so blocking, the fixed-layout
+    /// anchors, and the no-mirroring clause come out. The beat, the locked
+    /// style, and identity stay — those are things the model cannot infer.
+    @Test func simplePromptModelDropsGeometryClauses() {
+        let (plan, shot) = makePlan()
+        let prompt = ShotPromptBuilder.videoPrompt(
+            for: shot, plan: plan, model: "minimax-h3-max-text-to-video"
+        )
+        #expect(!prompt.contains("Blocking:"))
+        #expect(!prompt.contains("Fixed layout"))
+        #expect(!prompt.contains("do not mirror, swap, or rearrange"))
+        // The beat itself survives.
+        #expect(prompt.contains(shot.prompt))
+    }
+
+    @Test func directorialModelsKeepGeometryClauses() {
+        let (plan, shot) = makePlan()
+        // Explicit non-simple model, and the nil-model default, both keep them.
+        for model in ["seedance-2-5-reference-to-video", "minimax-h3-text-to-video", nil] {
+            let prompt = ShotPromptBuilder.videoPrompt(for: shot, plan: plan, model: model)
+            #expect(prompt.contains("Blocking:"), "expected blocking for \(model ?? "nil")")
+            #expect(prompt.contains("Fixed layout"), "expected fixed layout for \(model ?? "nil")")
+        }
+    }
+
     @Test func nilPlanStillBuildsPromptWithShotBlocking() {
         let (_, shot) = makePlan()
         let prompt = ShotPromptBuilder.videoPrompt(for: shot)

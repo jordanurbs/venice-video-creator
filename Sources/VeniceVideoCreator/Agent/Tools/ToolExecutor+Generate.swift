@@ -2,7 +2,12 @@ import Foundation
 
 extension ToolExecutor {
     func generate(_ editor: EditorViewModel, _ args: [String: Any], type: ClipType) throws -> ToolResult {
-        let prompt = try args.requireString("prompt")
+        let prompt: String
+        if type == .video, args.string("model") == VideoModelCapabilities.multiAngleID {
+            prompt = args.string("prompt") ?? ""
+        } else {
+            prompt = try args.requireString("prompt")
+        }
         guard AccountService.shared.hasVeniceKey else {
             throw ToolError("Generation requires a Venice API key. Tell the user to add it in Settings.")
         }
@@ -17,6 +22,9 @@ extension ToolExecutor {
                 throw ToolError("Unknown model '\(modelId)'. Available: \(enabledIds(VideoModelConfig.allModels.map(\.id)))")
             }
             try ensureEnabled(model.id, kind: "video")
+            if let value = args["cameraTrajectory"], !(value is NSNull), !model.supportsCameraTrajectory {
+                throw ToolError("Model '\(model.id)' does not support camera_trajectory. Remove the camera move or select Multi-Angle.")
+            }
             return model.requiresSourceVideo
                 ? try generateVideoEdit(editor, args, prompt: prompt, model: model)
                 : try generateVideoText(editor, args, prompt: prompt, model: model)
@@ -99,11 +107,24 @@ extension ToolExecutor {
         _ editor: EditorViewModel, _ args: [String: Any],
         prompt: String, model: VideoModelConfig
     ) throws -> ToolResult {
-        guard !prompt.isEmpty else { throw ToolError("Empty prompt") }
+        guard !prompt.isEmpty || model.supportsCameraTrajectory else { throw ToolError("Empty prompt") }
+        let trajectory: CameraTrajectory?
+        if let value = args["cameraTrajectory"], !(value is NSNull) {
+            trajectory = try Self.decode(value, as: CameraTrajectory.self, path: "cameraTrajectory")
+        } else {
+            trajectory = nil
+        }
+        if let error = CameraTrajectory.validate(trajectory, modelID: model.id) { throw ToolError(error) }
 
+        if MiniMaxVideoContract.lanes.contains(model.id), args["duration"] != nil {
+            guard let requested = args.double("duration"), requested.isFinite,
+                  requested.rounded() == requested, (5...15).contains(requested) else {
+                throw ToolError("MiniMax H3 Max requires an integer duration from 5 to 15 seconds.")
+            }
+        }
         let duration = args.int("duration") ?? model.durations.first ?? 0
         let aspectRatio = args.string("aspectRatio") ?? model.aspectRatios.first ?? ""
-        let resolution = args.string("resolution") ?? model.resolutions?.first
+        let resolution = args.string("resolution") ?? model.automaticResolution
 
         if let err = model.validate(duration: duration, aspectRatio: aspectRatio, resolution: resolution) {
             throw ToolError(err)
@@ -142,7 +163,7 @@ extension ToolExecutor {
 
         let genInput = GenerationInput(
             prompt: prompt, model: model.id, duration: duration,
-            aspectRatio: aspectRatio, resolution: resolution
+            aspectRatio: aspectRatio, resolution: resolution, cameraTrajectory: trajectory
         )
 
         let folderId = try resolveFolderId(
@@ -647,6 +668,9 @@ extension ToolExecutor {
             "id": m.id, "displayName": m.displayName,
             "durations": m.durations, "aspectRatios": m.aspectRatios,
             "supportsFirstFrame": m.supportsFirstFrame,
+            "supportsCameraTrajectory": m.supportsCameraTrajectory,
+            "promptOptional": m.supportsCameraTrajectory,
+            "automaticResolution": m.automaticResolution.map { $0 as Any } ?? NSNull(),
             "supportsLastFrame": m.supportsLastFrame,
             "supportsReferences": m.supportsReferences,
         ]

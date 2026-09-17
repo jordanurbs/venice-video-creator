@@ -1,0 +1,44 @@
+import Foundation
+
+struct ProductionStatus: Encodable {
+    let isRunning: Bool
+    let isPaused: Bool
+    let currentShotId: String?
+    let succeededCount: Int
+    let failedCount: Int
+    let cancelledCount: Int
+    let totalCount: Int
+    let queuedUnits: [MultiShotPlanner.Unit]
+    let generatingShotIds: [String]
+    let runningUSD: Double
+    let lastError: String?
+
+    enum CodingKeys: String, CodingKey {
+        case isRunning, isPaused, currentShotId, completedCount, succeededCount, failedCount
+        case cancelledCount, settledCount, pendingCount, totalCount, queuedCount, queuedUnitCount
+        case queuedShotIds, queuedUnits, generatingShotIds, runningUSD, lastError
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        let queuedShotIds = queuedUnits.flatMap(\.shotIds)
+        let settled = succeededCount + failedCount + cancelledCount
+        try c.encode(isRunning, forKey: .isRunning)
+        try c.encode(isPaused, forKey: .isPaused)
+        try c.encode(currentShotId, forKey: .currentShotId)
+        try c.encode(succeededCount, forKey: .completedCount)
+        try c.encode(succeededCount, forKey: .succeededCount)
+        try c.encode(failedCount, forKey: .failedCount)
+        try c.encode(cancelledCount, forKey: .cancelledCount)
+        try c.encode(settled, forKey: .settledCount)
+        try c.encode(max(0, totalCount - settled), forKey: .pendingCount)
+        try c.encode(totalCount, forKey: .totalCount)
+        try c.encode(queuedShotIds.count, forKey: .queuedCount)
+        try c.encode(queuedUnits.count, forKey: .queuedUnitCount)
+        try c.encode(queuedShotIds, forKey: .queuedShotIds)
+        try c.encode(queuedUnits, forKey: .queuedUnits)
+        try c.encode(generatingShotIds, forKey: .generatingShotIds)
+        try c.encode(runningUSD, forKey: .runningUSD)
+        try c.encode(lastError, forKey: .lastError)
+    }
+}

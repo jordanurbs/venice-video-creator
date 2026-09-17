@@ -111,7 +111,11 @@ enum VeniceModelMapper {
         id: String, name: String, constraints: [String: Any], pricing: [String: Any]
     ) -> CatalogEntry {
         let aspectRatios = (constraints["aspect_ratios"] as? [String]) ?? []
-        let resolutions = constraints["resolutions"] as? [String]
+        // Live order is incidental; the registry's is a choice. See
+        // `preferredResolutionOrder` — reconcile() defaults to `.first`.
+        let resolutions = VideoModelCapabilities.preferredResolutionOrder(
+            id: id, live: constraints["resolutions"] as? [String]
+        )
         let durations = parseDurations(constraints["durations"] as? [String]) 
         let modelType = (constraints["model_type"] as? String) ?? "text-to-video"
         let videoInput = (constraints["video_input"] as? Bool) ?? false
@@ -122,7 +126,7 @@ enum VeniceModelMapper {
         // so they must offer different input slots.
         let isVideoToVideo = modelType == "video" || videoInput
         let isReferenceToVideo = !isVideoToVideo && id.contains("reference-to-video")
-        let isImageToVideo = !isVideoToVideo && !isReferenceToVideo && modelType == "image-to-video"
+        let isImageToVideo = !isVideoToVideo && !isReferenceToVideo && (modelType == "image-to-video" || id == VideoModelCapabilities.multiAngleID)
         let needsImageInput = isImageToVideo || isReferenceToVideo
         // Venice exposes the same model under several variants that share a name
         // (text-to-video / image-to-video / reference-to-video). Append the

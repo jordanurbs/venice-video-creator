@@ -52,7 +52,7 @@ extension EditorViewModel {
     }
 
     func selectCharacter(id: String) {
-        guard character(id: id) != nil else { return }
+        guard let character = character(id: id) else { return }
         selectedCharacterId = id
         selectedShotId = nil
         selectedLocationId = nil
@@ -60,6 +60,10 @@ extension EditorViewModel {
         selectedGap = nil
         selectedTimelineRange = nil
         selectedMediaAssetIds = []
+        // Show the character's canonical reference in the viewer — selecting a
+        // cast member surfaces its look the same way selecting a shot surfaces
+        // its footage.
+        openCanonicalReferencePreview(character.referenceImageAssetIds, locked: character.lockedReferenceAssetId)
     }
 
     func deselectCharacter() {
@@ -73,7 +77,7 @@ extension EditorViewModel {
     }
 
     func selectLocation(id: String) {
-        guard location(id: id) != nil else { return }
+        guard let location = location(id: id) else { return }
         selectedLocationId = id
         selectedShotId = nil
         selectedCharacterId = nil
@@ -81,10 +85,26 @@ extension EditorViewModel {
         selectedGap = nil
         selectedTimelineRange = nil
         selectedMediaAssetIds = []
+        // Show the location's canonical reference plate in the viewer, mirroring
+        // selectShot / selectCharacter.
+        openCanonicalReferencePreview(location.referenceImageAssetIds, locked: location.lockedReferenceAssetId)
     }
 
     func deselectLocation() {
         selectedLocationId = nil
+    }
+
+    /// Surfaces an entity's canonical reference image in the viewer: the locked
+    /// reference when set, else the first reference that resolves to a ready
+    /// (non-generating) asset. No-op when nothing has been generated yet — so
+    /// selecting an entity without references leaves the viewer untouched.
+    private func openCanonicalReferencePreview(_ referenceIds: [String], locked: String?) {
+        let ordered = (locked.map { [$0] } ?? []) + referenceIds
+        for id in ordered {
+            guard let asset = mediaAssets.first(where: { $0.id == id }), !asset.isGenerating else { continue }
+            openPreviewTab(for: asset)
+            return
+        }
     }
 
     // MARK: - Writes

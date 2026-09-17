@@ -28,10 +28,15 @@ final class ProductionOrchestrator {
     private(set) var isPaused = false
     private(set) var currentShotId: String?
     private(set) var completedCount = 0
+    private(set) var failedCount = 0
+    private(set) var cancelledCount = 0
+    var settledCount: Int { completedCount + failedCount + cancelledCount }
     private(set) var totalCount = 0
     private(set) var runningUSD: Double = 0
     private(set) var lastError: String?
 
+    @ObservationIgnored var executeUnit: ((MultiShotPlanner.Unit, Options) async -> Void)?
+    @ObservationIgnored private var runID = UUID()
     @ObservationIgnored private var runTask: Task<Void, Never>?
     @ObservationIgnored private var cancelRequested = false
     /// Generation units waiting to produce, drained in order by the run loop.
@@ -70,7 +75,7 @@ final class ProductionOrchestrator {
 
     var progressText: String {
         guard isRunning else { return "Idle" }
-        let base = "Shot \(min(completedCount + 1, max(totalCount, 1))) of \(totalCount)"
+        let base = "Shot \(min(settledCount + 1, max(totalCount, 1))) of \(totalCount)"
         return isPaused ? "\(base) · paused" : base
     }
 
@@ -78,12 +83,15 @@ final class ProductionOrchestrator {
 
     /// Cancels the in-memory loop (Venice jobs already queued keep running server-side).
     func detachAll() {
+        cancelledCount += max(0, totalCount - settledCount)
+        runID = UUID()
         cancelRequested = true
         runTask?.cancel()
         runTask = nil
         fireInterrupts()
         pendingQueue.removeAll()
         generatingShotIds.removeAll()
+        currentUnitShotIds = []
         isRunning = false
         isPaused = false
         currentShotId = nil
@@ -154,6 +162,8 @@ final class ProductionOrchestrator {
     /// `generating` to their pre-run status so per-shot Generate stays usable.
     func cancel() {
         guard isRunning else { return }
+        cancelledCount += max(0, totalCount - settledCount)
+        runID = UUID()
         cancelRequested = true
         isPaused = false
         runTask?.cancel()
@@ -161,6 +171,7 @@ final class ProductionOrchestrator {
         fireInterrupts()
         pendingQueue.removeAll()
         generatingShotIds.removeAll()
+        currentUnitShotIds = []
         revertInFlightShots()
         currentShotId = nil
         isRunning = false
@@ -234,20 +245,25 @@ final class ProductionOrchestrator {
         isRunning = true
         isPaused = false
         completedCount = 0
+        failedCount = 0
+        cancelledCount = 0
+        runID = UUID()
+        let id = runID
         totalCount = totalShots
         lastError = nil
         pendingQueue = ordered
         postNotice("Starting production of \(totalShots) shot\(totalShots == 1 ? "" : "s") (\(ordered.count) generation\(ordered.count == 1 ? "" : "s")).")
 
         runTask = Task { @MainActor in
-            await runLoop(options: options)
+            await runLoop(options: options, id: id)
+            guard runID == id else { return }
             pendingQueue.removeAll()
             currentShotId = nil
             currentUnitShotIds = []
             generatingShotIds.removeAll()
             isRunning = false
             if !cancelRequested {
-                postNotice("Production run finished (\(completedCount)/\(totalCount) shots).")
+                postNotice("Production finished: \(completedCount) succeeded, \(failedCount) failed, \(cancelledCount) cancelled (\(totalCount) shots).")
             }
         }
     }
@@ -257,7 +273,7 @@ final class ProductionOrchestrator {
     /// A shot whose PREVIOUS plan shot transitions by dissolve/matchCut is
     /// seeded from that shot's last frame, so it only starts after the
     /// previous shot has settled (not merely started).
-    private func runLoop(options: Options) async {
+    private func runLoop(options: Options, id: UUID) async {
         var inFlight = 0
         var settled: Set<String> = []
 
@@ -282,9 +298,9 @@ final class ProductionOrchestrator {
         let report = reportCompletion!
 
         while !pendingQueue.isEmpty || inFlight > 0 {
-            if cancelRequested { break }
-            while isPaused && !cancelRequested { try? await Task.sleep(for: .milliseconds(300)) }
-            if cancelRequested { break }
+            if cancelRequested || runID != id { break }
+            while isPaused && !cancelRequested && runID == id { try? await Task.sleep(for: .milliseconds(300)) }
+            if cancelRequested || runID != id { break }
 
             // Launch every startable unit up to the parallelism cap.
             while inFlight < max(1, options.maxParallel), !pendingQueue.isEmpty {
@@ -303,8 +319,10 @@ final class ProductionOrchestrator {
                 if unit.isMultiShot { currentUnitShotIds = unit.shotIds }
                 inFlight += 1
                 Task { @MainActor [weak self] in
-                    if let self {
-                        if unit.isMultiShot {
+                    if let self, self.runID == id {
+                        if let executeUnit = self.executeUnit {
+                            await executeUnit(unit, options)
+                        } else if unit.isMultiShot {
                             await self.produceUnit(unit, options: options)
                         } else if let shotId = unit.shotIds.first {
                             await self.produceOne(shotId: shotId, options: options)
@@ -317,17 +335,24 @@ final class ProductionOrchestrator {
             guard inFlight > 0 else { break }  // nothing startable and nothing running
             if let finishedIds = await completionIterator.next() {
                 inFlight -= 1
+                guard runID == id else { continue }
                 settled.formUnion(finishedIds)
                 generatingShotIds.subtract(finishedIds)
                 if finishedIds.contains(currentUnitShotIds.first ?? "") { currentUnitShotIds = [] }
-                if !cancelRequested { completedCount += finishedIds.count }
+                for shotId in finishedIds {
+                    if editor?.shotPlan?.shot(id: shotId)?.status == .placed {
+                        completedCount += 1
+                    } else {
+                        failedCount += 1
+                    }
+                }
             }
         }
         // Drain in-flight units after a cancel/pause-break so state stays consistent.
         while inFlight > 0 {
             guard let finishedIds = await completionIterator.next() else { break }
             inFlight -= 1
-            generatingShotIds.subtract(finishedIds)
+            if runID == id { generatingShotIds.subtract(finishedIds) }
         }
     }
 
@@ -364,7 +389,7 @@ final class ProductionOrchestrator {
         // cut off the last beat, so require a rung >= the sum; bail to singles
         // when the ladder can't hold the window.
         let plannedSeconds = window.reduce(0.0) { $0 + $1.durationSeconds }
-        let requested = Int(plannedSeconds.rounded())
+        let requested = Int(plannedSeconds.rounded(.up))
         let duration: Int
         if route.model.durations.isEmpty {
             duration = max(1, requested)
@@ -543,10 +568,13 @@ final class ProductionOrchestrator {
         guard !identityRefs.isEmpty || panelRef != nil || !locationRefs.isEmpty else { return nil }
 
         let defaultModel = plan.defaultModel.flatMap { id in enabled.first { $0.id == id } }
-        let r2v = [defaultModel].compactMap { $0 }
-            .first { $0.requiresReferenceImage && !$0.requiresSourceVideo && $0.maxReferenceImages > 0 }
-            ?? Self.preferredModel(in: enabled) { $0.requiresReferenceImage && !$0.requiresSourceVideo && $0.maxReferenceImages > 0 }
-        guard let model = r2v else { return nil }
+        if plan.defaultModel != nil, defaultModel == nil { return nil }
+        if let defaultModel, defaultModel.supportsFirstFrame || VideoModelCapabilities.wantsSimplePrompt(id: defaultModel.id) { return nil }
+        let r2v = defaultModel ?? Self.preferredModel(in: enabled) {
+            $0.requiresReferenceImage && !$0.requiresSourceVideo && $0.maxReferenceImages > 0
+        }
+        guard let model = r2v, model.requiresReferenceImage, !model.requiresSourceVideo, model.maxReferenceImages > 0,
+              !VideoModelCapabilities.wantsSimplePrompt(id: model.id) else { return nil }
 
         let budget = max(1, model.maxReferenceImages)
         // @Image-tag models (Seedance R2V): bind refs to @ImageN slots so every
@@ -587,8 +615,11 @@ final class ProductionOrchestrator {
         // shot from its last frame for visual continuity (needs an image-to-video model).
         let chainFrame = await chainStartFrame(for: shotId, plan: plan, editor: editor)
 
-        guard let route = route(shot, plan: plan, editor: editor, chainFrame: chainFrame) else {
-            failShot(shotId, reason: "No enabled video model available.")
+        let route: Route
+        do {
+            route = try self.route(shot, plan: plan, editor: editor, chainFrame: chainFrame)
+        } catch {
+            failShot(shotId, reason: error.localizedDescription)
             return
         }
 
@@ -599,6 +630,10 @@ final class ProductionOrchestrator {
             return
         }
 
+        if let error = CameraTrajectory.validate(shot.cameraTrajectory, modelID: route.model.id) {
+            failShot(shotId, reason: error)
+            return
+        }
         let (duration, aspect, resolution) = reconcile(shot: shot, model: route.model, plan: plan)
         if let err = route.model.validate(duration: duration, aspectRatio: aspect, resolution: resolution) {
             failShot(shotId, reason: err)
@@ -609,10 +644,7 @@ final class ProductionOrchestrator {
         if aspect != plan.aspectRatio {
             postNotice("⚠️ \(label): \(route.model.displayName) doesn't offer \(plan.aspectRatio) — generating \(aspect) instead. To keep \(plan.aspectRatio), set a modelOverride that supports it (check list_models).")
         }
-        // Legacy overlong shot (planned before the cap): refuse to silently
-        // truncate a paid generation — the user splits it, then re-runs.
-        // Snapping to a nearby ladder rung (12s → 10s) is fine; exceeding the
-        // model's longest clip is not.
+        // Never shorten picture timing to fit a provider duration ladder.
         if let longest = route.model.durations.max(), shot.durationSeconds > Double(longest) {
             failShot(shotId, reason: "Planned \(Int(shot.durationSeconds))s but \(route.model.displayName) generates at most \(longest)s. Split the shot (shot inspector → Split) instead of truncating.")
             return
@@ -632,7 +664,7 @@ final class ProductionOrchestrator {
         postNotice("Generating \(label) with \(route.model.displayName): \(route.note), \(duration)s @ \(aspect)\(costNote).")
 
         var genInput = GenerationInput(
-            prompt: ShotPromptBuilder.videoPrompt(for: shot, plan: plan, slotPlan: route.slotPlan),
+            prompt: ShotPromptBuilder.videoPrompt(for: shot, plan: plan, slotPlan: route.slotPlan, model: route.model.id),
             model: route.model.id, duration: duration,
             aspectRatio: aspect, resolution: resolution
         )
@@ -642,6 +674,7 @@ final class ProductionOrchestrator {
         if VideoModelCapabilities.supportsNegativePrompt(id: route.model.id) {
             genInput.negativePrompt = ShotPromptBuilder.negativePrompt(for: shot)
         }
+        genInput.cameraTrajectory = shot.cameraTrajectory
         // Reproducibility: lock the series seed onto seed-capable families so the
         // recipe replays; nil leaves the queue to pick one (current behavior).
         if let seed = plan.seed, VideoModelCapabilities.supportsSeed(id: route.model.id) {
@@ -900,7 +933,7 @@ final class ProductionOrchestrator {
         return matching.first { $0.id.lowercased().contains(preferredAutoFamily) } ?? matching.first
     }
 
-    private struct Route {
+    struct Route {
         let model: VideoModelConfig
         let inputAssets: VideoGenerationSubmission.InputAssets
         let note: String
@@ -1034,12 +1067,14 @@ final class ProductionOrchestrator {
         )
     }
 
-    private func route(_ shot: Shot, plan: ShotPlan, editor: EditorViewModel, chainFrame: MediaAsset? = nil) -> Route? {
-        let enabled = VideoModelConfig.allModels.filter { ModelPreferences.shared.isEnabled($0.id) }
-        guard !enabled.isEmpty else { return nil }
-        func find(_ id: String?) -> VideoModelConfig? { id.flatMap { wanted in enabled.first { $0.id == wanted } } }
-        let override = find(shot.modelOverride)
-        let defaultModel = find(plan.defaultModel)
+    func route(
+        _ shot: Shot, plan: ShotPlan, editor: EditorViewModel,
+        chainFrame: MediaAsset? = nil, availableModels: [VideoModelConfig]? = nil
+    ) throws -> Route {
+        let enabled = availableModels ?? VideoModelConfig.allModels.filter { ModelPreferences.shared.isEnabled($0.id) }
+        let selectedID = shot.modelOverride ?? plan.defaultModel
+        let selected = try ProductionModelSelection.resolve(selectedID, in: enabled)
+        guard !enabled.isEmpty else { throw ToolError("No enabled video model available. Refresh Models in Settings.") }
 
         // Tiered reference stack (ports the harness reference-slots allocator):
         //   1. Character identity refs (primary — one per character)  PROTECTED
@@ -1099,24 +1134,29 @@ final class ProductionOrchestrator {
             return [audioRef]
         }
 
-        // Frame chaining takes priority when no character refs: seed an image-to-video model
-        // from the previous shot's last frame.
-        if refs.isEmpty, let chainFrame {
-            let i2v = [override, defaultModel].compactMap { $0 }
-                .first { $0.supportsFirstFrame && !$0.requiresSourceVideo }
-                ?? Self.preferredModel(in: enabled) { $0.supportsFirstFrame && !$0.requiresSourceVideo }
-            if let model = i2v {
-                let ia = VideoGenerationSubmission.InputAssets(frames: [chainFrame], audioRefs: audioRefs(for: model))
-                if ia.validate(for: model) == nil {
-                    return Route(model: model, inputAssets: ia, note: "image-to-video (chained from previous shot)")
-                }
+        if let selected, selected.supportsFirstFrame || !selected.requiresReferenceImage {
+            if !selected.supportsFirstFrame, panelRef != nil || chainFrame != nil || !refs.isEmpty {
+                throw ToolError("\(selected.displayName) cannot use this shot's visual inputs. Select I2V for the storyboard or R2V for references; no inputs were silently discarded.")
             }
+            let frames = selected.supportsFirstFrame ? [panelRef ?? chainFrame].compactMap { $0 } : []
+            let inputs = VideoGenerationSubmission.InputAssets(frames: frames, audioRefs: audioRefs(for: selected))
+            if let error = inputs.validate(for: selected) { throw ToolError(error) }
+            return Route(model: selected, inputAssets: inputs, note: frames.isEmpty ? "text-to-video" : "image-to-video (storyboard or chained frame)")
+        }
+
+        if selected == nil, let frame = panelRef ?? chainFrame {
+            guard let model = Self.preferredModel(in: enabled, where: { $0.supportsFirstFrame && !$0.requiresSourceVideo }) else {
+                throw ToolError("No enabled image-to-video model accepts the storyboard frame. Select an available I2V model.")
+            }
+            let inputs = VideoGenerationSubmission.InputAssets(frames: [frame], audioRefs: audioRefs(for: model))
+            if let error = inputs.validate(for: model) { throw ToolError(error) }
+            return Route(model: model, inputAssets: inputs, note: "image-to-video (storyboard or chained frame)")
         }
 
         if !refs.isEmpty {
-            let r2v = [override, defaultModel].compactMap { $0 }
-                .first { $0.requiresReferenceImage && !$0.requiresSourceVideo && $0.maxReferenceImages > 0 }
-                ?? Self.preferredModel(in: enabled) { $0.requiresReferenceImage && !$0.requiresSourceVideo && $0.maxReferenceImages > 0 }
+            let r2v = selected ?? Self.preferredModel(in: enabled) {
+                $0.requiresReferenceImage && !$0.requiresSourceVideo && $0.maxReferenceImages > 0
+            }
             if let model = r2v {
                 let audio = audioRefs(for: model)
                 // @Image-tag models (Seedance R2V): bind each reference to an
@@ -1146,13 +1186,18 @@ final class ProductionOrchestrator {
             }
         }
 
-        let t2v = [override, defaultModel].compactMap { $0 }
-            .first { !$0.requiresReferenceImage && !$0.requiresSourceVideo }
-            ?? Self.preferredModel(in: enabled) { !$0.requiresReferenceImage && !$0.requiresSourceVideo }
-            ?? enabled.first
-        guard let model = t2v else { return nil }
-        let ia = VideoGenerationSubmission.InputAssets(audioRefs: audioRefs(for: model))
-        return Route(model: model, inputAssets: ia.validate(for: model) == nil ? ia : VideoGenerationSubmission.InputAssets(), note: "text-to-video")
+        if let selected {
+            throw ToolError("\(selected.displayName) requires ready reference images. Generate or select references before producing this shot.")
+        }
+        guard refs.isEmpty else {
+            throw ToolError("No enabled reference-to-video model accepts these references. Select an available R2V model.")
+        }
+        guard let model = Self.preferredModel(in: enabled, where: {
+            !$0.requiresReferenceImage && !$0.requiresSourceVideo && !$0.supportsFirstFrame
+        }) else { throw ToolError("No enabled text-to-video model available. Select an available T2V model.") }
+        let inputs = VideoGenerationSubmission.InputAssets(audioRefs: audioRefs(for: model))
+        if let error = inputs.validate(for: model) { throw ToolError(error) }
+        return Route(model: model, inputAssets: inputs, note: "text-to-video")
     }
 
     /// Resolves the audio reference to attach to a shot's generation: the shot's
@@ -1192,19 +1237,19 @@ final class ProductionOrchestrator {
 
     /// Snaps the shot's requested settings to what the model actually accepts.
     private func reconcile(shot: Shot, model: VideoModelConfig, plan: ShotPlan) -> (Int, String, String?) {
-        let requested = Int(shot.durationSeconds.rounded())
+        let requested = Int(shot.durationSeconds.rounded(.up))
         let duration: Int
         if model.durations.isEmpty {
             duration = max(1, requested)
         } else if model.durations.contains(requested) {
             duration = requested
         } else {
-            duration = model.durations.min { abs($0 - requested) < abs($1 - requested) } ?? model.durations[0]
+            duration = model.durations.sorted().first { $0 >= requested } ?? model.durations.max() ?? requested
         }
         let aspect = model.aspectRatios.contains(plan.aspectRatio) ? plan.aspectRatio : (model.aspectRatios.first ?? plan.aspectRatio)
         let resolution: String?
         if let allowed = model.resolutions, !allowed.isEmpty {
-            resolution = allowed.contains(plan.resolution) ? plan.resolution : allowed.first
+            resolution = allowed.contains(plan.resolution) ? plan.resolution : model.automaticResolution
         } else {
             resolution = nil
         }

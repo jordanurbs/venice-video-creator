@@ -20,6 +20,21 @@ import Foundation
 /// record the probe date + exact error (see
 /// `.cursor/rules/harness-app-capability-sync.mdc`).
 enum VideoModelCapabilities {
+    static let multiAngleID = "minimax-h3-max-multi-angle"
+
+    static func supportsCameraTrajectory(id: String) -> Bool {
+        guard id == multiAngleID else { return false }
+        if let spec = manifest?.videoModels.first(where: { $0.id == id }) {
+            return spec.supportsCameraTrajectory
+        }
+        return true
+    }
+
+    static func automaticResolution(id: String, allowed: [String]?) -> String? {
+        if id == multiAngleID, allowed?.contains("768P") == true { return "768P" }
+        return allowed?.first
+    }
+
     private static var manifest: CapabilityManifest? { CapabilityManifestSnapshot.current }
 
     /// Whether the model accepts an `end_image_url` (last-frame interpolation).
@@ -62,6 +77,7 @@ enum VideoModelCapabilities {
         if lower.contains("wan-2.5-preview") { return true }
         if lower.contains("seedance") && lower.contains("reference-to-video") { return true }
         if lower.contains("minimax-h3-reference-to-video") { return true }
+        if lower.contains("minimax-h3-max-reference-to-video") { return true }
         return false
     }
 
@@ -130,6 +146,7 @@ enum VideoModelCapabilities {
         if lower.contains("seedance") && lower.contains("reference-to-video") { return true }
         if lower.contains("grok-imagine-reference-to-video") { return true }
         if lower.contains("minimax-h3-reference-to-video") { return true }
+        if lower.contains("minimax-h3-max-reference-to-video") { return true }
         if lower.contains("happyhorse-1-1-reference-to-video") { return true }
         return false
     }
@@ -152,6 +169,7 @@ enum VideoModelCapabilities {
         if lower.contains("seedance") && lower.contains("reference-to-video") { return 9 }
         if lower.contains("happyhorse-1-1-reference-to-video") { return 9 }
         if lower.contains("minimax-h3-reference-to-video") { return 9 }
+        if lower.contains("minimax-h3-max-reference-to-video") { return 9 }
         if lower.contains("wan-3-0") && lower.contains("reference-to-video") { return 9 }
         return 4
     }
@@ -159,6 +177,61 @@ enum VideoModelCapabilities {
     /// Venice's video prompt cap (2500 chars on the Seedance family and MiniMax H3).
     static var videoPromptCharLimit: Int {
         manifest?.budgets.videoPromptCharLimit ?? 2500
+    }
+
+    /// Whether the model wants a short, plain prompt rather than a fully
+    /// directed one. The MiniMax H3 Max family stages its own coverage and
+    /// cutting from a stated intent (harness registry `promptStyle: "simple"`,
+    /// probe 2026-09-03), so the directorial stack — and the production
+    /// pre-flight that insists on it — works against these models rather than
+    /// for them. Everything else is directorial; that stays the default for
+    /// ids neither layer knows.
+    static func wantsSimplePrompt(id: String) -> Bool {
+        if let m = manifest, m.knownIds.contains(id) {
+            return m.promptStyle(id: id) == "simple"
+        }
+        return id.lowercased().contains("minimax-h3-max")
+    }
+
+    /// Live `/models` resolutions reordered to follow the harness registry's
+    /// preference order, which is deliberate where the live order is incidental.
+    ///
+    /// This matters because `ProductionOrchestrator.reconcile` falls back to the
+    /// FIRST allowed resolution whenever the plan's own value isn't offered — and
+    /// for the whole MiniMax family that fallback is the effective default, since
+    /// their tier labels (`768P`, `2K`) never match a plan's `1080p`-style value.
+    /// Venice lists MiniMax H3 Max as `["480P", "768P"]`, so taking the live order
+    /// at face value silently renders every H3 Max shot at its draft tier.
+    ///
+    /// The live list still decides what is *allowed* — it's the fresher source, and
+    /// anything it offers that the registry hasn't caught up to is kept, ranked
+    /// last rather than dropped.
+    static func preferredResolutionOrder(id: String, live: [String]?) -> [String]? {
+        guard let live, !live.isEmpty else { return live }
+        if id == multiAngleID {
+            let preferred = ["768P", "480P", "1080P"]
+            return preferred.filter(live.contains) + live.filter { !preferred.contains($0) }
+        }
+        guard let preferred = manifest?.resolutions(id: id) ?? resolutionFallback(id: id),
+              !preferred.isEmpty
+        else { return live }
+        let ranked = preferred.filter(live.contains)
+        guard !ranked.isEmpty else { return live }
+        return ranked + live.filter { !ranked.contains($0) }
+    }
+
+    /// Family fallback for `preferredResolutionOrder`, for ids the manifest
+    /// doesn't carry and for the window before the manifest store has loaded —
+    /// the catalog can map models in that window, and a resolution defaulted
+    /// there sticks for the session. Only families whose live order we know to
+    /// be wrong appear here; everything else keeps live order untouched.
+    private static func resolutionFallback(id: String) -> [String]? {
+        let lower = id.lowercased()
+        // Must precede the `minimax-h3` check: H3 Max is 768P-capped and rejects
+        // 2K, the exact inverse of base H3.
+        if lower.contains("minimax-h3-max") { return ["768P", "480P"] }
+        if lower.contains("minimax-h3") { return ["2K"] }
+        return nil
     }
 
     /// Whether the model accepts a top-level `negative_prompt`. Venice's

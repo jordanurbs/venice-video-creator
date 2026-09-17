@@ -179,6 +179,10 @@ extension ToolExecutor {
         if let v = op.double("durationSeconds") { shot.durationSeconds = max(0.1, v) }
         if let v = op.string("motionLevel") { shot.motionLevel = try parseEnum(v, ShotMotionLevel.self, field: "\(path).motionLevel") }
         if let v = op.string("transition") { shot.transition = try parseEnum(v, ShotTransition.self, field: "\(path).transition") }
+        if let value = op["cameraTrajectory"] {
+            shot.cameraTrajectory = value is NSNull ? nil : try decode(value, as: CameraTrajectory.self, path: "\(path).cameraTrajectory")
+            if let error = shot.cameraTrajectory?.validationError { throw ToolError(error) }
+        }
         if op["modelOverride"] != nil { shot.modelOverride = op.string("modelOverride") }
         if op["characterIds"] != nil { shot.characterIds = op.stringArray("characterIds") }
         if op["locationIds"] != nil { shot.locationIds = op.stringArray("locationIds") }
@@ -213,6 +217,7 @@ extension ToolExecutor {
 
     private static func validated(_ shot: Shot, index: Int?) throws -> Shot {
         var s = shot
+        if let error = s.cameraTrajectory?.validationError { throw ToolError(error) }
         if s.durationSeconds <= 0 { s.durationSeconds = 5 }
         let cap = maxGenerableShotSeconds()
         if s.durationSeconds > cap {
@@ -268,7 +273,18 @@ extension ToolExecutor {
 
     /// Per-shot production pre-flight: nil when the prompt reads as a video
     /// prompt, else what's wrong. Money gate — used by produce_shots.
-    static func videoPromptIssue(_ shot: Shot) -> String? {
+    ///
+    /// `defaultModel` is the plan's model, consulted when the shot has no
+    /// override: the bar for "directed enough" is a property of the routed
+    /// model, not of prompts in general. Simple-prompt models (MiniMax H3 Max)
+    /// stage their own camera and cutting, so the camera/motion requirement and
+    /// the 12-word floor below would reject exactly the prompts those models
+    /// want. They get a thin-but-not-empty floor instead.
+    static func videoPromptIssue(_ shot: Shot, defaultModel: String? = nil) -> String? {
+        if let model = shot.modelOverride ?? defaultModel {
+            if let error = CameraTrajectory.validate(shot.cameraTrajectory, modelID: model) { return error }
+            if VideoModelCapabilities.supportsCameraTrajectory(id: model), shot.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return nil }
+        }
         let p = shot.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         if p.isEmpty {
             return "prompt is EMPTY (generation would fall back to the one-line summary)"
@@ -278,6 +294,15 @@ extension ToolExecutor {
             return "prompt says '\(marker)' — that's a storyboard-panel prompt, not a video prompt"
         }
         let wordCount = p.split(whereSeparator: \.isWhitespace).count
+
+        if let model = shot.modelOverride ?? defaultModel,
+           VideoModelCapabilities.wantsSimplePrompt(id: model) {
+            if wordCount < 4 {
+                return "prompt is only \(wordCount) words — even \(model) needs a stated subject and setting"
+            }
+            return nil
+        }
+
         let hasMotion = motionVocabulary.contains { lower.contains($0) }
         if !hasMotion {
             return "prompt has no camera or motion language — a video model renders it as \(Int(shot.durationSeconds))s of nothing moving"

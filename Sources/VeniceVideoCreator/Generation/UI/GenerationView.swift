@@ -12,6 +12,7 @@ struct GenerationView: View {
     @State private var selectedVideoModelIndex = 0
     @State private var selectedImageModelIndex = 0
     @State private var selectedAudioModelIndex = 0
+    @State private var cameraTrajectory: CameraTrajectory?
     @State private var selectedDuration = 5
     @State private var selectedAspectRatio = "16:9"
     @State private var selectedResolution = "1080p"
@@ -221,6 +222,9 @@ struct GenerationView: View {
                 return audioVideoSource != nil
             }
             return trimmedPrompt.count >= audioModel.minPromptLength
+        }
+        if selectedType == .video, videoModel.supportsCameraTrajectory {
+            return firstFrame != nil && CameraTrajectory.validate(cameraTrajectory, modelID: videoModel.id) == nil
         }
         return !isPromptEmpty
     }
@@ -647,6 +651,7 @@ struct GenerationView: View {
         .onChange(of: selectedVideoModelIndex) { _, _ in
             guard !isPopulatingPanel else { return }
             if selectedType == .video {
+                selectedResolution = videoModel.automaticResolution ?? ""
                 resetSettings()
                 framesRefsMode = .firstLast
                 sanitizeVideoReferences()
@@ -927,26 +932,35 @@ struct GenerationView: View {
 
     /// Changes to any of these re-fetch the cost estimate.
     private var costSignature: String {
-        "\(selectedType.rawValue)|\(currentModelId)|\(effectiveVideoSeconds)|\(effectiveResolution ?? "")|\(selectedAspectRatio)|\(selectedNumImages)|\(effectiveVideoCount)|\(selectedAudioDuration)"
+        "\(selectedType.rawValue)|\(currentModelId)|\(effectiveVideoSeconds)|\(effectiveResolution ?? "")|\(selectedAspectRatio)|\(selectedNumImages)|\(effectiveVideoCount)|\(selectedAudioDuration)|\(String(describing: cameraTrajectory))"
     }
 
     /// Live USD estimate: Venice quote for video/audio, static per-image price for images.
     private func refreshEstimatedUSD() async {
+        let signature = costSignature
+        estimatedUSD = nil
         guard let api = VeniceAPI.fromKeychain() else { estimatedUSD = nil; return }
         switch selectedType {
         case .video:
+            guard CameraTrajectory.validate(cameraTrajectory, modelID: videoModel.id) == nil else {
+                estimatedUSD = nil
+                return
+            }
             let unit = await api.videoQuote(
                 model: currentModelId,
                 duration: effectiveVideoSeconds,
                 resolution: effectiveResolution,
                 aspectRatio: selectedAspectRatio
             )
+            guard signature == costSignature else { return }
             estimatedUSD = unit.map { $0 * Double(effectiveVideoCount) }
         case .audio:
             let secs: Int? = audioModel.durations?.isEmpty == false
                 ? selectedAudioDuration
                 : (audioModel.inputs.contains(.video) && audioVideoSource != nil ? effectiveAudioVideoSeconds : nil)
-            estimatedUSD = await api.audioQuote(model: currentModelId, durationSeconds: secs, characterCount: nil)
+            let quote = await api.audioQuote(model: currentModelId, durationSeconds: secs, characterCount: nil)
+            guard signature == costSignature else { return }
+            estimatedUSD = quote
         case .image:
             if let cents = imageModel.creditsPerImage[""], cents > 0 {
                 estimatedUSD = (cents / 100.0) * Double(supportsImageVariants ? max(1, selectedNumImages) : 1)
@@ -1744,6 +1758,9 @@ struct GenerationView: View {
             if selectedType == .audio, let durations = audioModel.durations, !durations.isEmpty {
                 settingsPicker("Duration", selection: $selectedAudioDuration, options: durations) { "\($0)s" }
             }
+            if selectedType == .video, videoModel.supportsCameraTrajectory || cameraTrajectory != nil {
+                CameraMoveControls(trajectory: $cameraTrajectory, supportsCameraMove: videoModel.supportsCameraTrajectory)
+            }
             if !currentAspectRatios.isEmpty {
                 settingsPicker("Aspect Ratio", selection: $selectedAspectRatio, options: currentAspectRatios) { $0 }
             }
@@ -1899,7 +1916,7 @@ struct GenerationView: View {
                     resolution: effectiveResolution
                 )
             }
-            return modelError ?? inputAssets.validate(for: videoModel)
+            return CameraTrajectory.validate(cameraTrajectory, modelID: videoModel.id) ?? modelError ?? inputAssets.validate(for: videoModel)
         case .image:
             let quality = currentQualities != nil ? selectedQuality : nil
             let imageCount = imageModel.maxImages > 1
@@ -1997,6 +2014,7 @@ struct GenerationView: View {
                 ? instrumental : nil,
             generateAudio: supportsAudioToggle ? generateAudio : nil
         )
+        genInput.cameraTrajectory = selectedType == .video ? cameraTrajectory : nil
         if supportsImageStylePreset, !selectedStyle.isEmpty {
             genInput.stylePreset = selectedStyle
         }
@@ -2207,6 +2225,7 @@ struct GenerationView: View {
         }
         defer { DispatchQueue.main.async { isPopulatingPanel = false } }
 
+        cameraTrajectory = stored.cameraTrajectory
         prompt = stored.prompt
         if !stored.aspectRatio.isEmpty { selectedAspectRatio = stored.aspectRatio }
         if let r = stored.resolution { selectedResolution = r }
@@ -2282,7 +2301,7 @@ struct GenerationView: View {
             selectedAspectRatio = currentAspectRatios.first ?? "16:9"
         }
         if let resolutions = currentResolutions, !resolutions.contains(selectedResolution) {
-            selectedResolution = resolutions.first ?? "1080p"
+            selectedResolution = selectedType == .video ? (videoModel.automaticResolution ?? resolutions.first ?? "1080p") : (resolutions.first ?? "1080p")
         }
         if let qualities = currentQualities, !qualities.contains(selectedQuality) {
             selectedQuality = qualities.last ?? "high"

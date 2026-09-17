@@ -22,6 +22,23 @@ struct MultiShotPlannerTests {
         return ShotPlan(shots: shots, characters: [char], locations: [loc])
     }
 
+    @Test func requestedSubsetCannotGroupAcrossOmittedShot() {
+        let plan = makePlan(shotCount: 3)
+        let subset = [plan.shots[0], plan.shots[2]]
+        let units = MultiShotPlanner.plan(shots: subset, plan: plan, groupingEnabled: true)
+        #expect(units.count == 2)
+        #expect(units.allSatisfy { !$0.isMultiShot })
+    }
+
+    @Test func cameraMovesAndSimplePromptDefaultsStaySingle() {
+        var plan = makePlan(shotCount: 2)
+        plan.defaultModel = "minimax-h3-max-reference-to-video"
+        #expect(MultiShotPlanner.plan(shots: plan.shots, plan: plan, groupingEnabled: true).count == 2)
+        plan.defaultModel = nil
+        plan.shots[0].cameraTrajectory = .stationary
+        #expect(MultiShotPlanner.plan(shots: plan.shots, plan: plan, groupingEnabled: true).count == 2)
+    }
+
     @Test func groupsSameSceneWindow() {
         let plan = makePlan(shotCount: 3, seconds: 4) // 12s total
         let units = MultiShotPlanner.plan(shots: plan.shots, plan: plan, groupingEnabled: true)

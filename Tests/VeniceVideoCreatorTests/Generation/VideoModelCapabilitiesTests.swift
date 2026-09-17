@@ -101,6 +101,100 @@ struct VideoModelAudioCapabilityTests {
         #expect(!VideoModelCapabilities.audioInputCapable(id: "minimax-h3-text-to-video"))
         #expect(!VideoModelCapabilities.audioInputCapable(id: "minimax-h3-image-to-video"))
     }
+
+    @Test func minimaxH3MaxR2VAcceptsAudioUrl() {
+        // Probe 2026-09-03: same t2v/i2v vs R2V split as base H3. Turbo has no
+        // R2V lane at all, so there is nothing to enable for it.
+        #expect(VideoModelCapabilities.audioInputCapable(id: "minimax-h3-max-reference-to-video"))
+        #expect(!VideoModelCapabilities.audioInputCapable(id: "minimax-h3-max-text-to-video"))
+        #expect(!VideoModelCapabilities.audioInputCapable(id: "minimax-h3-max-image-to-video"))
+        #expect(!VideoModelCapabilities.audioInputCapable(id: "minimax-h3-max-turbo-image-to-video"))
+    }
+}
+
+/// MiniMax H3 Max is the only `promptStyle: "simple"` family: it stages its own
+/// framing and cutting from a plain statement of intent. Everything else is
+/// directorial, and that must stay the default — a wrong "simple" strips the
+/// blocking and geography clauses out of a family that needs them.
+@Suite("VideoModelCapabilities prompt style")
+struct VideoModelPromptStyleTests {
+
+    @Test func h3MaxFamilyWantsSimplePrompts() {
+        for id in [
+            "minimax-h3-max-text-to-video",
+            "minimax-h3-max-image-to-video",
+            "minimax-h3-max-reference-to-video",
+            "minimax-h3-max-turbo-text-to-video",
+            "minimax-h3-max-turbo-image-to-video",
+        ] {
+            #expect(VideoModelCapabilities.wantsSimplePrompt(id: id), "expected simple-prompt mode for \(id)")
+        }
+    }
+
+    @Test func everyOtherFamilyStaysDirectorial() {
+        for id in [
+            // Same name as H3 Max, opposite prompt style — the trap worth pinning.
+            "minimax-h3-text-to-video",
+            "minimax-h3-reference-to-video",
+            "seedance-2-5-reference-to-video",
+            "happyhorse-1-1-reference-to-video",
+            "wan-3-0-image-to-video",
+            "kling-o3-pro-reference-to-video",
+            "some-future-model-text-to-video",
+        ] {
+            #expect(!VideoModelCapabilities.wantsSimplePrompt(id: id), "expected directorial prompts for \(id)")
+        }
+    }
+}
+
+@Suite("VideoModelCapabilities resolution preference order")
+struct VideoModelResolutionOrderTests {
+
+    /// Venice reports H3 Max as ["480P", "768P"]. reconcile() takes `.first`
+    /// whenever the plan's resolution isn't offered — which for MiniMax tier
+    /// labels is always — so live order alone renders every shot at draft tier.
+    @Test func h3MaxPrefers768PoverVeniceLiveOrder() {
+        for id in [
+            "minimax-h3-max-text-to-video",
+            "minimax-h3-max-image-to-video",
+            "minimax-h3-max-reference-to-video",
+            "minimax-h3-max-turbo-text-to-video",
+            "minimax-h3-max-turbo-image-to-video",
+        ] {
+            let ordered = VideoModelCapabilities.preferredResolutionOrder(id: id, live: ["480P", "768P"])
+            #expect(ordered?.first == "768P", "expected 768P defaulted for \(id), got \(ordered ?? [])")
+            #expect(ordered?.contains("480P") == true, "480P must stay selectable as the draft tier for \(id)")
+        }
+    }
+
+    /// A resolution the live API offers but the registry hasn't caught up to is
+    /// kept, just ranked behind the ones we've made a decision about.
+    @Test func unknownLiveResolutionsAreKeptRankedLast() {
+        let ordered = VideoModelCapabilities.preferredResolutionOrder(
+            id: "minimax-h3-max-image-to-video", live: ["480P", "768P", "1080P"]
+        )
+        #expect(ordered == ["768P", "480P", "1080P"])
+    }
+
+    /// Base MiniMax H3 is the inverse case, and the pair has to not cross:
+    /// Venice now offers it 768P as well, but the harness pins every H3 render to
+    /// 2K, so the app defaults there too rather than quietly disagreeing.
+    @Test func baseH3Prefers2KAndDoesNotInheritTheMaxCap() {
+        let ordered = VideoModelCapabilities.preferredResolutionOrder(
+            id: "minimax-h3-image-to-video", live: ["768P", "2K"]
+        )
+        #expect(ordered == ["2K", "768P"])
+    }
+
+    /// No manifest entry, no opinion — live order passes through untouched.
+    @Test func unknownModelsKeepLiveOrder() {
+        let ordered = VideoModelCapabilities.preferredResolutionOrder(
+            id: "some-future-model-text-to-video", live: ["540p", "1080p"]
+        )
+        #expect(ordered == ["540p", "1080p"])
+        #expect(VideoModelCapabilities.preferredResolutionOrder(id: "anything", live: nil) == nil)
+        #expect(VideoModelCapabilities.preferredResolutionOrder(id: "anything", live: []) == [])
+    }
 }
 
 @Suite("VideoModelCapabilities reference budgets and tags")
@@ -113,6 +207,7 @@ struct VideoModelReferenceCapabilityTests {
             "seedance-2-0-fast-reference-to-video",
             "happyhorse-1-1-reference-to-video",
             "minimax-h3-reference-to-video",
+            "minimax-h3-max-reference-to-video",
             "wan-3-0-reference-to-video",
             "wan-3-0-enhanced-reference-to-video",
         ] {
@@ -147,6 +242,7 @@ struct VideoModelReferenceCapabilityTests {
             "seedance-2-0-reference-to-video",
             "seedance-2-0-enhanced-reference-to-video",
             "minimax-h3-reference-to-video",
+            "minimax-h3-max-reference-to-video",
             "happyhorse-1-1-reference-to-video",
             "grok-imagine-reference-to-video",
         ] {

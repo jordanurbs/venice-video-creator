@@ -162,9 +162,9 @@ private struct LocationRow: View {
         }
     }
 
-    /// One reference plate: click to select, double-click to preview, and remove
-    /// via the hover ✕, the context menu, or the delete/backspace key while
-    /// selected — each routed through a confirmation.
+    /// One reference plate: click to select and preview it in the viewer, and
+    /// remove via the hover ✕, the context menu, or the delete/backspace key
+    /// while selected — each routed through a confirmation.
     @ViewBuilder
     private func plateCell(_ aid: String) -> some View {
         let isFocused = focusedPlate == aid
@@ -179,8 +179,9 @@ private struct LocationRow: View {
         .focusable()
         .focused($focusedPlate, equals: aid)
         .onHover { hoveredPlate = $0 ? aid : (hoveredPlate == aid ? nil : hoveredPlate) }
-        .onTapGesture(count: 2) { openPreview(aid) }
-        .onTapGesture { focusedPlate = aid }
+        // A single click both focuses the plate (for the delete key) and shows
+        // it in the viewer — matching the Cast panel's click-to-preview thumbs.
+        .onTapGesture { focusedPlate = aid; openPreview(aid) }
         .onDeleteCommand { confirmingPlateDeletion = aid }
     }
 
@@ -292,7 +293,7 @@ private struct LocationRow: View {
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.xs))
-        .help(isLocked ? "Canonical look (locked) — double-click to preview" : "Click to select, double-click to preview")
+        .help(isLocked ? "Canonical look (locked) — click to preview" : "Click to preview")
         .contextMenu {
             Button("Preview") { openPreview(assetId) }
             if isLocked {

@@ -97,6 +97,14 @@ final class GenerationService {
                 self.preSubmitBatchIds.remove(primaryId)
             }
             do {
+                if assetType == .video,
+                   let error = CameraTrajectory.validate(genInput.cameraTrajectory, modelID: genInput.model) {
+                    throw ToolError(error)
+                }
+                if assetType == .video, MiniMaxVideoContract.lanes.contains(genInput.model),
+                   case .video(let params) = buildParams(preUploadedURLs ?? references.map { $0.url.absoluteString }) {
+                    try MiniMaxVideoContract.validate(model: genInput.model, params: params)
+                }
                 let prepared = try await self.prepareReferences(
                     references: references,
                     trimmedSourceOverride: trimmedSourceOverride,

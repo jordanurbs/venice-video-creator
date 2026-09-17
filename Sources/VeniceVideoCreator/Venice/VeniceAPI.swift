@@ -173,7 +173,7 @@ struct VeniceAPI: Sendable {
     func videoQuote(model: String, duration: Int, resolution: String?, aspectRatio: String) async -> Double? {
         var body: [String: Any] = ["model": model, "duration": "\(max(1, duration))s"]
         if let resolution, !resolution.isEmpty { body["resolution"] = resolution }
-        if !aspectRatio.isEmpty { body["aspect_ratio"] = aspectRatio }
+        if !aspectRatio.isEmpty, !MiniMaxVideoContract.inheritsAspect(model) { body["aspect_ratio"] = aspectRatio }
         return (try? await postJSON(path: "video/quote", body: body))?["quote"] as? Double
     }
 

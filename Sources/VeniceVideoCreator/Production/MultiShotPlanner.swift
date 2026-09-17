@@ -13,7 +13,7 @@ import Foundation
 enum MultiShotPlanner {
 
     /// One generation unit: either a single shot or a grouped window.
-    struct Unit: Equatable, Sendable {
+    struct Unit: Codable, Equatable, Sendable {
         var shotIds: [String]
         /// Why this window grouped (or stayed single) — surfaced in run notices.
         var reason: String
@@ -81,13 +81,19 @@ enum MultiShotPlanner {
     /// nil otherwise. The gates mirror the harness `canUseMultiShotWindow`.
     static func groupingVerdict(window: [Shot], plan: ShotPlan, budget: WindowBudget = .standard) -> String? {
         guard window.count >= 2 else { return nil }
+        let indices = window.compactMap { shot in plan.shots.firstIndex { $0.id == shot.id } }
+        guard indices.count == window.count,
+              zip(indices, indices.dropFirst()).allSatisfy({ pair in pair.1 == pair.0 + 1 }) else { return nil }
 
         // Per-shot opt-out and status: only produce-ready shots group, and a
         // regeneration of one shot never re-renders its neighbors.
         if window.contains(where: { $0.allowMultiShot == false }) { return nil }
 
         // Explicit model overrides pin a shot to its own lane.
-        if window.contains(where: { $0.modelOverride != nil }) { return nil }
+        if window.contains(where: { $0.modelOverride != nil || $0.cameraTrajectory != nil }) { return nil }
+        // Grouped routing cannot honor arbitrary pinned lanes or simple-prompt contracts yet.
+        if let model = plan.defaultModel,
+           !model.contains("reference-to-video") || VideoModelCapabilities.wantsSimplePrompt(id: model) { return nil }
 
         // Single-generation duration cap (15s standard, 30s on Seedance 2.5).
         let total = window.reduce(0.0) { $0 + $1.durationSeconds }

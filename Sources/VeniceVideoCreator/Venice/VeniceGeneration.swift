@@ -160,11 +160,40 @@ enum VeniceGenerationRunner {
         model: String, params: VideoGenerationParams, api: VeniceAPI,
         onQueue: (@MainActor (String, String?) -> Void)? = nil
     ) async throws -> [String] {
-        let catalogModel = videoModel(for: model)
+        let body = try videoRequestBody(model: model, params: params, catalogModel: videoModel(for: model))
+        let queued = try await api.postJSON(path: "video/queue", body: body, forModel: model)
+        guard let queueId = queued["queue_id"] as? String else {
+            throw VeniceAPI.VeniceError.decode("missing queue_id")
+        }
+        let downloadURL = queued["download_url"] as? String
+        onQueue?(queueId, downloadURL)
+
+        return [try await pollVideo(queueId: queueId, model: model, downloadURL: downloadURL, api: api)]
+    }
+
+    static func videoRequestBody(
+        model: String, params: VideoGenerationParams, catalogModel: VideoModelConfig?
+    ) throws -> sending [String: Any] {
+        if let error = CameraTrajectory.validate(params.cameraTrajectory, modelID: model) {
+            throw ToolError(error)
+        }
+        if let catalogModel,
+           let error = catalogModel.validate(duration: params.duration, aspectRatio: params.aspectRatio, resolution: params.resolution, validateDuration: !catalogModel.requiresSourceVideo) {
+            throw ToolError(error)
+        }
+        try MiniMaxVideoContract.validate(model: model, params: params)
+        let isMultiAngle = model == VideoModelCapabilities.multiAngleID
+        if isMultiAngle, params.startFrameURL == nil { throw ToolError("Multi-Angle requires a starting image.") }
         var body: [String: Any] = [
             "model": model,
             "prompt": params.prompt,
         ]
+        if isMultiAngle, params.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body.removeValue(forKey: "prompt")
+        }
+        if let trajectory = params.cameraTrajectory {
+            body["camera_trajectory"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(trajectory))
+        }
         if supportsVideoDuration(params.duration, model: catalogModel) {
             body["duration"] = "\(max(1, params.duration))s"
         }
@@ -172,7 +201,7 @@ enum VeniceGenerationRunner {
            supports(resolution, allowed: catalogModel?.resolutions, knownModel: catalogModel != nil) {
             body["resolution"] = resolution
         }
-        if supports(params.aspectRatio, allowed: catalogModel?.aspectRatios, knownModel: catalogModel != nil) {
+        if !MiniMaxVideoContract.inheritsAspect(model), supports(params.aspectRatio, allowed: catalogModel?.aspectRatios, knownModel: catalogModel != nil) {
             body["aspect_ratio"] = params.aspectRatio
         }
         if catalogModel?.supportsFirstFrame ?? true, let startFrame = params.startFrameURL {
@@ -193,7 +222,7 @@ enum VeniceGenerationRunner {
         if (catalogModel?.maxReferenceAudios ?? 1) > 0, let audioURL = params.referenceAudioURLs.first {
             body["audio_url"] = audioURL
         }
-        if catalogModel?.audioConfigurable == true { body["audio"] = params.generateAudio }
+        if !MiniMaxVideoContract.lanes.contains(model), catalogModel?.audioConfigurable == true { body["audio"] = params.generateAudio }
         // Negative prompt (e.g. the rule-33 audio suppression on dialogue shots),
         // only on families the API accepts it on — never risk a queue rejection.
         if let negative = params.negativePrompt, !negative.isEmpty,
@@ -217,14 +246,7 @@ enum VeniceGenerationRunner {
             ]
         }
 
-        let queued = try await api.postJSON(path: "video/queue", body: body, forModel: model)
-        guard let queueId = queued["queue_id"] as? String else {
-            throw VeniceAPI.VeniceError.decode("missing queue_id")
-        }
-        let downloadURL = queued["download_url"] as? String
-        onQueue?(queueId, downloadURL)
-
-        return [try await pollVideo(queueId: queueId, model: model, downloadURL: downloadURL, api: api)]
+        return body
     }
 
     /// Polls `/video/retrieve` until the video is ready, returning a downloadable URL.

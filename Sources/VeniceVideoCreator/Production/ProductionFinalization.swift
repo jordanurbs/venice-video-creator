@@ -35,7 +35,7 @@ extension ProductionOrchestrator {
         guard let editor, let placements = operation.attempts.last?.finalization?.placements,
               placements.count == operation.destinations.count else { return false }
         return placements.allSatisfy { shotId, placement in
-            guard editor.shot(id: shotId)?.placement == placement else { return false }
+            guard editor.shot(id: shotId)?.placement?.destinationBinding == placement.destinationBinding else { return false }
             return ([placement.videoClipId] + placement.linkedAudioClipIds).allSatisfy { editor.clipFor(id: $0)?.mediaRef == placement.assetId }
         }
     }

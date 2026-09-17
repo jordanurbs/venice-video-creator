@@ -659,6 +659,14 @@ extension EditorViewModel {
     private func applyShotPlan(_ plan: ShotPlan, actionName: String) {
         let previous = mediaManifest.shotPlan
         var plan = plan
+        let beforeTimeline = timeline
+        var mixedTimeline = timeline
+        if undoManager?.isUndoing != true, undoManager?.isRedoing != true {
+            do { try applyNativeAudioPolicyChanges(from: previous, to: &plan, timeline: &mixedTimeline) }
+            catch { editorToast = MediaPanelToast(message: error.localizedDescription); return }
+        }
+        undoManager?.beginUndoGrouping()
+        defer { undoManager?.setActionName(actionName); undoManager?.endUndoGrouping() }
         for index in plan.shots.indices {
             let shot = plan.shots[index]
             let replacedPanel = previous?.shot(id: shot.id)?.storyboardAssetId != shot.storyboardAssetId
@@ -674,6 +682,7 @@ extension EditorViewModel {
             }
         }
         mediaManifest.shotPlan = plan
+        timeline = mixedTimeline
         undoManager?.registerUndo(withTarget: self) { vm in
             if let previous {
                 vm.applyShotPlan(previous, actionName: actionName)
@@ -682,6 +691,10 @@ extension EditorViewModel {
             }
         }
         undoManager?.setActionName(actionName)
+        if mixedTimeline != beforeTimeline {
+            registerTimelineSwap(undoState: beforeTimeline, redoState: mixedTimeline, actionName: actionName)
+            notifyTimelineChanged()
+        }
         // Mirror a human-readable version into the Documents library (upserted by name).
         saveDocument(name: Self.shotPlanDocumentName, content: plan.markdown())
         onProjectContentChanged?()

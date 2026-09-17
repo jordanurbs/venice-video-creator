@@ -343,10 +343,10 @@ final class ProductionAudioCoordinator {
                 guard record.ownsDucking, baseline == nil || baseline?.volumeTrack == clip.volumeTrack else { continue }
                 let relative = windows.filter { $0.upperBound > clip.startFrame && $0.lowerBound < clip.endFrame }
                     .map { max(0, $0.lowerBound - clip.startFrame)...min(clip.durationFrames, $0.upperBound - clip.startFrame) }
-                let points = DialogueScheduler.duckKeyframes(windows: relative, baseVolume: clip.volume, duckVolume: clip.volume * 0.25,
+                let points = DialogueScheduler.duckKeyframes(windows: relative, baseVolume: 1, duckVolume: 0.25,
                                                             rampFrames: max(1, secondsToFrame(seconds: 0.3, fps: timeline.fps)), clipFrames: clip.durationFrames)
                 var track = KeyframeTrack<Double>()
-                for point in points { track.upsert(Keyframe(frame: point.frame, value: point.value, interpolationOut: .linear)) }
+                for point in points { track.upsert(Keyframe(frame: point.frame, value: VolumeScale.dbFromLinear(point.value), interpolationOut: .linear)) }
                 clip.volumeTrack = track
                 timeline.tracks[ti].clips[ci] = clip
             }

@@ -131,7 +131,8 @@ struct ProductionAudioTests {
         let bedClipId = try #require(o.operation(bed)?.clipId)
         let clip = try #require(h.editor.clipFor(id: bedClipId))
         #expect(clip.durationFrames == 300 && clip.trimEndFrame == 300)
-        #expect(clip.volumeTrack?.keyframes.contains { $0.frame == 60 && $0.value == 0.25 } == true)
+        #expect(abs(clip.volumeAt(frame: 30) - 0.25) < 0.000001)
+        #expect(abs(clip.volumeAt(frame: 150) - 1) < 0.000001)
         #expect(o.operation(bed)?.clipId != o.operation(ambient)?.clipId)
         #expect(h.editor.timeline.totalFrames == 300)
     }

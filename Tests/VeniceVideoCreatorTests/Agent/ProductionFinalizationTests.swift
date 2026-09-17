@@ -56,6 +56,7 @@ struct ProductionFinalizationTests {
         #expect(evidence.reviews.count == 3)
         #expect(evidence.placements.count == 3)
         #expect(h.editor.timeline.tracks.flatMap(\.clips).count == 6)
+        h.editor.mutateShotPlan(actionName: "Mute placed native audio") { $0.shots[0].nativeAudio = .mute }
         let timeline = h.editor.timeline
         _ = try await h.runOK("resume_production", args: ["operationId": shortId])
         #expect(h.editor.timeline == timeline)

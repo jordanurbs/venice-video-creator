@@ -13,6 +13,13 @@ struct ShotPlacement: Codable, Sendable, Equatable {
     var productionUnitId: String?
     // Assigned source window; subsequent manual trims remain on the bound clips.
     var sourceRange: ShotSourceRange
+    var nativeAudioMix: NativeAudioMix?
+
+    var destinationBinding: ShotPlacement {
+        var binding = self
+        binding.nativeAudioMix = nil
+        return binding
+    }
 }
 
 extension EditorViewModel {
@@ -100,7 +107,8 @@ extension EditorViewModel {
         }
         undoManager?.enableUndoRegistration()
         let take = shot.takes.last { $0.videoAssetId == asset.id }
-        let placement = makeProductionPlacement(clip: clipFor(id: clipId)!, take: take, sourceRange: range)
+        var placement = makeProductionPlacement(clip: clipFor(id: clipId)!, take: take, sourceRange: range)
+        placement.nativeAudioMix = nativeAudioMix(for: placement, policy: shot.nativeAudio, previous: previous?.nativeAudioMix)
         registerTimelineSwap(undoState: before, redoState: timeline, actionName: actionName)
         mutateShotPlan(actionName: actionName) { plan in
             guard let index = plan.shots.firstIndex(where: { $0.id == shotId }) else { return }

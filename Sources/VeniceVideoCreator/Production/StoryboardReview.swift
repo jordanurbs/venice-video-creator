@@ -44,6 +44,7 @@ enum StoryboardReviewGate {
         settings.videoAssetId = nil
         settings.placement = nil
         settings.activeProductionOperationId = nil
+        settings.nativeAudio = .keep
         settings.takes = []
         settings.qaSummary = nil
         settings.failureReason = nil

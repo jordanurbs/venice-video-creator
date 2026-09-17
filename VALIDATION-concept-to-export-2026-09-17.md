@@ -1,7 +1,7 @@
 # Concept-to-export implementation validation
 
 Date: 2026-09-17
-Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c`, native fixture `d9f2975`, placement bindings `f3542fb`, operation lifecycle `d0b4bc9`, and shared video finalization `8d3e3e8` committed. Durable audio identity and measured finishing compiled and regression-tested. Native control acceptance remains unverified. Not E2E-ready.
+Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c`, native fixture `d9f2975`, placement bindings `f3542fb`, operation lifecycle `d0b4bc9`, shared video finalization `8d3e3e8`, and durable audio `9c91687` committed. Linked native mix restoration and decibel-correct ducking compiled and regression-tested. Native control acceptance remains unverified. Not E2E-ready.
 
 ## Permissions and spending
 
@@ -45,7 +45,7 @@ Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c
 
 ## Next slice and open gates
 
-1. Phase 4 continuation: shared reconciliation after manual/agent trim, move, picture retake/reorder, and FPS/cut changes; linked native-audio keep/duck/mute restoration; explicit legacy audio adoption. Durable audio attempts and live/recovered measured finishing are implemented below. Completed-placement resume currently verifies identity/saves without continuously reflowing later timeline edits.
+1. Phase 4 continuation: shared reconciliation after manual/agent trim, move, picture retake/reorder, and FPS/cut changes; explicit legacy audio adoption. Durable audio attempts, live/recovered measured finishing, and linked native-audio keep/duck/mute are implemented below. Completed-placement resume currently verifies identity/saves without continuously reflowing later timeline edits.
 2. Finish Phase 1 native verification of all six camera controls, unsupported-camera clear path, approval controls, inspector/retake/save-reopen, and 1080P budget presentation. The fixture rendered, but its background window on another Space exposes only menu-bar accessibility elements. Do not change the user's foreground app/Space to bypass this limitation.
 3. Finish Phase 2 placement ownership: selection preview source windows, manually split descendants, arbitrary source replacement, and keep/duck/mute restoration. Exact retake/reset/dialogue addressing and linked replacement/reorder are covered below; these do not establish full production recovery.
 4. Phases 3–5 remain open: revisioned QA/approval and dependency invalidation, attempt/quote ledger and stricter decoded-output validation, idempotent measured audio and exact-speech ownership, readiness, retained export jobs and verified immutable delivery.
@@ -68,6 +68,19 @@ Placement identity is committed as `f3542fb`, `fix(production): persist exact sh
 Operation lifecycle is committed as `d0b4bc9`, `fix(production): persist attempts and guard cancelled operations` (16 files), with the unrelated bitrate block excluded.
 
 Shared video finalization is committed as `8d3e3e8`, `feat(production): finalize retained takes with per-beat review` (17 files), with the unrelated bitrate block excluded.
+
+Durable audio is committed as `9c91687`, `fix(production): retain audio attempts and finish measured takes` (18 files), with the unrelated bitrate block excluded.
+
+## Native mix and playback ducking correction
+
+- Found a playback-level defect in both the older ducking helper and the new audio finisher: `Clip.volumeTrack` stores decibels and `volumeAt(frame:)` multiplies its converted gain by static volume. Writing linear `1` / `0.25` values slightly boosted the bed instead of attenuating it. Both writers now convert unit-relative gains to dB and apply static clip gain only once. The prior keyframe-value-only audio assertion has been replaced with actual `volumeAt` assertions.
+- Added `Production/NativeAudioMix.swift` and optional `ShotPlacement.nativeAudioMix`. Base/applied scalar volumes are retained per exact picture/audio clip ID. Policy transitions affect that pair; authored dB curves, fades, timing, and source trims remain intact. A manual volume adjustment after a policy application becomes the preserved mix for subsequent restoration. Muted retakes and manifest reopen keep restoration state.
+- Shared `applyShotPlan` preflights and applies native mix changes atomically with the plan and one undo group. Agent plan save/update preflight propagates actionable errors; native failures toast without mutating plan/timeline. The inspector labels this control “Native mix.” Missing/detached referenced clips require reconciliation; a legacy placement with no audio binding can restore sound from its known audio-bearing video if no competing audio is present.
+- Mix-only changes no longer affect storyboard settings identity; `ProductionOperation` compares destination bindings without the mix snapshot. Existing reviews created with a non-keep mix under the older fingerprint may require reapproval. Genuine destination/range edits retain their existing guard behavior.
+- Added eight `NativeAudioMixTests`: exact shared-asset pair changes, playback gain and authored envelopes, one-step tool undo/redo, manual adjustments, detached/missing refusal, source-window restoration, muted retake/manifest reopen, and review/destination identity. The generic bed helper is tested with static gain `0.4`, spoken gain `0.1`, and restored non-speech gain `0.4`.
+- `swift test --filter 'NativeAudioMixTests|ProductionAudioTests|ProductionOperationTests|ShotPlacementTests|StoryboardApprovalTests'`: **60 tests / five suites passed** (0.186s tests, 23.09s build). `swift test`: **1,145 tests / 174 suites passed** (1.952s tests), same seven skips. Full output: `/Users/venetian42069/.local/share/opencode/tool-output/tool_0b158b195001KxlQAuJuvSVJx6`. `git diff --check` passed. No paid/provider calls, native launch, or foreground changes.
+- Final review also updated the already-placed video integrity check to ignore only native mix metadata, so changing mix does not block repeat finalization. Extended the grouped-finalization regression accordingly. `swift test --filter 'NativeAudioMixTests|ProductionFinalizationTests|ProductionAudioTests'` passed **40 tests / three suites**; final full run passed **1,145 tests / 174 suites** (1.811s, same seven skips). Final combined output: `/Users/venetian42069/.local/share/opencode/tool-output/tool_0b15dbceb001wK7wL28PmLMoRG`.
+- Remaining: shared reflow/ducking reconciliation after arbitrary timeline edits, including native speech window changes; old automatic-envelope migration; explicit legacy VO/bed adoption; native UI interaction and real queue/crash acceptance; exact speech, readiness and verified export. Passing scalar playback math is not a rendered end-to-end listening test.
 
 ## Durable audio identity and measured finishing
 

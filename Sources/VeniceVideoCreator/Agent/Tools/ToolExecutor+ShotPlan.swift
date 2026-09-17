@@ -41,6 +41,7 @@ extension ToolExecutor {
         // / imageModelSupportsSeed) — recording the seed here is harmless.
         if plan.seed == nil { plan.seed = editor.shotPlan?.seed }
         if plan.seed == nil { plan.seed = Int.random(in: 1...1_000_000_000) }
+        try editor.validateNativeAudioPolicyChanges(plan)
         let saved = editor.saveShotPlan(plan)
         var body = Self.summary(of: saved)
         if let warning = Self.stillPromptWarning(saved.shots) {
@@ -457,6 +458,7 @@ extension EditorViewModel {
     func mutateShotPlanThrowing(actionName: String, _ mutate: (inout ShotPlan) throws -> Void) throws -> ShotPlan {
         var plan = mediaManifest.shotPlan ?? ShotPlan()
         try mutate(&plan)
+        try validateNativeAudioPolicyChanges(plan)
         return mutateShotPlan(actionName: actionName) { $0 = plan }
     }
 }

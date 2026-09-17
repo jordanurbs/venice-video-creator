@@ -107,12 +107,12 @@ extension EditorViewModel {
         let relative = windows.map { max(0, $0.lowerBound - bedStart)...max(0, $0.upperBound - bedStart) }
         let ramp = max(1, secondsToFrame(seconds: rampSeconds, fps: timeline.fps))
         let points = DialogueScheduler.duckKeyframes(
-            windows: relative, baseVolume: bed.volume, duckVolume: duckVolume,
+            windows: relative, baseVolume: 1, duckVolume: duckVolume,
             rampFrames: ramp, clipFrames: bedFrames
         )
         guard points.count > 1 else { return }
         var track = KeyframeTrack<Double>()
-        for p in points { track.upsert(Keyframe(frame: p.frame, value: p.value, interpolationOut: .linear)) }
+        for p in points { track.upsert(Keyframe(frame: p.frame, value: VolumeScale.dbFromLinear(p.value), interpolationOut: .linear)) }
         commitClipProperty(clipId: bedClipId) { $0.volumeTrack = track }
     }
 

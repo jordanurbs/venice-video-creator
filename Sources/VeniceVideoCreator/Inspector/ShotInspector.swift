@@ -734,7 +734,7 @@ extension ShotInspector {
                     }
                 }
             }
-            labeledRow("Mix on placement") {
+            labeledRow("Native mix") {
                 picker(ShotNativeAudio.allCases, selected: shot.nativeAudio, label: { $0.rawValue }) { v in
                     update("Edit Shot Audio") { s in s.nativeAudio = v }
                 }

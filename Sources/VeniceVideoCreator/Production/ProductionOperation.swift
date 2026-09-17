@@ -75,7 +75,7 @@ extension EditorViewModel {
             guard let shot = plan.shot(id: destination.shotId), shot.activeProductionOperationId == id,
                   try StoryboardReviewGate.settingsDigest(shot: shot, plan: plan) == destination.settingsDigest,
                   try requireApprovedStoryboard(for: shot, plan: plan) == destination.storyboardRevision,
-                  try productionPlacement(for: shot) == destination.placement else {
+                  try productionPlacement(for: shot)?.destinationBinding == destination.placement?.destinationBinding else {
                 throw ToolError("The shot or its destination changed during production. Start a new operation for the current revision.")
             }
         }

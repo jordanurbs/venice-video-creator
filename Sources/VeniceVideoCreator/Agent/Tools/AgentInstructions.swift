@@ -110,8 +110,12 @@ enum AgentInstructions {
           timeline XML and mode=venice for a self-contained .venice package. If the user did \
           not name a destination, omit outputPath; the export writes a unique project-named file \
           to ~/Downloads. Provide outputPath only when the user named a destination. \
-          video renders in the background, tell the user it is rendering and that they'll get \
-          a notification when it finishes. xml and venice finish inline, so report their result directly.
+          video returns a retained jobId and revision. Call wait_for_export until terminal, \
+          or export_status for progress. Only completed means decoded output was verified and \
+          published; report its path, revision and remaining warnings. Failed, cancelled, \
+          interrupted or timed-out jobs are not delivered movies. Never re-export just to poll. \
+          cancel_export stops a job; cancelling a wait does not. History saves with the project. \
+          xml and venice finish inline, so report their result directly.
 
         # Generation
         - Costs real money and is not undoable. Propose the prompt, model, duration, and \

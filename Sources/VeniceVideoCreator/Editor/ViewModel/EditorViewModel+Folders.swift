@@ -204,9 +204,11 @@ extension EditorViewModel {
         timeline = snapshot.timeline
         let operations = mediaManifest.productionOperations
         let audioOperations = mediaManifest.productionAudioOperations
+        let exportJobs = mediaManifest.videoExportJobs
         mediaManifest = snapshot.mediaManifest
         mediaManifest.productionOperations = operations
         mediaManifest.productionAudioOperations = audioOperations
+        mediaManifest.videoExportJobs = exportJobs
         mediaAssets = snapshot.mediaAssets
         selectedClipIds = snapshot.selectedClipIds
         selectedMediaAssetIds = snapshot.selectedMediaAssetIds

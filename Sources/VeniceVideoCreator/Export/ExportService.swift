@@ -6,12 +6,14 @@ enum ExportError: LocalizedError {
     case unsupportedPreset
     case invalidFormat
     case xmlEncodingFailed
+    case verification(String)
 
     var errorDescription: String? {
         switch self {
         case .unsupportedPreset: "Export preset not supported on this system"
         case .invalidFormat: "Invalid export format"
         case .xmlEncodingFailed: "Couldn't encode the timeline as XML"
+        case .verification(let reason): reason
         }
     }
 }
@@ -328,6 +330,7 @@ final class ExportService {
         error = nil
         defer { isExporting = false }
         do {
+            try await requireSourceCoverage(timeline: timeline, resolver: resolver)
             let renderSize = resolution.renderSize(for: CGSize(width: timeline.width, height: timeline.height))
             let result = try await CompositionBuilder.build(
                 timeline: timeline,
@@ -335,6 +338,7 @@ final class ExportService {
                 missingMediaRefs: missingMediaRefs,
                 renderSize: renderSize
             )
+            try await requireCompleteComposition(result, timeline: timeline)
             try? FileManager.default.removeItem(at: outputURL)
             Log.export.notice("hdr export start size=\(Int(renderSize.width))x\(Int(renderSize.height)) url=\(Log.ref(outputURL))")
             let inputs = HDRVideoExporter.Inputs(
@@ -383,6 +387,7 @@ final class ExportService {
         resolution: ExportResolution,
         missingMediaRefs: Set<String>
     ) async throws -> (session: AVAssetExportSession, result: CompositionResult, renderSize: CGSize) {
+        try await requireSourceCoverage(timeline: timeline, resolver: resolver)
         let timelineCanvas = CGSize(width: timeline.width, height: timeline.height)
         let renderSize = resolution.renderSize(for: timelineCanvas)
         let mediaURLs = resolver.expectedURLMap()
@@ -393,6 +398,7 @@ final class ExportService {
             missingMediaRefs: missingMediaRefs,
             renderSize: renderSize
         )
+        try await requireCompleteComposition(result, timeline: timeline)
 
         let presetName = exportPresetName(format: format, resolution: resolution)
         guard let session = AVAssetExportSession(asset: result.composition, presetName: presetName) else {
@@ -401,6 +407,55 @@ final class ExportService {
         session.audioMix = result.audioMix
         session.videoComposition = result.videoComposition
         return (session, result, renderSize)
+    }
+
+    private func requireSourceCoverage(timeline: Timeline, resolver: MediaResolver) async throws {
+        var ranges: [String: CMTimeRange] = [:]
+        for track in timeline.tracks {
+            for clip in track.clips where clip.mediaType == .video || clip.mediaType == .audio {
+                try Task.checkCancellation()
+                let key = "\(clip.mediaRef):\(track.type)"
+                if ranges[key] == nil {
+                    guard let url = resolver.resolveURL(for: clip.mediaRef),
+                          let source = try await AVURLAsset(url: url).loadTracks(withMediaType: track.type == .audio ? .audio : .video).first else {
+                        throw ExportError.verification("Relink or replace the source for clip \(clip.id).")
+                    }
+                    ranges[key] = try await source.load(.timeRange)
+                }
+                let start = Double(clip.trimStartFrame) / Double(timeline.fps)
+                let end = start + Double(clip.durationFrames) * clip.speed / Double(timeline.fps)
+                let tolerance = 1 / Double(timeline.fps) + 0.000001
+                guard let range = ranges[key], range.start.seconds.isFinite, range.end.seconds.isFinite,
+                      start + tolerance >= range.start.seconds, end <= range.end.seconds + tolerance else {
+                    throw ExportError.verification("The source track does not cover clip \(clip.id)'s edited range.")
+                }
+            }
+        }
+    }
+
+    private func requireCompleteComposition(_ result: CompositionResult, timeline: Timeline) async throws {
+        guard result.offlineMediaRefs.isEmpty, result.unprocessableMediaRefs.isEmpty else {
+            throw ExportError.verification("Relink or replace media that could not be included in the export.")
+        }
+        var coverage: [String: [CMTimeRange]] = [:]
+        for mapping in result.trackMappings {
+            guard case .timeline(_, let ids) = mapping.kind, let ids else { continue }
+            let ranges = try await mapping.compositionTrack.load(.segments).filter { !$0.isEmpty }.map { $0.timeMapping.target }
+            for id in ids { coverage[id, default: []].append(contentsOf: ranges) }
+        }
+        for clip in timeline.tracks.flatMap(\.clips) where clip.mediaType != .text {
+            var cursor = Double(clip.startFrame) / Double(timeline.fps)
+            let end = Double(clip.endFrame) / Double(timeline.fps)
+            let tolerance = 1 / Double(timeline.fps) + 0.000001
+            for range in (coverage[clip.id] ?? []).sorted(by: { $0.start < $1.start }) {
+                if range.end.seconds < cursor { continue }
+                if range.start.seconds > cursor + tolerance { break }
+                cursor = max(cursor, range.end.seconds)
+            }
+            guard coverage[clip.id] != nil, cursor + tolerance >= end else {
+                throw ExportError.verification("Clip \(clip.id) could not be included for its full edited range.")
+            }
+        }
     }
 
     // MARK: - Export preset mapping

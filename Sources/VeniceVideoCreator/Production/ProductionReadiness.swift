@@ -28,6 +28,8 @@ struct VideoExportSnapshot {
     let resolver: MediaResolver
     let readiness: ProductionReadiness
     let revision: String
+    let sourceURLs: [String: URL]
+    let sourceDigests: [String: String]
 }
 
 extension EditorViewModel {
@@ -47,6 +49,11 @@ extension EditorViewModel {
         var video: [ProductionStatus.OperationSummary]
         var audio: [ProductionStatus.AudioSummary]
         var audioLayouts: [ProductionAudioCoordinator.LayoutState]
+    }
+
+    private struct ExportContentRevision: Encodable {
+        var readiness: String
+        var sources: [String: String]
     }
 
     func videoExportRevision() throws -> String {
@@ -228,6 +235,29 @@ extension EditorViewModel {
         try Task.checkCancellation()
         guard readiness.canExport, let revision = readiness.revision else { throw ToolError(readiness.blockingMessage) }
         guard try videoExportRevision() == revision else { throw ToolError("The project changed after readiness checks. Check the current revision again.") }
-        return VideoExportSnapshot(timeline: timeline, manifest: mediaManifest, resolver: mediaResolver.snapshot(), readiness: readiness, revision: revision)
+        let frozenTimeline = timeline
+        let manifest = mediaManifest
+        let resolver = mediaResolver.snapshot()
+        let refs = Set(frozenTimeline.tracks.flatMap(\.clips).filter { $0.mediaType != .text }.map(\.mediaRef))
+        var urls = ExportFiles.lutSources(in: frozenTimeline)
+        for ref in refs {
+            guard let url = resolver.resolveURL(for: ref) else { throw ToolError("Relink missing media before exporting.") }
+            urls[ref] = url
+        }
+        let digests = try await ExportFiles.digests(urls)
+        try Task.checkCancellation()
+        guard try videoExportRevision() == revision else { throw ToolError("The project changed while capturing export inputs. Check readiness again.") }
+        let currentOperations = Set(manifest.shotPlan?.shots.compactMap(\.activeProductionOperationId) ?? [])
+        for operation in manifest.productionOperations where currentOperations.contains(operation.id) && operation.stage == .placed {
+            if let evidence = operation.attempts.last?.finalization, let hash = digests[evidence.assetId], hash != evidence.contentDigest {
+                throw ToolError("Video bytes changed after validation. Review the current take before exporting.")
+            }
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let inputRevision = SHA256.hash(data: try encoder.encode(ExportContentRevision(readiness: revision, sources: digests)))
+            .map { String(format: "%02x", $0) }.joined()
+        return VideoExportSnapshot(timeline: frozenTimeline, manifest: manifest, resolver: resolver, readiness: readiness,
+                                   revision: inputRevision, sourceURLs: urls, sourceDigests: digests)
     }
 }

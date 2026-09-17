@@ -21,6 +21,9 @@ enum ToolName: String, CaseIterable, Sendable {
     case updateText = "update_text"
     case addCaptions = "add_captions"
     case exportProject = "export_project"
+    case exportStatus = "export_status"
+    case waitForExport = "wait_for_export"
+    case cancelExport = "cancel_export"
     case generateVideo = "generate_video"
     case generateImage = "generate_image"
     case generateAudio = "generate_audio"
@@ -536,7 +539,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .exportProject,
-            description: "Exports from the current project using the same modes as the Export dialog. mode defaults to video. video renders H.264, H.265, or ProRes; xml writes XMEML timeline XML; fcpxml writes FCPXML; venice writes a self-contained .venice project package. For timeline interchange, pick the format by the target editor: Premiere Pro -> xml; DaVinci Resolve or Final Cut Pro -> fcpxml (fcpxml also carries text, transforms, crop, opacity, and keyframes that xml cannot). Omit outputPath to write a unique file to ~/Downloads. If outputPath already exists the call fails; pass overwrite=true only when replacing the file is explicitly intended. video renders in the background and returns status=started with the destination path; the app posts a system notification on completion or failure, so do not expect a final result inline. xml, fcpxml, and venice finish before returning and report their result inline.",
+            description: "Exports from the current project using the same modes as the Export dialog. mode defaults to video. video renders H.264, H.265, or ProRes; xml writes XMEML timeline XML; fcpxml writes FCPXML; venice writes a self-contained .venice project package. For timeline interchange, pick the format by the target editor: Premiere Pro -> xml; DaVinci Resolve or Final Cut Pro -> fcpxml. Omit outputPath to write a unique file to ~/Downloads. Pass overwrite=true only when replacing a file is explicitly intended. Video runs shared readiness, captures source hashes, and returns a retained jobId and revision. Call wait_for_export for the terminal result; only completed means the decoded artifact was verified and published. Job history saves with the project. xml, fcpxml, and venice finish inline as working-project transfers.",
             inputSchema: objectSchema(
                 properties: [
                     "mode": ["type": "string", "enum": ["video", "xml", "fcpxml", "venice"], "description": "Optional. Default video. Use xml for Premiere Pro, fcpxml for DaVinci Resolve or Final Cut Pro."],
@@ -548,6 +551,24 @@ enum ToolDefinitions {
                     "includeAIHistory": ["type": "boolean", "description": "venice mode only. Optional, default false. When true the package carries agent chat conversations, generation prompts, and the generation activity log. Leave false when sharing the project so private AI history stays behind."],
                 ]
             )
+        ),
+        AgentTool(
+            name: .exportStatus,
+            description: "Read retained video export status, revision, destination, warnings, errors, and verified artifact facts. Omit jobId to list the latest 50 jobs. Completed is historical verification at publication; it does not revalidate later external changes to the output.",
+            inputSchema: objectSchema(properties: ["jobId": ["type": "string", "description": "Full export job ID."]])
+        ),
+        AgentTool(
+            name: .waitForExport,
+            description: "Wait for a retained video export to finish, fail, or be cancelled/interrupted. Returns current status on timeout; repeat waiting, never start another export just to poll. Cancelling this wait does not cancel rendering. Only completed certifies decoded output at publication; preserve warnings about semantic/speech review.",
+            inputSchema: objectSchema(properties: [
+                "jobId": ["type": "string", "description": "Full export job ID."],
+                "timeoutSeconds": ["type": "number", "description": "0–300 seconds; default 120."],
+            ], required: ["jobId"])
+        ),
+        AgentTool(
+            name: .cancelExport,
+            description: "Cancel a retained video export. An existing destination stays intact until verified publication. Query or wait for its terminal cancellation result.",
+            inputSchema: objectSchema(properties: ["jobId": ["type": "string", "description": "Full export job ID."]], required: ["jobId"])
         ),
         AgentTool(
             name: .generateVideo,

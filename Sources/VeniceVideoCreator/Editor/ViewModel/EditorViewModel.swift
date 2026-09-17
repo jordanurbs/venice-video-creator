@@ -153,6 +153,7 @@ final class EditorViewModel {
     let agentService = AgentService()
     let productionOrchestrator = ProductionOrchestrator()
     let productionAudioCoordinator = ProductionAudioCoordinator()
+    let videoExportJobs = VideoExportJobs()
 
     var agentPanelVisible: Bool = {
         UserDefaults.standard.object(forKey: "agentPanelVisible") as? Bool ?? false
@@ -227,6 +228,7 @@ final class EditorViewModel {
         agentService.editor = self
         productionOrchestrator.editor = self
         productionAudioCoordinator.editor = self
+        videoExportJobs.editor = self
         searchIndex.assetsProvider = { [weak self] in self?.mediaAssets ?? [] }
 
         // Re-check media presence when the app regains focus: a user may have

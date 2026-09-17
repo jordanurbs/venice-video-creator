@@ -39,6 +39,12 @@ enum LUTLoader {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var cache: [String: (mtime: Date, lut: CubeLUT)] = [:]
 
+    static func removeCached(paths: [String]) {
+        lock.lock()
+        defer { lock.unlock() }
+        for path in paths { cache[path] = nil }
+    }
+
     static func load(path: String) -> CubeLUT? {
         let mtime = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date)
             .flatMap { $0 } ?? .distantPast

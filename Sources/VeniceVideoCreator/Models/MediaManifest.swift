@@ -9,6 +9,7 @@ struct MediaManifest: Codable, Sendable, Equatable {
     var shotPlan: ShotPlan?
     var productionOperations: [ProductionOperation] = []
     var productionAudioOperations: [ProductionAudioOperation] = []
+    var videoExportJobs: [VideoExportJob] = []
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -19,11 +20,12 @@ struct MediaManifest: Codable, Sendable, Equatable {
         shotPlan = try c.decodeIfPresent(ShotPlan.self, forKey: .shotPlan)
         productionOperations = try c.decodeIfPresent([ProductionOperation].self, forKey: .productionOperations) ?? []
         productionAudioOperations = try c.decodeIfPresent([ProductionAudioOperation].self, forKey: .productionAudioOperations) ?? []
+        videoExportJobs = try c.decodeIfPresent([VideoExportJob].self, forKey: .videoExportJobs) ?? []
     }
 
     init() {}
 
-    private enum CodingKeys: String, CodingKey { case version, entries, folders, documents, shotPlan, productionOperations, productionAudioOperations }
+    private enum CodingKeys: String, CodingKey { case version, entries, folders, documents, shotPlan, productionOperations, productionAudioOperations, videoExportJobs }
 }
 
 /// A markdown document authored in the project (scripts, storyboards, shot lists).

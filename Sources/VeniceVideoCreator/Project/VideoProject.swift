@@ -358,6 +358,7 @@ final class VideoProject: NSDocument {
         editorViewModel.generationService.detachAll()
         editorViewModel.productionOrchestrator.detachAll()
         editorViewModel.productionAudioCoordinator.detachAll()
+        editorViewModel.videoExportJobs.detachAll()
         editorViewModel.onProjectCheckpointRequired = nil
         editorViewModel.persistProductionState = nil
         editorViewModel.onProjectContentChanged = nil
@@ -404,6 +405,7 @@ final class VideoProject: NSDocument {
 
         if let manifest = loadedManifest {
             editorViewModel.mediaManifest = manifest
+            editorViewModel.videoExportJobs.restore()
             loadedManifest = nil
             restoreAssetsFromManifest()
         }

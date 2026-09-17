@@ -65,6 +65,16 @@ struct ExportView: View {
     @State private var includeAIHistory = false
     @State private var isCheckingReadiness = false
     @State private var exportTask: Task<Void, Never>?
+    @State private var exportJobId: String?
+
+    private var exportJob: VideoExportJob? { exportJobId.flatMap { try? editor.videoExportJobs.record($0) } }
+    private var isExporting: Bool { service.isExporting || exportJob?.status.isTerminal == false }
+
+    private func cancelExport() {
+        exportTask?.cancel()
+        if let exportJobId { try? editor.videoExportJobs.cancel(exportJobId) }
+        service.cancel()
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -82,9 +92,8 @@ struct ExportView: View {
         // Esc mirrors the Cancel button: cancel an in-progress export (stop, discard the
         // partial file, show "Export cancelled"); otherwise dismiss the sheet.
         .onExitCommand {
-            if service.isExporting || isCheckingReadiness {
-                exportTask?.cancel()
-                service.cancel()
+            if isExporting || isCheckingReadiness {
+                cancelExport()
             } else {
                 editor.showExportDialog = false
             }
@@ -93,8 +102,7 @@ struct ExportView: View {
         // which would leave the detached export rendering with an orphaned partial file.
         // Cancelling on disappear guarantees a mid-export dismissal aborts and cleans up.
         .onDisappear {
-            exportTask?.cancel()
-            if service.isExporting { service.cancel() }
+            cancelExport()
         }
     }
 
@@ -130,7 +138,7 @@ struct ExportView: View {
                     }
                 }
 
-                if service.isExporting {
+                if isExporting {
                     VStack(spacing: AppTheme.Spacing.xs) {
                         if service.isWaitingForSlot {
                             HStack(spacing: AppTheme.Spacing.sm) {
@@ -143,7 +151,7 @@ struct ExportView: View {
                         } else {
                             ProgressView(value: service.progress)
                                 .progressViewStyle(.linear)
-                            Text("\(Int(service.progress * 100))%")
+                            Text(exportJob.map { $0.status.rawValue.capitalized } ?? "\(Int(service.progress * 100))%")
                                 .font(.system(size: AppTheme.FontSize.xs))
                                 .monospacedDigit()
                                 .foregroundStyle(AppTheme.Text.secondaryColor)
@@ -365,10 +373,9 @@ struct ExportView: View {
 
             Spacer()
 
-            Button(service.isExporting ? "Cancel Export" : "Cancel") {
-                if service.isExporting || isCheckingReadiness {
-                    exportTask?.cancel()
-                    service.cancel()
+            Button(isExporting ? "Cancel Export" : "Cancel") {
+                if isExporting || isCheckingReadiness {
+                    cancelExport()
                 } else {
                     editor.showExportDialog = false
                 }
@@ -376,7 +383,7 @@ struct ExportView: View {
             Button(isCheckingReadiness ? "Checking…" : "Export") { startExport() }
                 .buttonStyle(.glassProminent)
                 .buttonBorderShape(.capsule)
-                .disabled(service.isExporting || isCheckingReadiness)
+                .disabled(isExporting || isCheckingReadiness)
                 .keyboardShortcut(.defaultAction)
         }
         .padding(.horizontal, AppTheme.Spacing.xl)
@@ -542,6 +549,7 @@ struct ExportView: View {
         service.error = nil
         let format = exportFormat
         let isVideo = destination == .video
+        let requestedResolution = resolution
         let panel = NSSavePanel()
         let contentType: UTType = switch format {
         case .xml:
@@ -571,16 +579,22 @@ struct ExportView: View {
                     isCheckingReadiness = false
                 } else { snapshot = nil }
                 guard !Task.isCancelled else { return }
-                await service.export(
-                    timeline: snapshot?.timeline ?? editor.timeline,
-                    resolver: snapshot?.resolver ?? editor.mediaResolver.snapshot(),
-                    format: format,
-                    resolution: resolution,
-                    fcpxmlVersion: fcpxmlVersion,
-                    fcpxmlTarget: fcpxmlTarget,
-                    missingMediaRefs: snapshot == nil ? editor.missingMediaRefs : [],
-                    outputURL: url
-                )
+                if let snapshot {
+                    do {
+                        let job = try editor.videoExportJobs.start(snapshot: snapshot, format: format, resolution: requestedResolution,
+                                                                  outputURL: url, overwrite: true, service: service)
+                        exportJobId = job.id
+                        let result = try await editor.videoExportJobs.wait(job.id)
+                        if result.status != .completed { service.error = result.error ?? "Export did not complete" }
+                    } catch {
+                        service.error = Task.isCancelled ? "Export cancelled" : error.localizedDescription
+                        return
+                    }
+                } else {
+                    await service.export(timeline: editor.timeline, resolver: editor.mediaResolver.snapshot(), format: format,
+                                         resolution: requestedResolution, fcpxmlVersion: fcpxmlVersion, fcpxmlTarget: fcpxmlTarget,
+                                         missingMediaRefs: editor.missingMediaRefs, outputURL: url)
+                }
                 if let error = service.error {
                     // Long renders often finish in the background; cancels stay quiet.
                     if !NSApp.isActive, error != "Export cancelled" {

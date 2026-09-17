@@ -34,7 +34,7 @@ extension ToolExecutor {
             guard editor.timeline.totalFrames > 0 else {
                 throw ToolError("export_project: timeline is empty")
             }
-            return try await exportVideo(editor, format: format, resolution: resolution, outputURL: outputURL)
+            return try await exportVideo(editor, format: format, resolution: resolution, outputURL: outputURL, overwrite: overwrite)
         case .xml:
             return try await exportXML(editor, outputURL: outputURL)
         case .fcpxml:
@@ -57,58 +57,29 @@ extension ToolExecutor {
         _ editor: EditorViewModel,
         format: ExportFormat,
         resolution: ExportResolution,
-        outputURL: URL
+        outputURL: URL,
+        overwrite: Bool
     ) async throws -> ToolResult {
         guard !ExportCoordinator.isExportActive else { throw ToolError("export_project: Another export is already in progress.") }
         let snapshot = try await editor.prepareVideoExport()
-        guard ExportCoordinator.beginExportIfIdle() else {
-            throw ToolError("export_project: Another export is already in progress.")
+        let job = try editor.videoExportJobs.start(snapshot: snapshot, format: format, resolution: resolution,
+                                                  outputURL: outputURL, overwrite: overwrite, notify: true)
+        return .ok(String(decoding: try JSONEncoder().encode(editor.videoExportJobs.summary(job.id)), as: UTF8.self))
+    }
+
+    func exportJobStatus(_ editor: EditorViewModel, _ args: [String: Any], wait: Bool = false, cancel: Bool = false) async throws -> ToolResult {
+        let input: ExportJobArgs = try decodeToolArgs(args, path: wait ? "wait_for_export" : cancel ? "cancel_export" : "export_status")
+        guard wait || input.timeoutSeconds == nil else { throw ToolError("timeoutSeconds only applies to wait_for_export.") }
+        let timeout = input.timeoutSeconds ?? 120
+        guard timeout.isFinite, timeout >= 0, timeout <= 300 else { throw ToolError("timeoutSeconds must be between 0 and 300.") }
+        if let id = input.jobId {
+            if cancel { try editor.videoExportJobs.cancel(id) }
+            if wait { _ = try await editor.videoExportJobs.wait(id, timeout: .seconds(timeout)) }
+            return .ok(String(decoding: try JSONEncoder().encode(editor.videoExportJobs.summary(id)), as: UTF8.self))
         }
-
-        let timeline = snapshot.timeline
-        let resolver = snapshot.resolver
-        let warnings = snapshot.readiness.issues.filter { $0.severity == .warning }.map(\.message)
-        let name = outputURL.lastPathComponent
-
-        Task { @MainActor in
-            defer { ExportCoordinator.endExport() }
-            let service = ExportService()
-            await service.export(
-                timeline: timeline,
-                resolver: resolver,
-                format: format,
-                resolution: resolution,
-                missingMediaRefs: [],
-                outputURL: outputURL,
-                acquireSlot: false
-            )
-            if let error = service.error {
-                AppNotifications.exportFailed(name: name, reason: error)
-            } else {
-                let report = service.lastReport
-                let warningCount = (report?.offlineMediaRefs.count ?? 0) + (report?.unprocessableMediaRefs.count ?? 0) + warnings.count
-                AppNotifications.exportComplete(
-                    name: name,
-                    outputURL: outputURL,
-                    size: report?.outputSize,
-                    warningCount: warningCount
-                )
-            }
-        }
-
-        return try jsonResult([
-            "status": "started",
-            "mode": ExportProjectMode.video.rawValue,
-            "path": outputURL.path,
-            "codec": format.displayName,
-            "resolution": resolution.rawValue,
-            "durationFrames": timeline.totalFrames,
-            "durationSeconds": Double(timeline.totalFrames) / Double(max(1, timeline.fps)),
-            "fps": timeline.fps,
-            "revision": snapshot.revision,
-            "warnings": warnings,
-            "note": "Rendering in the background. A system notification will report completion or failure.",
-        ])
+        guard !wait, !cancel else { throw ToolError("jobId is required.") }
+        let jobs = try editor.mediaManifest.videoExportJobs.suffix(50).map { try editor.videoExportJobs.summary($0.id) }
+        return .ok(String(decoding: try JSONEncoder().encode(jobs), as: UTF8.self))
     }
 
     private func exportXML(_ editor: EditorViewModel, outputURL: URL) async throws -> ToolResult {
@@ -302,6 +273,12 @@ private struct ExportProjectArgs: DecodableToolArgs {
     var overwrite: Bool?
     var fcpxmlTarget: String?
     var includeAIHistory: Bool?
+}
+
+private struct ExportJobArgs: DecodableToolArgs {
+    static let allowedKeys: Set<String> = ["jobId", "timeoutSeconds"]
+    var jobId: String?
+    var timeoutSeconds: Double?
 }
 
 private enum ExportProjectMode: String {

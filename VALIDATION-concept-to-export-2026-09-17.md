@@ -1,7 +1,7 @@
 # Concept-to-export implementation validation
 
 Date: 2026-09-17
-Status: routing `c36247d`, catalog/1080P `fa3e067`, and storyboard approval `563608c` committed. Native fixture package round trip and launch verified; native control acceptance remains blocked. Not E2E-ready.
+Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c`, and native fixture `d9f2975` committed. Durable placement bindings compiled and regression-tested. Native control acceptance remains blocked. Not E2E-ready.
 
 ## Permissions and spending
 
@@ -45,9 +45,9 @@ Status: routing `c36247d`, catalog/1080P `fa3e067`, and storyboard approval `563
 
 ## Next slice and open gates
 
-1. Retain the validated native fixture and evidence in a separate commit, excluding the unrelated Seedance bitrate block. Routing `c36247d`, catalog/1080P `fa3e067`, and storyboard approval `563608c` commits exist.
+1. Phase 2 continuation: persist operation/line IDs and placeholders before asynchronous waits, then reconcile live/recovered completion through one finalizer. Current placement identity is durable, but operation identity and callback lifetime are not.
 2. Finish Phase 1 native verification of all six camera controls, unsupported-camera clear path, approval controls, inspector/retake/save-reopen, and 1080P budget presentation. The fixture rendered, but its background window on another Space exposes only menu-bar accessibility elements. Do not change the user's foreground app/Space to bypass this limitation.
-3. Phase 2: durable shot-to-clip/source-range/linked-audio bindings, stable pre-wait operation and line IDs, exactly-once live/recovered finalization. Replace asset-only retake/reset/dialogue lookup and linked-group mutation before claiming production recovery.
+3. Finish Phase 2 placement ownership: selection preview source windows, manually split descendants, arbitrary source replacement, and keep/duck/mute restoration. Exact retake/reset/dialogue addressing and linked replacement/reorder are covered below; these do not establish full production recovery.
 4. Phases 3–5 remain open: revisioned QA/approval and dependency invalidation, attempt/quote ledger and stricter decoded-output validation, idempotent measured audio and exact-speech ownership, readiness, retained export jobs and verified immutable delivery.
 5. Run the audit's valid-media 35–50s deterministic workflow and native manual-tweak acceptance before asking for a paid live budget. No exact-speech or live E2E claims until those lanes actually pass.
 
@@ -60,6 +60,8 @@ Historical attempt: staging using an explicit 47-file path list plus a related-o
 Prepared staging inputs (outside the repository): `/tmp/venice-concept-to-export-paths` and `/tmp/venice-concept-to-export-request.patch`. The request patch passed `git apply --check --cached` before the permission request; that check does not write the index. Reinspect/regenerate those inputs if the tree changes. They intentionally omit the Seedance bitrate hunk from the proposed commit while retaining it in the working tree.
 
 The first commit used 47 explicit whole-file paths and a refreshed request-builder patch; `git diff --cached --check` passed. The second catalog/1080P slice is committed as `fa3e067`, `fix(generation): guard catalog refreshes and budget 1080P attempts` (20 files), after staged-diff inspection. Storyboard approval is committed as `563608c`, `feat(production): bind storyboard approval to reviewed revisions` (20 files). Each commit excluded the unchanged Seedance bitrate block.
+
+Native fixture/evidence is committed as `d9f2975`, `test(production): add native camera project fixture` (three files), with only the unrelated bitrate block left unstaged afterward.
 
 ## Catalog/1080P follow-up validation
 
@@ -98,6 +100,21 @@ The first commit used 47 explicit whole-file paths and a refreshed request-build
 - App PID `12301`, fixture window `8800`, title `concept-to-export-native`: package restored one asset without missing media; screenshot showed the image and timeline. Screenshot: `/var/folders/sw/rpnndcqn6nlcdtbknm36s0fh0000gn/T/opencode/native-camera-initial.png`. Launch OSLog: `/Users/venetian42069/.local/share/opencode/tool-output/tool_0b0514370001L41uiJbwgWT00c`.
 - Native interaction remains blocked: the fixture window was on Space `1`, while the current Space was `154`; `on_current_space=false`, `is_on_screen=false`. `get_window_state` exposed only 17 menu-bar AX elements. No camera/approval/budget control interaction, undo, retake, or native save/reopen was completed. The user's foreground app/Space was preserved.
 - Launch performed normal free catalog/capability requests. No paid generation, fresh live lane probe, or verified live model availability is claimed. This small package is not the dated 35–50s integration film.
+
+## Durable placement validation
+
+- Added `Production/ShotPlacement.swift`: persisted video clip ID, linked native-audio clip IDs, asset ID, optional take/unit IDs, and assigned source window. Current manual trims/speed remain authoritative on the bound clips. `Shot` and `ShotTake` decode older packages with nil placement/range/unit fields. Placement metadata is excluded from storyboard settings fingerprints and preserved by agent plan resaves.
+- Retakes, resets, dialogue start-frame lookup, and recovery use exact clip identity. A removed bound clip cannot silently adopt another use of its asset. Unique legacy shot/clip matches can be persisted on reopen; shared/ambiguous legacy matches fail with a reconciliation action. `update_shots` accepts `placedClipId`, including the shortened IDs returned by `get_timeline`, and rejects a clip already bound to another shot.
+- Replacement preserves pair IDs, timeline position, edited source offsets/duration/speed, fades, and mix; insufficient replacement coverage fails before mutation. The selected `videoAssetId` changes with placement rather than when a candidate take is recorded. Grouped takes retain their per-beat source ranges and a shared unit ID; grouped placement rolls back fully on failure and supports one-operation undo/redo.
+- Reset resolves all requested shots before modifying anything, removes the intended bound pair, retains deliberately unlinked audio, and restores plan/timeline together on undo. Native reset errors are surfaced as a toast; tool resets return errors instead of claiming success. Reordering uses exact clip IDs and moves linked partners; it rejects conflicting shared link groups and new overlaps with manual picture/audio edits.
+- Recovery reuses an existing exact placement and rejects missing grouped legacy source ranges. Recovering watchers check the current shot/asset identity before acting. A local H.264 package round trip retains shared source ranges/clip IDs and repeated recovery does not duplicate already-bound clips. This does not validate reopen during upload/generation/download/QA or stale callbacks across cancellation/new runs.
+- Added 12 regressions in `Tests/VeniceVideoCreatorTests/Agent/ShotPlacementTests.swift`: shared-asset middle reset/retake, pair edits and undo/redo, reversed completion and dialogue positions, explicit/ambiguous/shortened legacy binding, missing clip protection, too-short retake rejection, detached audio retention, manual audio collision, atomic grouped replacement, old decoding/resave, and actual package reopen. Most are metadata-level editor/dispatcher tests; the package case generates and probes a real local H.264 fixture.
+- First package test exposed a fixture metadata mismatch: `MediaAsset` defaulted to audio-present for the silent fixture. The fixture now loads its actual audio tracks before placement. A later test tuple expression exceeded Swift's type-check limit; split and typed the expression. Both were corrected before successful final runs.
+- `swift test --filter 'ShotPlacementTests|ProductionRoutingTests|ProductionStatusTests|StoryboardApprovalTests'`: passed, 30 tests in four suites (0.198s tests, 4.80s incremental build).
+- `swift test`: passed, reported 1,093 tests in 170 suites (1.805s tests, 2.03s incremental build). Same seven skips as native fixture validation. Combined output: `/Users/venetian42069/.local/share/opencode/tool-output/tool_0b06f3b5d001RNwB29K3G7qExF`.
+- Final source review added `placedClipId` to the input prefix resolver and changed the repair regression to pass the actual short ID. `swift test --filter 'ShotPlacementTests|ShortIdTests'`: passed, 18 tests in two suites (0.176s tests, 10.85s build), after that change. No paid/API/native interactions in this slice.
+- Remaining: pre-wait durable operation/line identities and job stages; exactly-once finalization with validation/QA; cancellation/restart callbacks; split-descendant and selection-preview ownership; keep/duck/mute restoration; revisioned take/range QA; measured idempotent audio; retained verified export. Group unit IDs here are assigned when recording a completed take, not durable pre-submission operation IDs.
+- Related paths: `Production/{ShotPlacement,ShotPlan,ProductionOrchestrator,StoryboardReview}.swift`, `Editor/ViewModel/EditorViewModel+{GeneratedClips,ShotPlan}.swift`, `Agent/Tools/{ToolDefinitions,ToolExecutor+ShotPlan,ToolExecutor+ProduceAudio,ToolExecutor+ShortId}.swift`, the new tests, and both dated progress records. The unrelated `VeniceGeneration.swift` bitrate block remains excluded.
 
 ## Changed-file inventory
 

@@ -401,39 +401,35 @@ extension EditorViewModel {
     /// The prompt/summary/blocking are untouched — this resets production,
     /// not planning.
     func resetShot(id: String) {
-        guard let shot = shotPlan?.shot(id: id) else { return }
-        undoManager?.beginUndoGrouping()
-        // Remove the clip backing this shot from the timeline (placed runs).
-        if let assetId = shot.videoAssetId, let clipId = productionClipId(forAsset: assetId) {
-            removeClips(ids: [clipId], prune: true)
-        }
-        mutateShotPlan(actionName: "Start Shot Over") { plan in
-            guard let idx = plan.shots.firstIndex(where: { $0.id == id }) else { return }
-            plan.shots[idx].videoAssetId = nil
-            plan.shots[idx].storyboardAssetId = nil
-            plan.shots[idx].takes = []
-            plan.shots[idx].qaSummary = nil
-            plan.shots[idx].failureReason = nil
-            plan.shots[idx].status = .planned
-        }
-        undoManager?.setActionName("Start Shot Over")
-        undoManager?.endUndoGrouping()
+        do { try resetProductionShots(ids: [id]) }
+        catch { editorToast = MediaPanelToast(message: error.localizedDescription) }
     }
 
     /// Start-over for the whole production: every shot back to `planned` in
     /// one undoable step. Library assets are kept.
     func resetAllShots() {
-        guard let plan = shotPlan, !plan.shots.isEmpty else { return }
-        undoManager?.beginUndoGrouping()
-        let clipIds = plan.shots
-            .compactMap(\.videoAssetId)
-            .compactMap { productionClipId(forAsset: $0) }
-        if !clipIds.isEmpty {
-            removeClips(ids: Set(clipIds), prune: true)
+        do { try resetProductionShots(ids: shotPlan?.shots.map(\.id) ?? []) }
+        catch { editorToast = MediaPanelToast(message: error.localizedDescription) }
+    }
+
+    func resetProductionShots(ids: [String]) throws {
+        guard let plan = shotPlan, !ids.isEmpty else { return }
+        guard !productionOrchestrator.isRunning else { throw ToolError("Stop production before resetting shots.") }
+        var clipIds = Set<String>()
+        for id in ids {
+            guard let shot = plan.shot(id: id) else { throw ToolError("Shot not found: \(id)") }
+            clipIds.formUnion(try productionClipIdsForReset(shot))
         }
-        mutateShotPlan(actionName: "Start Production Over") { plan in
-            for idx in plan.shots.indices {
+        let actionName = ids.count == 1 ? "Start Shot Over" : "Start Shots Over"
+        undoManager?.beginUndoGrouping()
+        defer { undoManager?.setActionName(actionName); undoManager?.endUndoGrouping() }
+        if !clipIds.isEmpty {
+            removeClips(ids: clipIds, prune: true)
+        }
+        mutateShotPlan(actionName: actionName) { plan in
+            for idx in plan.shots.indices where ids.contains(plan.shots[idx].id) {
                 plan.shots[idx].videoAssetId = nil
+                plan.shots[idx].placement = nil
                 plan.shots[idx].storyboardAssetId = nil
                 plan.shots[idx].takes = []
                 plan.shots[idx].qaSummary = nil
@@ -441,8 +437,6 @@ extension EditorViewModel {
                 plan.shots[idx].status = .planned
             }
         }
-        undoManager?.setActionName("Start Production Over")
-        undoManager?.endUndoGrouping()
     }
 
     /// Scrubs deleted media-asset ids out of the shot plan so cast/location
@@ -496,6 +490,7 @@ extension EditorViewModel {
                 }
                 if let video = plan.shots[i].videoAssetId, ids.contains(video) {
                     plan.shots[i].videoAssetId = nil
+                    plan.shots[i].placement = nil
                 }
             }
         }
@@ -626,6 +621,39 @@ extension EditorViewModel {
     }
 
     // MARK: - Internal apply + undo + mirror
+
+    func placeProductionUnit(asset: MediaAsset, segments: [(shotId: String, sourceRange: ShotSourceRange)]) throws {
+        guard let beforePlan = shotPlan else { throw ToolError("No shot plan yet.") }
+        guard !segments.isEmpty, Set(segments.map(\.shotId)).count == segments.count else {
+            throw ToolError("Production unit requires unique shot IDs.")
+        }
+        let beforeTimeline = timeline
+        undoManager?.disableUndoRegistration()
+        do {
+            for segment in segments {
+                let range = segment.sourceRange
+                guard range.startSeconds.isFinite, range.endSeconds.isFinite, range.endSeconds > range.startSeconds else {
+                    throw ToolError("Production unit has an invalid source range.")
+                }
+                try placeProductionShot(asset: asset, shotId: segment.shotId,
+                                        sourceSegment: range.startSeconds...range.endSeconds,
+                                        actionName: "Place Multi-Shot")
+            }
+        } catch {
+            timeline = beforeTimeline
+            applyShotPlan(beforePlan, actionName: "Place Multi-Shot")
+            undoManager?.enableUndoRegistration()
+            notifyTimelineChanged()
+            throw error
+        }
+        let afterPlan = shotPlan!
+        undoManager?.enableUndoRegistration()
+        undoManager?.beginUndoGrouping()
+        mediaManifest.shotPlan = beforePlan
+        applyShotPlan(afterPlan, actionName: "Place Multi-Shot")
+        registerTimelineSwap(undoState: beforeTimeline, redoState: timeline, actionName: "Place Multi-Shot")
+        undoManager?.endUndoGrouping()
+    }
 
     private func applyShotPlan(_ plan: ShotPlan, actionName: String) {
         let previous = mediaManifest.shotPlan

@@ -104,19 +104,17 @@ final class ProductionOrchestrator {
     /// places it on completion. Does not auto-resume the loop — the user restarts it from
     /// the panel/agent.
     func resume(editor: EditorViewModel) {
+        editor.reconcileLegacyProductionPlacements()
         guard let plan = editor.shotPlan else { return }
         for shot in plan.shots {
             guard shot.status == .generating || shot.status == .qa else { continue }
-            guard let assetId = shot.videoAssetId,
+            guard let assetId = shot.takes.last?.videoAssetId ?? shot.videoAssetId,
                   let asset = editor.mediaAssets.first(where: { $0.id == assetId }) else {
                 failShot(shot.id, reason: "Generation was interrupted before it could be recovered. Regenerate the shot.")
                 continue
             }
             if ToolExecutor.isReady(asset, editor: editor) {
-                if editor.productionClipId(forAsset: assetId) == nil {
-                    _ = editor.placeProductionShotClip(asset: asset, actionName: "Place Shot")
-                }
-                editor.setShotStatus(id: shot.id, .placed)
+                recoverPlacement(shotId: shot.id, asset: asset, editor: editor)
             } else if asset.isGenerating || asset.isRecoveringGeneration {
                 watchAndPlace(shotId: shot.id, assetId: assetId)
             } else {
@@ -130,15 +128,14 @@ final class ProductionOrchestrator {
     private func watchAndPlace(shotId: String, assetId: String) {
         Task { @MainActor [weak self] in
             while let self, let editor = self.editor {
+                guard let shot = editor.shot(id: shotId), shot.status == .generating || shot.status == .qa,
+                      (shot.takes.last?.videoAssetId ?? shot.videoAssetId) == assetId else { return }
                 guard let asset = editor.mediaAssets.first(where: { $0.id == assetId }) else {
                     self.failShot(shotId, reason: "Generated asset disappeared. Regenerate the shot.")
                     return
                 }
                 if ToolExecutor.isReady(asset, editor: editor) {
-                    if editor.productionClipId(forAsset: assetId) == nil {
-                        _ = editor.placeProductionShotClip(asset: asset, actionName: "Place Shot")
-                    }
-                    editor.setShotStatus(id: shotId, .placed)
+                    self.recoverPlacement(shotId: shotId, asset: asset, editor: editor)
                     return
                 }
                 if !asset.isGenerating && !asset.isRecoveringGeneration {
@@ -152,6 +149,30 @@ final class ProductionOrchestrator {
     }
 
     // MARK: - Controls
+
+    private func recoverPlacement(shotId: String, asset: MediaAsset, editor: EditorViewModel) {
+        guard let shot = editor.shot(id: shotId) else { return }
+        do {
+            if shot.placement?.assetId == asset.id, try editor.productionClip(for: shot) != nil {
+                editor.setShotStatus(id: shotId, .placed)
+                return
+            }
+            let take = shot.takes.last { $0.videoAssetId == asset.id }
+            let shared = editor.shotPlan?.shots.filter { ($0.takes.last?.videoAssetId ?? $0.videoAssetId) == asset.id }.count ?? 0
+            guard shared <= 1 || take?.sourceRange != nil else {
+                throw ToolError("Shared legacy take has no per-shot source range. Bind each beat's timeline clip before recovery.")
+            }
+            let segment: ClosedRange<Double>?
+            if let range = take?.sourceRange {
+                guard range.startSeconds.isFinite, range.endSeconds.isFinite, range.endSeconds > range.startSeconds else {
+                    throw ToolError("Recovered shot has an invalid source range. Reconcile its placement before recovery.")
+                }
+                segment = range.startSeconds...range.endSeconds
+            } else { segment = nil }
+            try editor.placeProductionShot(asset: asset, shotId: shotId, sourceSegment: segment)
+            editor.reorderProductionClipsToPlanOrder()
+        } catch { failShot(shotId, reason: error.localizedDescription) }
+    }
 
     func pause() { isPaused = true }
     func unpause() { isPaused = false }
@@ -208,7 +229,10 @@ final class ProductionOrchestrator {
         }
 
         do {
-            for shot in orderedShots { _ = try editor.requireApprovedStoryboard(for: shot, plan: plan) }
+            for shot in orderedShots {
+                _ = try editor.productionClip(for: shot)
+                _ = try editor.requireApprovedStoryboard(for: shot, plan: plan)
+            }
         } catch {
             lastError = error.localizedDescription
             postNotice(lastError!)
@@ -501,8 +525,13 @@ final class ProductionOrchestrator {
                 }
             }
 
-            // Record the shared take on every shot in the window.
-            for shot in window { recordTake(shotId: shot.id, asset: asset, model: route.model.id) }
+            let segments: [ShotSourceRange]
+            do { segments = try unitSourceRanges(window: window, asset: asset) }
+            catch { lastFailure = error.localizedDescription; break }
+            let unitId = UUID().uuidString
+            for (shot, segment) in zip(window, segments) {
+                recordTake(shotId: shot.id, asset: asset, model: route.model.id, unitId: unitId, sourceRange: segment)
+            }
 
             if options.autoQA, let firstId = window.first?.id {
                 if let result = await runAutoQA(shotId: firstId, asset: asset, plan: plan) {
@@ -514,7 +543,8 @@ final class ProductionOrchestrator {
                 }
             }
 
-            placeUnitClips(window: window, asset: asset, editor: editor)
+            do { try placeUnitClips(window: window, segments: segments, asset: asset, editor: editor) }
+            catch { lastFailure = error.localizedDescription; break }
             editor.reorderProductionClipsToPlanOrder()
             if let quoted { runningUSD += quoted }
             postNotice("Placed \(label) on the timeline as \(window.count) clips from one take.")
@@ -527,28 +557,23 @@ final class ProductionOrchestrator {
     /// Splits the unit's single video into per-shot timeline clips at the
     /// planned beat boundaries. The last shot absorbs any surplus (ladder
     /// snapping can make the render longer than the planned sum).
-    private func placeUnitClips(window: [Shot], asset: MediaAsset, editor: EditorViewModel) {
-        let plannedTotal = window.reduce(0.0) { $0 + $1.durationSeconds }
-        let actual = asset.duration > 0 ? asset.duration : plannedTotal
+    private func unitSourceRanges(window: [Shot], asset: MediaAsset) throws -> [ShotSourceRange] {
+        let actual = asset.duration
+        guard actual.isFinite, actual > 0 else { throw ToolError("Generated take has no measured duration.") }
+        var ranges: [ShotSourceRange] = []
         var cursor = 0.0
         for (index, shot) in window.enumerated() {
             let isLast = index == window.count - 1
             let end = isLast ? actual : min(actual, cursor + shot.durationSeconds)
-            let segment = cursor...max(cursor + 0.1, end)
-            let clipId = editor.placeProductionUnitClip(
-                asset: asset,
-                sourceSegment: segment,
-                actionName: "Place Multi-Shot"
-            )
-            if let clipId, ShotPromptBuilder.placedClipVolume(for: shot) < 1.0,
-               let loc = editor.findClip(id: clipId) {
-                editor.timeline.tracks[loc.trackIndex].clips[loc.clipIndex].volume =
-                    ShotPromptBuilder.placedClipVolume(for: shot)
-                editor.notifyTimelineChanged()
-            }
-            editor.setShotStatus(id: shot.id, .placed)
+            guard end > cursor else { throw ToolError("Generated take does not cover every grouped shot.") }
+            ranges.append(.init(startSeconds: cursor, endSeconds: end))
             cursor = end
         }
+        return ranges
+    }
+
+    private func placeUnitClips(window: [Shot], segments: [ShotSourceRange], asset: MediaAsset, editor: EditorViewModel) throws {
+        try editor.placeProductionUnit(asset: asset, segments: zip(window, segments).map { (shotId: $0.id, sourceRange: $1) })
     }
 
     /// Routes a grouped window: pure reference mode on a reference-capable
@@ -678,9 +703,8 @@ final class ProductionOrchestrator {
             return
         }
 
-        // Clip currently backing this shot (non-nil only when regenerating) — captured before
-        // recordTake rewrites the shot's videoAssetId, so we can replace it in place.
-        let existingClipId = shot.videoAssetId.flatMap { editor.productionClipId(forAsset: $0) }
+        do { _ = try editor.productionClip(for: shot) }
+        catch { failShot(shotId, reason: error.localizedDescription); return }
 
         editor.setShotStatus(id: shotId, .generating)
         let quoted = await VeniceAPI.fromKeychain()?.videoQuote(
@@ -757,7 +781,6 @@ final class ProductionOrchestrator {
                 }
             }
 
-            // Record the take + link the asset to the shot.
             recordTake(shotId: shotId, asset: asset, model: route.model.id)
 
             // Optional auto-QA: a hard fail with retries left triggers another take.
@@ -771,7 +794,9 @@ final class ProductionOrchestrator {
                 }
             }
 
-            place(asset: asset, shotId: shotId, existingClipId: existingClipId, editor: editor)
+            do { try editor.placeProductionShot(asset: asset, shotId: shotId) }
+            catch { failShot(shotId, reason: error.localizedDescription); return }
+            editor.reorderProductionClipsToPlanOrder()
             if let quoted { runningUSD += quoted }
             postNotice("Placed \(label) on the timeline.")
             return
@@ -883,43 +908,21 @@ final class ProductionOrchestrator {
 
     // MARK: - Plan mutations
 
-    private func recordTake(shotId: String, asset: MediaAsset, model: String) {
+    private func recordTake(shotId: String, asset: MediaAsset, model: String, unitId: String? = nil, sourceRange: ShotSourceRange? = nil) {
         // The produced asset carries the fully-resolved submitted call (final
         // prompt, reference asset ids, negative prompt, seed) — snapshot it as the
         // take's replayable recipe (harness rule 39).
         let recipe = asset.generationInput
         editor?.mutateShotPlan(actionName: "Shot Take") { plan in
             guard let idx = plan.shots.firstIndex(where: { $0.id == shotId }) else { return }
-            plan.shots[idx].videoAssetId = asset.id
-            plan.shots[idx].takes.append(ShotTake(
+            var take = ShotTake(
                 videoAssetId: asset.id, model: model, recipe: recipe, seed: recipe?.seed
-            ))
+            )
+            take.productionUnitId = unitId
+            take.sourceRange = sourceRange
+            plan.shots[idx].takes.append(take)
             plan.shots[idx].failureReason = nil
         }
-    }
-
-    private func place(asset: MediaAsset, shotId: String, existingClipId: String?, editor: EditorViewModel) {
-        // Replace an existing placed clip in-place (regeneration), else append in shot order.
-        let clipId: String?
-        if let existingClipId {
-            editor.replaceClipMediaRef(clipId: existingClipId, newAssetId: asset.id, resetTrim: true)
-            clipId = existingClipId
-        } else {
-            clipId = editor.placeProductionShotClip(asset: asset, actionName: "Place Shot")?.clipId
-        }
-        // Audio is always generated; the shot's mix choice lands as clip volume
-        // (keep=1, duck=0.3, mute=0) — recoverable in the timeline, unlike a
-        // generation with no audio track.
-        if let clipId, let shot = editor.shotPlan?.shot(id: shotId) {
-            let volume = ShotPromptBuilder.placedClipVolume(for: shot)
-            if volume < 1.0, let loc = editor.findClip(id: clipId) {
-                editor.timeline.tracks[loc.trackIndex].clips[loc.clipIndex].volume = volume
-                editor.notifyTimelineChanged()
-            }
-        }
-        editor.setShotStatus(id: shotId, .placed)
-        // Parallel shots finish out of order; keep the edit in plan order.
-        editor.reorderProductionClipsToPlanOrder()
     }
 
     private func failShot(_ shotId: String, reason: String) {

@@ -164,6 +164,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
     var storyboardAssetId: String?
     var panelReview: StoryboardReview?
     var videoAssetId: String?
+    var placement: ShotPlacement?
     var takes: [ShotTake]
     var qaSummary: String?
     var failureReason: String?
@@ -227,7 +228,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         case cameraTrajectory
         case modelOverride, characterIds, locationIds, dialogue, blocking, allowMultiShot, nativeAudio, audioContent, status
         case audioReferenceAssetId, attachCastVoiceReference
-        case storyboardAssetId, panelReview, videoAssetId, takes, qaSummary, failureReason
+        case storyboardAssetId, panelReview, videoAssetId, placement, takes, qaSummary, failureReason
     }
 
     init(from decoder: Decoder) throws {
@@ -255,6 +256,7 @@ struct Shot: Codable, Sendable, Equatable, Identifiable {
         storyboardAssetId = try c.decodeIfPresent(String.self, forKey: .storyboardAssetId)
         panelReview = try c.decodeIfPresent(StoryboardReview.self, forKey: .panelReview)
         videoAssetId = try c.decodeIfPresent(String.self, forKey: .videoAssetId)
+        placement = try c.decodeIfPresent(ShotPlacement.self, forKey: .placement)
         takes = try c.decodeIfPresent([ShotTake].self, forKey: .takes) ?? []
         qaSummary = try c.decodeIfPresent(String.self, forKey: .qaSummary)
         failureReason = try c.decodeIfPresent(String.self, forKey: .failureReason)
@@ -370,6 +372,8 @@ struct ShotDialogue: Codable, Sendable, Equatable, Identifiable {
 struct ShotTake: Codable, Sendable, Equatable, Identifiable {
     let id: String
     var videoAssetId: String?
+    var productionUnitId: String?
+    var sourceRange: ShotSourceRange?
     var model: String?
     var createdAt: Date
     var note: String?
@@ -407,12 +411,14 @@ struct ShotTake: Codable, Sendable, Equatable, Identifiable {
         self.seed = seed
     }
 
-    private enum CodingKeys: String, CodingKey { case id, videoAssetId, model, createdAt, note, qaScore, qaSummary, recipe, seed }
+    private enum CodingKeys: String, CodingKey { case id, videoAssetId, productionUnitId, sourceRange, model, createdAt, note, qaScore, qaSummary, recipe, seed }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
         videoAssetId = try c.decodeIfPresent(String.self, forKey: .videoAssetId)
+        productionUnitId = try c.decodeIfPresent(String.self, forKey: .productionUnitId)
+        sourceRange = try c.decodeIfPresent(ShotSourceRange.self, forKey: .sourceRange)
         model = try c.decodeIfPresent(String.self, forKey: .model)
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         note = try c.decodeIfPresent(String.self, forKey: .note)

@@ -1081,6 +1081,7 @@ enum ToolDefinitions {
                                 "transition": ["type": "string", "enum": ShotTransition.allCases.map(\.rawValue)],
                                 "cameraTrajectory": cameraTrajectorySchema,
                                 "approveStoryboard": ["type": "boolean", "description": "Approve the current storyboard revision only after the user explicitly reviews it. Requires approvalReason; changing status alone does not approve a storyboard."],
+                                "placedClipId": ["type": "string", "description": "Explicitly bind this shot to a video clip from get_timeline to reconcile a legacy or changed placement. Required when a shared asset makes the beat ambiguous. Does not move clips or approve media; stop production first."],
                                 "approvalReason": ["type": "string", "description": "User's reason for accepting this storyboard, including any deliberate failed/unchecked QA override."],
                                 "modelOverride": ["type": "string"],
                                 "characterIds": ["type": "array", "items": ["type": "string"]],

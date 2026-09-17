@@ -123,56 +123,6 @@ extension EditorViewModel {
         return insertTrack(at: 0, type: .video)
     }
 
-    /// Appends a finished shot's video clip at the end of the production video track (in shot
-    /// order). Returns the clip id and start frame. Undoable as one swap.
-    @discardableResult
-    func placeProductionShotClip(asset: MediaAsset, actionName: String) -> (clipId: String, startFrame: Int)? {
-        let trackIdx = productionVideoTrackIndex()
-        guard timeline.tracks.indices.contains(trackIdx) else { return nil }
-        let startFrame = timeline.tracks[trackIdx].endFrame
-        let durationFrames = max(1, secondsToFrame(seconds: asset.duration, fps: timeline.fps))
-        let before = timeline
-        let ids = placeClip(
-            asset: asset,
-            trackIndex: trackIdx,
-            startFrame: startFrame,
-            durationFrames: durationFrames
-        )
-        guard let clipId = ids.first else { return nil }
-        registerTimelineSwap(undoState: before, redoState: timeline, actionName: actionName)
-        notifyTimelineChanged()
-        return (clipId, startFrame)
-    }
-
-    /// Appends one beat of a multi-shot unit's video at the end of the production
-    /// track: the clip shows only `sourceSegment` (source seconds) of the shared
-    /// asset, so one generated take fans out into per-shot clips. Undoable as
-    /// one swap per clip.
-    @discardableResult
-    func placeProductionUnitClip(
-        asset: MediaAsset,
-        sourceSegment: ClosedRange<Double>,
-        actionName: String
-    ) -> String? {
-        let trackIdx = productionVideoTrackIndex()
-        guard timeline.tracks.indices.contains(trackIdx) else { return nil }
-        let startFrame = timeline.tracks[trackIdx].endFrame
-        let visibleSeconds = max(0.1, sourceSegment.upperBound - sourceSegment.lowerBound)
-        let durationFrames = max(1, secondsToFrame(seconds: visibleSeconds, fps: timeline.fps))
-        let before = timeline
-        let ids = placeClip(
-            asset: asset,
-            trackIndex: trackIdx,
-            startFrame: startFrame,
-            durationFrames: durationFrames,
-            sourceSegment: sourceSegment
-        )
-        guard let clipId = ids.first else { return nil }
-        registerTimelineSwap(undoState: before, redoState: timeline, actionName: actionName)
-        notifyTimelineChanged()
-        return clipId
-    }
-
     /// Re-sorts the production track's shot clips into PLAN order and re-packs
     /// them back-to-back. With parallel production, shots finish (and get
     /// appended) out of order — S5 must not sit before S4 in the edit just
@@ -182,53 +132,77 @@ extension EditorViewModel {
         let trackIdx = productionVideoTrackIndex()
         guard timeline.tracks.indices.contains(trackIdx) else { return }
 
-        // Shot order index per video asset id (multi-shot units share an asset;
-        // their per-beat clips keep their relative order via stable sort).
-        var orderByAsset: [String: Int] = [:]
+        var orderByClip: [String: Int] = [:]
         for (i, shot) in plan.shots.enumerated() {
-            if let aid = shot.videoAssetId, orderByAsset[aid] == nil { orderByAsset[aid] = i }
+            do {
+                if let clip = try productionClip(for: shot) { orderByClip[clip.id] = i }
+            } catch {
+                editorToast = MediaPanelToast(message: error.localizedDescription)
+                return
+            }
         }
 
         let track = timeline.tracks[trackIdx]
-        let shotClips = track.clips.filter { orderByAsset[$0.mediaRef] != nil }
+        let shotClips = track.clips.filter { orderByClip[$0.id] != nil }.sorted { $0.startFrame < $1.startFrame }
         guard shotClips.count > 1 else { return }
 
         let sorted = shotClips.enumerated().sorted { a, b in
-            let oa = orderByAsset[a.element.mediaRef] ?? Int.max
-            let ob = orderByAsset[b.element.mediaRef] ?? Int.max
+            let oa = orderByClip[a.element.id] ?? Int.max
+            let ob = orderByClip[b.element.id] ?? Int.max
             return oa == ob ? a.offset < b.offset : oa < ob
         }.map(\.element)
         guard sorted.map(\.id) != shotClips.map(\.id) else { return }
 
         let before = timeline
-        undoManager?.disableUndoRegistration()
+        var after = timeline
         var cursor = shotClips.map(\.startFrame).min() ?? 0
         var repacked = sorted
+        var moves: [String: Int] = [:]
         for i in repacked.indices {
+            let delta = cursor - repacked[i].startFrame
+            let members = expandToLinkGroup([repacked[i].id])
+            for id in members {
+                if let previous = moves[id], previous != delta {
+                    editorToast = MediaPanelToast(message: "Unlink shots that share a clip group before reordering production.")
+                    return
+                }
+                moves[id] = delta
+            }
             repacked[i].startFrame = cursor
             cursor += repacked[i].durationFrames
         }
         let shotClipIds = Set(shotClips.map(\.id))
-        var newClips = timeline.tracks[trackIdx].clips.filter { !shotClipIds.contains($0.id) }
+        var newClips = track.clips.filter { !shotClipIds.contains($0.id) }
+        guard !newClips.contains(where: { manual in repacked.contains { $0.startFrame < manual.endFrame && manual.startFrame < $0.endFrame } }) else {
+            editorToast = MediaPanelToast(message: "Production reorder overlaps a manual clip. Move the clip before reordering shots.")
+            return
+        }
+        for ti in after.tracks.indices {
+            for ci in after.tracks[ti].clips.indices {
+                let clip = after.tracks[ti].clips[ci]
+                if let delta = moves[clip.id] {
+                    guard clip.startFrame + delta >= 0 else { return }
+                    after.tracks[ti].clips[ci].startFrame += delta
+                }
+            }
+            after.tracks[ti].clips.sort { $0.startFrame < $1.startFrame }
+        }
         newClips.append(contentsOf: repacked)
-        timeline.tracks[trackIdx].clips = newClips.sorted { $0.startFrame < $1.startFrame }
-        undoManager?.enableUndoRegistration()
-        registerTimelineSwap(undoState: before, redoState: timeline, actionName: "Reorder Shots")
-        notifyTimelineChanged()
-    }
-
-    /// Finds the timeline clip currently backed by `assetId` (a placed shot's video), if any.
-    /// `occurrence` disambiguates when one asset backs several clips (a multi-shot
-    /// unit's video fans out into per-beat clips): 0 = first clip in track order.
-    func productionClipId(forAsset assetId: String, occurrence: Int = 0) -> String? {
-        var matches: [String] = []
-        for track in timeline.tracks where track.type == .video {
-            for clip in track.clips where clip.mediaRef == assetId {
-                matches.append(clip.id)
+        after.tracks[trackIdx].clips = newClips.sorted { $0.startFrame < $1.startFrame }
+        for track in after.tracks where track.type == .audio {
+            for clip in track.clips where moves[clip.id] != nil {
+                for other in track.clips where other.id != clip.id && clip.startFrame < other.endFrame && other.startFrame < clip.endFrame {
+                    guard let oldClip = clipFor(id: clip.id), let oldOther = clipFor(id: other.id) else { continue }
+                    if oldClip.startFrame >= oldOther.endFrame || oldOther.startFrame >= oldClip.endFrame {
+                        editorToast = MediaPanelToast(message: "Production reorder overlaps an audio edit. Adjust the audio track before reordering shots.")
+                        return
+                    }
+                }
             }
         }
-        guard occurrence >= 0, occurrence < matches.count else { return matches.first }
-        return matches[occurrence]
+        timeline = after
+        registerTimelineSwap(undoState: before, redoState: timeline, actionName: "Reorder Shots")
+        notifyTimelineChanged()
     }
 
     private func findClipLocationByMediaRef(_ mediaRef: String) -> ClipLocation? {

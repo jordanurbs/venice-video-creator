@@ -31,6 +31,7 @@ extension ToolExecutor {
         // frame 0 (the exact anti-pattern-19 bug).
         let gapFrames = max(1, secondsToFrame(seconds: 0.12, fps: fps))
         let leadFrames = 0
+        let duckWindows = try dialogueDuckWindows(plan: plan, editor: editor, leadFrames: leadFrames, gapFrames: gapFrames)
 
         var dialogueClips: [[String: Any]] = []
         var beds: [[String: Any]] = []
@@ -54,7 +55,7 @@ extension ToolExecutor {
             var planned: [PlannedLine] = []
             for shot in targets {
                 guard !shot.dialogue.isEmpty else { continue }
-                guard let startFrame = shotStartFrame(shot, editor: editor) else {
+                guard let startFrame = try shotStartFrame(shot, editor: editor) else {
                     skippedUnplaced.append(shot.slug ?? shot.id)
                     continue
                 }
@@ -123,11 +124,6 @@ extension ToolExecutor {
             }
         }
 
-        // Dialogue duck windows (absolute frames) for any bed placed below —
-        // computed from the SAME schedule so beds duck exactly where lines sit,
-        // whether or not dialogue was (re)generated in this call.
-        let duckWindows = dialogueDuckWindows(plan: plan, editor: editor, leadFrames: leadFrames, gapFrames: gapFrames)
-
         // MARK: Music bed
         if wantMusic {
             let model = try defaultMusicModel(args.string("musicModel"))
@@ -164,11 +160,11 @@ extension ToolExecutor {
     /// lines regardless of whether they were generated this call.
     private func dialogueDuckWindows(
         plan: ShotPlan, editor: EditorViewModel, leadFrames: Int, gapFrames: Int
-    ) -> [ClosedRange<Int>] {
+    ) throws -> [ClosedRange<Int>] {
         let fps = editor.timeline.fps
         var lines: [DialogueScheduler.Line] = []
         for shot in plan.shots {
-            guard let start = shotStartFrame(shot, editor: editor) else { continue }
+            guard !shot.dialogue.isEmpty, let start = try shotStartFrame(shot, editor: editor) else { continue }
             for line in shot.dialogue where !line.text.trimmingCharacters(in: .whitespaces).isEmpty {
                 lines.append(DialogueScheduler.Line(
                     shotStartFrame: start,
@@ -224,11 +220,8 @@ extension ToolExecutor {
     /// when the shot has no placed clip yet. A shot without a position must NOT
     /// default to frame 0 — that piles every unplaced shot's dialogue at the
     /// head of the timeline (anti-pattern 19).
-    private func shotStartFrame(_ shot: Shot, editor: EditorViewModel) -> Int? {
-        guard let assetId = shot.videoAssetId,
-              let clipId = editor.productionClipId(forAsset: assetId),
-              let clip = editor.clipFor(id: clipId) else { return nil }
-        return clip.startFrame
+    func shotStartFrame(_ shot: Shot, editor: EditorViewModel) throws -> Int? {
+        try editor.productionClip(for: shot)?.startFrame
     }
 
     private func defaultTTSModel() throws -> AudioModelConfig {

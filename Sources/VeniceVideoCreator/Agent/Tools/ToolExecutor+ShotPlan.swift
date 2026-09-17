@@ -71,6 +71,14 @@ extension ToolExecutor {
         let updated = try editor.mutateShotPlanThrowing(actionName: "Update Shots") { plan in
             for (i, op) in ops.enumerated() {
                 try Self.apply(op, to: &plan, path: "operations[\(i)]")
+                if op["placedClipId"] != nil {
+                    guard !editor.productionOrchestrator.isRunning else { throw ToolError("Stop production before changing shot placements.") }
+                    let id = try op.requireString("id")
+                    guard let index = plan.shots.firstIndex(where: { $0.id == id }) else { throw ToolError("Shot not found: \(id)") }
+                    let placement = try editor.productionPlacement(for: plan.shots[index], clipId: op.requireString("placedClipId"), plan: plan)
+                    plan.shots[index].placement = placement
+                    plan.shots[index].videoAssetId = placement.assetId
+                }
                 if op.bool("approveStoryboard") == true {
                     let id = try op.requireString("id")
                     guard let index = plan.shots.firstIndex(where: { $0.id == id }) else { throw ToolError("Shot not found: \(id)") }
@@ -102,13 +110,7 @@ extension ToolExecutor {
         for id in shotIds where plan.shot(id: id) == nil {
             throw ToolError("Shot not found: \(id)")
         }
-        if shotIds.isEmpty {
-            editor.resetAllShots()
-        } else {
-            withUndoGroup(editor, actionName: "Start Shots Over") {
-                for id in shotIds { editor.resetShot(id: id) }
-            }
-        }
+        try editor.resetProductionShots(ids: shotIds.isEmpty ? plan.shots.map(\.id) : shotIds)
         let count = shotIds.isEmpty ? plan.shots.count : shotIds.count
         return .ok(Self.jsonString([
             "reset": count,
@@ -394,6 +396,7 @@ extension ToolExecutor {
             merged.storyboardAssetId = old.storyboardAssetId
             merged.panelReview = old.panelReview
             merged.videoAssetId = old.videoAssetId
+            merged.placement = old.placement
             merged.takes = old.takes
             merged.qaSummary = old.qaSummary
             merged.failureReason = old.failureReason

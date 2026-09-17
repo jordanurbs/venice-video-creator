@@ -42,6 +42,7 @@ enum StoryboardReviewGate {
         settings.panelReview = nil
         settings.status = .planned
         settings.videoAssetId = nil
+        settings.placement = nil
         settings.takes = []
         settings.qaSummary = nil
         settings.failureReason = nil

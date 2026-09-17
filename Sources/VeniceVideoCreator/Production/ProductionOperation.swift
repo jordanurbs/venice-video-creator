@@ -100,6 +100,7 @@ extension EditorViewModel {
     }
 
     func validateProductionAttempt(_ input: GenerationInput, placeholderId: String? = nil) throws {
+        try productionAudioCoordinator.validate(input, placeholderId: placeholderId)
         guard let operationId = input.productionOperationId else { return }
         let operation = try requireCurrentProductionOperation(operationId)
         guard let attemptId = input.productionAttemptId, operation.attempts.last?.id == attemptId else {
@@ -120,6 +121,7 @@ extension EditorViewModel {
     }
 
     func recordProductionJobMetadata(_ asset: MediaAsset) {
+        productionAudioCoordinator.record(asset)
         guard let input = asset.generationInput, let operationId = input.productionOperationId,
               let attemptId = input.productionAttemptId else { return }
         mutateProductionOperation(operationId) { operation in

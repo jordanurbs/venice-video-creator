@@ -8,6 +8,7 @@ struct MediaManifest: Codable, Sendable, Equatable {
     /// The agent/production shot plan for this project, if any (version 3+).
     var shotPlan: ShotPlan?
     var productionOperations: [ProductionOperation] = []
+    var productionAudioOperations: [ProductionAudioOperation] = []
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -17,11 +18,12 @@ struct MediaManifest: Codable, Sendable, Equatable {
         documents = try c.decodeIfPresent([ProjectDocument].self, forKey: .documents) ?? []
         shotPlan = try c.decodeIfPresent(ShotPlan.self, forKey: .shotPlan)
         productionOperations = try c.decodeIfPresent([ProductionOperation].self, forKey: .productionOperations) ?? []
+        productionAudioOperations = try c.decodeIfPresent([ProductionAudioOperation].self, forKey: .productionAudioOperations) ?? []
     }
 
     init() {}
 
-    private enum CodingKeys: String, CodingKey { case version, entries, folders, documents, shotPlan, productionOperations }
+    private enum CodingKeys: String, CodingKey { case version, entries, folders, documents, shotPlan, productionOperations, productionAudioOperations }
 }
 
 /// A markdown document authored in the project (scripts, storyboards, shot lists).
@@ -88,6 +90,7 @@ struct GenerationInput: Codable, Sendable, Equatable {
     var storyboardBindings: [StoryboardSubmissionBinding]?
     var productionOperationId: String?
     var productionAttemptId: String?
+    var productionAudioOperationId: String?
     /// Negative prompt (video): terms to suppress, e.g. the rule-33 audio
     /// suppression negative on dialogue shots. Only emitted to models that
     /// accept it (`VideoModelCapabilities.supportsNegativePrompt`).

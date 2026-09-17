@@ -357,6 +357,7 @@ final class VideoProject: NSDocument {
         isClosed = true
         editorViewModel.generationService.detachAll()
         editorViewModel.productionOrchestrator.detachAll()
+        editorViewModel.productionAudioCoordinator.detachAll()
         editorViewModel.onProjectCheckpointRequired = nil
         editorViewModel.persistProductionState = nil
         editorViewModel.onProjectContentChanged = nil
@@ -707,6 +708,7 @@ final class VideoProject: NSDocument {
         editorViewModel.reconcileShotPlanWithMediaLibrary()
         editorViewModel.generationService.resumePendingGenerations(editor: editorViewModel)
         editorViewModel.productionOrchestrator.resume(editor: editorViewModel)
+        editorViewModel.productionAudioCoordinator.resume()
         Log.project.notice(
             "restore ok restored=\(restored) missing=\(missing)",
             telemetry: "Media restored",

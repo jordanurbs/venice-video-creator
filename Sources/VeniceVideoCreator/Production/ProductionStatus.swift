@@ -14,6 +14,25 @@ struct ProductionStatus: Encodable {
     let lastError: String?
     var operationCount: Int = 0
     var operations: [OperationSummary] = []
+    var audioOperationCount: Int = 0
+    var audioOperations: [AudioSummary] = []
+
+    struct AudioSummary: Encodable {
+        let id: String
+        let key: ProductionAudioOperation.Key
+        let stage: ProductionAudioOperation.Stage
+        let clipId: String
+        let assetId: String?
+        let queueId: String?
+        let measuredSeconds: Double?
+        let failureReason: String?
+
+        init(_ operation: ProductionAudioOperation) {
+            id = operation.id; key = operation.key; stage = operation.stage; clipId = operation.clipId
+            assetId = operation.placeholderId; queueId = operation.queueId
+            measuredSeconds = operation.measuredSeconds; failureReason = operation.failureReason
+        }
+    }
 
     struct OperationSummary: Encodable {
         let id: String
@@ -45,7 +64,7 @@ struct ProductionStatus: Encodable {
         case isRunning, isPaused, currentShotId, completedCount, succeededCount, failedCount
         case cancelledCount, settledCount, pendingCount, totalCount, queuedCount, queuedUnitCount
         case queuedShotIds, queuedUnits, generatingShotIds, runningUSD, lastError
-        case operationCount, operations
+        case operationCount, operations, audioOperationCount, audioOperations
     }
 
     func encode(to encoder: Encoder) throws {
@@ -71,5 +90,7 @@ struct ProductionStatus: Encodable {
         try c.encode(lastError, forKey: .lastError)
         try c.encode(operationCount, forKey: .operationCount)
         try c.encode(operations, forKey: .operations)
+        try c.encode(audioOperationCount, forKey: .audioOperationCount)
+        try c.encode(audioOperations, forKey: .audioOperations)
     }
 }

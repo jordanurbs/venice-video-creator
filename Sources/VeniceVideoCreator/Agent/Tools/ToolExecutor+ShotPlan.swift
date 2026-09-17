@@ -10,6 +10,14 @@ extension ToolExecutor {
     /// wipe locked voices and reference images.
     func saveShotPlan(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         var plan = try Self.decode(args, as: ShotPlan.self, path: "save_shot_plan")
+        if let raw = args["shots"] as? [[String: Any]] {
+            for index in plan.shots.indices where raw.indices.contains(index) {
+                if let dialogue = raw[index]["dialogue"] {
+                    plan.shots[index].dialogue = try Self.parseDialogue(dialogue, path: "shots[\(index)].dialogue",
+                        existing: editor.shotPlan?.shot(id: plan.shots[index].id)?.dialogue ?? [])
+                }
+            }
+        }
         try Self.requireUniqueShotIds(plan.shots, path: "save_shot_plan")
         plan.shots = try plan.shots.map { try Self.validated($0, index: nil) }
         plan.shots = Self.mergeRuntimeState(newShots: plan.shots, existing: editor.shotPlan?.shots ?? [])
@@ -204,15 +212,26 @@ extension ToolExecutor {
         if let v = op.bool("attachCastVoiceReference") { shot.attachCastVoiceReference = v }
         if let v = op.string("status") { shot.status = try parseEnum(v, ShotStatus.self, field: "\(path).status") }
         if let dlg = op["dialogue"] {
-            shot.dialogue = try parseDialogue(dlg, path: "\(path).dialogue")
+            shot.dialogue = try parseDialogue(dlg, path: "\(path).dialogue", existing: shot.dialogue)
         }
     }
 
-    private static func parseDialogue(_ any: Any, path: String) throws -> [ShotDialogue] {
+    private static func parseDialogue(_ any: Any, path: String, existing: [ShotDialogue] = []) throws -> [ShotDialogue] {
         guard let arr = any as? [[String: Any]] else {
             throw ToolError("\(path): expected an array of dialogue objects.")
         }
-        return try arr.map { try decode($0, as: ShotDialogue.self, path: path) }
+        var used = Set(arr.compactMap { $0["id"] as? String })
+        return try arr.map { raw in
+            var value = raw
+            if raw["id"] == nil {
+                let line = try decode(raw, as: ShotDialogue.self, path: path)
+                let matches = existing.filter { !used.contains($0.id) && $0.text == line.text && $0.speaker == line.speaker
+                    && $0.characterId == line.characterId && $0.voiceOver == line.voiceOver }
+                guard matches.count <= 1 else { throw ToolError("\(path): preserve IDs for repeated dialogue lines.") }
+                if let match = matches.first { value["id"] = match.id; used.insert(match.id) }
+            }
+            return try decode(value, as: ShotDialogue.self, path: path)
+        }
     }
 
     private static func parseEnum<T: RawRepresentable & CaseIterable>(_ raw: String, _ type: T.Type, field: String) throws -> T where T.RawValue == String {
@@ -227,6 +246,7 @@ extension ToolExecutor {
 
     private static func validated(_ shot: Shot, index: Int?) throws -> Shot {
         var s = shot
+        guard Set(s.dialogue.map(\.id)).count == s.dialogue.count else { throw ToolError("Dialogue requires unique line IDs within each shot.") }
         if let error = s.cameraTrajectory?.validationError { throw ToolError(error) }
         if s.durationSeconds <= 0 { s.durationSeconds = 5 }
         let cap = maxGenerableShotSeconds()

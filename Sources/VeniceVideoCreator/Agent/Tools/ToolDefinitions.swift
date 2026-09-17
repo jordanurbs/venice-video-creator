@@ -1333,11 +1333,12 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .produceAudio,
-            description: "Generate and place the production's audio layers: per-shot dialogue (text-to-speech in each character's locked voice, placed at the shot's timeline position), an optional music bed and an optional ambient/SFX bed spanning the whole edit. Voice-over lines are spoken by TTS here (the video prompt already suppresses model narration). Async — clips resolve as generation finishes. For subtitles afterward, use add_captions.",
+            description: "Produce retained voice-over lines and music/ambient beds. Reuses attempts by line/role identity; changed recipes replace the bound clip. Completed audio is measured, fitted to picture, and ducked before placement. Overruns are reported without spilling into another shot. On-screen dialogue stays owned by native video; exact speech/lip-sync is unverified. Repeat to inspect or finish retained attempts. For subtitles afterward, use add_captions.",
             inputSchema: objectSchema(
                 properties: [
                     "shotIds": ["type": "array", "items": ["type": "string"], "description": "Shots to voice. Omit for all shots with dialogue."],
-                    "dialogue": ["type": "boolean", "description": "Generate per-shot dialogue TTS. Default true."],
+                    "dialogue": ["type": "boolean", "description": "Generate voiceOver lines with TTS; report on-screen lines separately. Default true."],
+                    "regenerate": ["type": "boolean", "description": "Explicitly buy new attempts for the requested lines/beds, replacing their bound clips. Default false; unchanged recipes reuse retained attempts."],
                     "music": ["type": "boolean", "description": "Generate a music bed across the edit. Default false."],
                     "musicPrompt": ["type": "string", "description": "Music description. Defaults to the plan logline."],
                     "musicModel": ["type": "string", "description": "Music model slug (defaults to an enabled music model)."],
@@ -1398,6 +1399,7 @@ enum ToolDefinitions {
         [
             "type": "object",
             "properties": [
+                "id": ["type": "string", "description": "Preserve the line ID from get_shot_plan when editing or reordering existing speech. Omit for a new line."],
                 "characterId": ["type": "string", "description": "Character id for the locked voice; omit for anonymous/narrator lines."],
                 "speaker": ["type": "string", "description": "Free-text speaker label when no character is linked (e.g. 'NARRATOR')."],
                 "text": ["type": "string", "description": "The line."],

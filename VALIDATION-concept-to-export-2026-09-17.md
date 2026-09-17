@@ -1,7 +1,7 @@
 # Concept-to-export implementation validation
 
 Date: 2026-09-17
-Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c`, native fixture `d9f2975`, placement bindings `f3542fb`, and operation lifecycle `d0b4bc9` committed. Shared live/recovered finalization compiled and regression-tested. Native control acceptance remains unverified. Not E2E-ready.
+Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c`, native fixture `d9f2975`, placement bindings `f3542fb`, operation lifecycle `d0b4bc9`, and shared video finalization `8d3e3e8` committed. Durable audio identity and measured finishing compiled and regression-tested. Native control acceptance remains unverified. Not E2E-ready.
 
 ## Permissions and spending
 
@@ -45,7 +45,7 @@ Status: routing `c36247d`, catalog/1080P `fa3e067`, storyboard approval `563608c
 
 ## Next slice and open gates
 
-1. Phase 4 foundation: durable audio-line/role identities, idempotent partial reruns, measured lengths and timing ownership, linked native-audio keep/duck/mute restoration. Shared video finalization is now available through explicit `resume_production`; audio finishing remains separate.
+1. Phase 4 continuation: shared reconciliation after manual/agent trim, move, picture retake/reorder, and FPS/cut changes; linked native-audio keep/duck/mute restoration; explicit legacy audio adoption. Durable audio attempts and live/recovered measured finishing are implemented below. Completed-placement resume currently verifies identity/saves without continuously reflowing later timeline edits.
 2. Finish Phase 1 native verification of all six camera controls, unsupported-camera clear path, approval controls, inspector/retake/save-reopen, and 1080P budget presentation. The fixture rendered, but its background window on another Space exposes only menu-bar accessibility elements. Do not change the user's foreground app/Space to bypass this limitation.
 3. Finish Phase 2 placement ownership: selection preview source windows, manually split descendants, arbitrary source replacement, and keep/duck/mute restoration. Exact retake/reset/dialogue addressing and linked replacement/reorder are covered below; these do not establish full production recovery.
 4. Phases 3–5 remain open: revisioned QA/approval and dependency invalidation, attempt/quote ledger and stricter decoded-output validation, idempotent measured audio and exact-speech ownership, readiness, retained export jobs and verified immutable delivery.
@@ -66,6 +66,22 @@ Native fixture/evidence is committed as `d9f2975`, `test(production): add native
 Placement identity is committed as `f3542fb`, `fix(production): persist exact shot placement bindings` (13 files), after related-only staged review. The unrelated bitrate block remained unstaged.
 
 Operation lifecycle is committed as `d0b4bc9`, `fix(production): persist attempts and guard cancelled operations` (16 files), with the unrelated bitrate block excluded.
+
+Shared video finalization is committed as `8d3e3e8`, `feat(production): finalize retained takes with per-beat review` (17 files), with the unrelated bitrate block excluded.
+
+## Durable audio identity and measured finishing
+
+- Added `Production/ProductionAudioOperation.swift` and `Production/ProductionAudioCoordinator.swift`. Each attempt records a stable dialogue `(shotId, lineId)` or music/ambient role, recipe, assigned clip ID, prior destination, timing/ducking ownership, placeholder/backend/queue state, measured seconds, placement, and failure. The manifest defaults old projects to an empty audio ledger; media-library undo preserves it.
+- The existing shared generation checkpoint now covers audio. A real service regression fails the save before provider access and verifies the saved line, destination identity, and placeholder entry. Native autosave/crash and actual queue recovery are still acceptance gates.
+- `produce_audio` resolves/validates requested model parameters before dispatch, preserves explicit locked TTS models, and reuses unchanged attempts. Changed recipes or explicit `regenerate=true` create distinct attempts replacing the same clip. New attempts cannot race a currently generating/finalizing attempt for that line. Poll `production_status.audioOperations` for compact stage, asset/queue, measured duration, and failure data; recipes are not emitted there.
+- Tool schemas expose dialogue IDs; unchanged unambiguous lines retain IDs even when omitted on resave. Duplicate line IDs/repeated ambiguous lines fail. Short-ID handling includes dialogue and audio-operation IDs. Removed/converted voice-over lines with placed clips block new production until reconciled. Recognizable legacy named production audio also blocks automatic duplication; no automatic old-clip adoption is claimed.
+- Shared metadata-driven completion and package reopen use the same finisher without ephemeral line callbacks. It probes audio track presence/duration through AVFoundation, rejects missing/nonfinite/zero output facts, refreshes asset/manifest duration, and checkpoints before/after placement. Tests inject measurement except the real 24kHz, 1.25s WAV/package fixture. Timing uses the editor's existing frame truncation convention.
+- Automatic dialogue reflows in picture order using measured placed lengths (pending lines reserve estimates), with a global gap and a hard bound at each shot's picture end. Overruns retain the generated file and report a blocked state. Extending picture can finish the same take. Parallel replacements update automatically shifted pending destinations; explicit retries accept intervening same-source manual edits without rebuying.
+- Beds fit picture extent rather than timeline extent inflated by earlier audio or full provider duration. Long output is trimmed; insufficient coverage fails. Supported duration choices must cover the cut. Owned envelopes recompute from placed voice-over windows; native speech uses its picture window as a conservative ducking window. Manual timing, trims, fades, volume, and authored bed envelopes are retained; overlap/fade/source-coverage conflicts fail before timeline mutation.
+- `produce_audio` only synthesizes `voiceOver=true` lines. On-screen dialogue remains native-video-owned and is reported as `nativeSpeechUnverified`; no transcript or lip-sync verification is claimed. Native audio keep/duck/mute restoration remains open.
+- Added **19 `ProductionAudioTests`** covering reversed completion, unchanged/partial/concurrent regeneration, per-role beds, measured ducking, manual edits, overrun retry, stale line edits, duplicate callbacks/close, cancelled/replayed placeholders, checkpoint failures, undo, legacy refusal, line-ID tools, native speech reporting, invalid media, and real WAV/package recovery. Initial test compilation exposed nested Swift Testing macro limitations; corrected test syntax. Two initial frame assertions incorrectly expected rounding and were corrected to the editor's truncation convention.
+- `swift build`: passed during implementation. Final `swift test --filter 'ProductionAudioTests|ProductionOperationTests|ProductionStatusTests|ShotPlacementTests'`: **47 tests / four suites passed**. Final `swift test`: **1,137 tests / 173 suites passed**, same seven skips. Final combined output: `/Users/venetian42069/.local/share/opencode/tool-output/tool_0b149fc3a001hXRqBWpguEmnZ3`. No paid calls, fresh catalog/quote probes, native app launch, or foreground/Space changes occurred in this slice.
+- Remaining scope: continuous trim/move/retake/reorder/FPS/cut reconciliation; known-queue failed-download recovery acceptance; native audio policy restoration; explicit legacy adoption/clip-binding repair; retained audio byte revisions; exact-speech verification; full attempt billing; final readiness/export and dated integrated/native/live acceptance. The full passing suite includes existing local export tests, not the dated 35–50s E2E fixture.
 
 ## Catalog/1080P follow-up validation
 

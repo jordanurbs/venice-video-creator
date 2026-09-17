@@ -102,7 +102,7 @@ final class GenerationService {
             }
             do {
                 try Task.checkCancellation()
-                if genInput.productionOperationId != nil {
+                if genInput.productionOperationId != nil || genInput.productionAudioOperationId != nil {
                     try editor.validateProductionAttempt(genInput, placeholderId: primaryId)
                     try await editor.checkpointProductionState()
                     try editor.validateProductionAttempt(genInput, placeholderId: primaryId)

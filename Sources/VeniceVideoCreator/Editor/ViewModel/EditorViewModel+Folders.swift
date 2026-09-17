@@ -203,8 +203,10 @@ extension EditorViewModel {
         let redo = mediaLibraryUndoSnapshot()
         timeline = snapshot.timeline
         let operations = mediaManifest.productionOperations
+        let audioOperations = mediaManifest.productionAudioOperations
         mediaManifest = snapshot.mediaManifest
         mediaManifest.productionOperations = operations
+        mediaManifest.productionAudioOperations = audioOperations
         mediaAssets = snapshot.mediaAssets
         selectedClipIds = snapshot.selectedClipIds
         selectedMediaAssetIds = snapshot.selectedMediaAssetIds

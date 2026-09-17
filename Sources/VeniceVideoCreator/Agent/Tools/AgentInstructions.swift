@@ -335,10 +335,12 @@ enum AgentInstructions {
         - Dialogue/VO: put spoken lines on the shot (voiceOver=true for narration/off-screen). \
           The video prompt automatically suppresses model narration for VO shots; produce_audio \
           speaks the lines in the character's locked voice. Run produce_shots BEFORE produce_audio: \
-          dialogue is placed at each shot's timeline position, so a shot with no placed video is \
-          skipped (reported in skippedUnplacedShots) rather than piling its lines at frame 0. \
-          Lines schedule on one global no-overlap cursor and a music/ambient bed auto-ducks under \
-          them.
+          unplaced shots are skipped. Preserve dialogue line IDs when editing. Identical audio \
+          requests reuse retained attempts; regenerate=true explicitly buys replacements. \
+          Completed speech is measured and must fit its picture window; overruns block placement. \
+          Beds fit the picture cut and duck under placed speech. On-screen lines stay owned by \
+          native video and are reported as unverified, never duplicated with automatic TTS. \
+          Exact speech and lip-sync still require separate verification.
         - Voice consistency across shots: lock_voice also locks a voice REFERENCE (an audio \
           sample of the character speaking) — pass voiceReferenceMediaRef with the winning \
           audition sample, or let it auto-generate one. Shots that include the character then \

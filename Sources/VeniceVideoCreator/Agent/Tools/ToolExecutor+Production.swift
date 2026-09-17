@@ -173,6 +173,8 @@ extension ToolExecutor {
         )
         status.operationCount = editor.mediaManifest.productionOperations.count
         status.operations = editor.mediaManifest.productionOperations.suffix(50).map(ProductionStatus.OperationSummary.init)
+        status.audioOperationCount = editor.mediaManifest.productionAudioOperations.count
+        status.audioOperations = editor.mediaManifest.productionAudioOperations.suffix(50).map(ProductionStatus.AudioSummary.init)
         do {
             let data = try JSONEncoder().encode(status)
             return .ok(String(decoding: data, as: UTF8.self))

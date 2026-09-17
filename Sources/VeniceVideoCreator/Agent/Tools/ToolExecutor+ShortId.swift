@@ -15,7 +15,7 @@ extension ToolExecutor {
         // Production entities + their reference locks. These were missing,
         // which made update_character/update_location reject shortened ids
         // the agent had just been shown (e.g. lockedReferenceMediaRef).
-        "characterId", "locationId", "shotId", "afterId", "id",
+        "characterId", "locationId", "shotId", "lineId", "afterId", "id",
         "lockedReferenceMediaRef", "voiceReferenceMediaRef",
         "audioReferenceAssetId",
     ]
@@ -42,11 +42,15 @@ extension ToolExecutor {
         for asset in editor.mediaAssets { ids.insert(asset.id) }
         for folder in editor.folders { ids.insert(folder.id) }
         for operation in editor.mediaManifest.productionOperations { ids.insert(operation.id) }
+        for operation in editor.mediaManifest.productionAudioOperations { ids.insert(operation.id); ids.insert(operation.clipId) }
         // Shot-plan entities: their ids appear in get_shot_plan output and come
         // back as characterId/locationId/shotId arguments. Excluding them meant
         // shortened entity ids couldn't round-trip.
         if let plan = editor.shotPlan {
-            for shot in plan.shots { ids.insert(shot.id) }
+            for shot in plan.shots {
+                ids.insert(shot.id)
+                for line in shot.dialogue { ids.insert(line.id) }
+            }
             for character in plan.characters { ids.insert(character.id) }
             for location in plan.locations { ids.insert(location.id) }
         }

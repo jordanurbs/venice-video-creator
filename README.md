@@ -17,13 +17,13 @@ Venice Video Creator is an open-source video editor for Mac. You and your agent 
 **Don't use GitHub? No problem — it's a normal Mac app.**
 
 1. Go to the **[latest release page](https://github.com/jordanurbs/venice-video-creator/releases/latest)**.
-2. Under **Assets**, download **`VeniceVideoCreator.dmg`**.
-3. Open the downloaded `.dmg`, then drag **Venice Video Creator** onto the **Applications** folder.
+2. Under **Assets**, download **`VeniceVideoCreator.dmg`** — or, on an **Unofficial Build** release, the **`VeniceVideoCreator-*-unsigned.zip`** (see below).
+3. Open the downloaded `.dmg` (or unzip the `.zip`), then drag **Venice Video Creator** onto the **Applications** folder.
 4. Launch it from Applications.
 
 > First launch: because the app is distributed outside the Mac App Store, macOS may ask you to confirm. If you see *"cannot be opened"*, right-click the app → **Open** → **Open**, or allow it under **System Settings → Privacy & Security**.
 
-**Unofficial build (zip, ad-hoc signed).** If a release also carries a `VeniceVideoCreator-*-unsigned.zip` asset, that's the same app built without Developer ID signing or notarization. Install it the same way — unzip, drag to Applications — then approve it manually on first launch: right-click the app → **Open** → **Open** (or, after a blocked first attempt, **System Settings → Privacy & Security → Open Anyway**). macOS remembers the approval; later launches are normal. If Finder still refuses, run `xattr -dr com.apple.quarantine "/Applications/Venice Video Creator.app"` once in Terminal.
+**Unofficial build (zip, ad-hoc signed).** The **[Unofficial Build](https://github.com/jordanurbs/venice-video-creator/releases/tag/unofficial)** release is rebuilt from `venice-integration` on every push, and any release may also carry a `VeniceVideoCreator-*-unsigned.zip` asset. It's the same app built without Developer ID signing or notarization. Install it the same way — unzip, drag to Applications — then approve it manually on first launch: right-click the app → **Open** → **Open** (or, after a blocked first attempt, **System Settings → Privacy & Security → Open Anyway**). macOS remembers the approval; later launches are normal. If Finder still refuses, run `xattr -dr com.apple.quarantine "/Applications/Venice Video Creator.app"` once in Terminal.
 
 To start creating, open **Settings → Venice** and paste your Venice API key (get one at [venice.ai](https://venice.ai)).
 

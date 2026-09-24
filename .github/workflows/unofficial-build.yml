@@ -1,26 +1,28 @@
 name: Unofficial Build
 
-# Builds an ad-hoc signed (unsigned/unofficial) zip of the app and attaches it
-# to a GitHub Release. No Developer ID, no notarization — users install via
-# right-click → Open. Runs on demand; optionally on version tags.
+# Builds an ad-hoc signed (unsigned/unofficial) zip of the app. No Developer ID,
+# no notarization — users install via right-click → Open. Pushes to
+# venice-integration refresh the rolling "unofficial" release (marked Latest);
+# v* tags attach the zip to that tag's release.
 
 on:
   workflow_dispatch:
   push:
+    branches: [venice-integration]
     tags:
       - "v*"
 
-concurrency:
-  group: unofficial-build-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
 
 jobs:
   package:
     name: Package unofficial zip
     runs-on: macos-26
     timeout-minutes: 60
-    permissions:
-      contents: write
+    concurrency:
+      group: unofficial-build-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
 
@@ -43,10 +45,76 @@ jobs:
           name: unofficial-zip
           path: dist/*.zip
           retention-days: 30
+          if-no-files-found: error
 
-      - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+  publish-rolling:
+    name: Publish rolling release
+    needs: package
+    if: github.ref == 'refs/heads/venice-integration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    # Never cancel mid-publish: that could leave the release with no zip attached.
+    concurrency:
+      group: unofficial-publish
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: unofficial
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: unofficial-zip
+          path: dist
+
+      - name: Move tag to this commit
+        run: |
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$TAG"
+
+      - name: Replace release zip
+        run: |
+          ZIP="$(ls dist/*.zip)"
+          LABEL="$(basename "$ZIP")"
+          LABEL="${LABEL#VeniceVideoCreator-}"
+          LABEL="${LABEL%-unsigned.zip}"
+          TITLE="Unofficial Build $LABEL"
+          NOTES="$(cat <<EOF
+          Ad-hoc signed build of \`venice-integration\` at ${GITHUB_SHA::7}. Not notarized. Rebuilt on every push.
+
+          **Install:** unzip, drag **Venice Video Creator** to Applications, then right-click it → **Open** → **Open** on first launch. If macOS still blocks it, use **System Settings → Privacy & Security → Open Anyway**, or run \`xattr -dr com.apple.quarantine "/Applications/Venice Video Creator.app"\` once in Terminal.
+          EOF
+          )"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release view "$TAG" --json assets --jq '.assets[].name' | while read -r name; do
+              gh release delete-asset "$TAG" "$name" --yes < /dev/null
+            done
+            gh release upload "$TAG" "$ZIP"
+            gh release edit "$TAG" --title "$TITLE" --notes "$NOTES" --latest
+          else
+            gh release create "$TAG" "$ZIP" --verify-tag --title "$TITLE" --notes "$NOTES" --latest
+          fi
+
+  attach-to-tag:
+    name: Attach to tag release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: unofficial-zip
+          path: dist
+
+      - uses: softprops/action-gh-release@v2
         with:
           files: dist/*.zip
           generate_release_notes: false

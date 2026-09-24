@@ -35,3 +35,6 @@ models/*/.venv/
 models/*/build*/
 models/*/checkpoint*
 models/*/convert*.log
+
+# Internal working docs (audits, handoffs, plans — local only)
+docs/internal/

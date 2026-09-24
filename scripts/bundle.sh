@@ -60,6 +60,10 @@ cp -R "$SPARKLE_FW" "$APP/Contents/Frameworks/Sparkle.framework"
 
 # Flatten SwiftPM's resource bundle into the app's Resources tree.
 RES_BUNDLE="$(dirname "$BIN")/VeniceVideoCreator_VeniceVideoCreator.bundle"
+# The Swift Build backend (default since Swift 6.4) nests resources under Contents/Resources/.
+if [ -d "$RES_BUNDLE/Contents/Resources" ]; then
+  RES_BUNDLE="$RES_BUNDLE/Contents/Resources"
+fi
 if [ -d "$RES_BUNDLE/Fonts" ]; then
   cp -R "$RES_BUNDLE/Fonts" "$APP/Contents/Resources/"
 else

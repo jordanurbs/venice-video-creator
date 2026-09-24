@@ -1,0 +1,52 @@
+name: Unofficial Build
+
+# Builds an ad-hoc signed (unsigned/unofficial) zip of the app and attaches it
+# to a GitHub Release. No Developer ID, no notarization — users install via
+# right-click → Open. Runs on demand; optionally on version tags.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: unofficial-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Package unofficial zip
+    runs-on: macos-26
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-unofficial-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-unofficial-${{ runner.os }}-
+
+      - name: Build + package
+        run: ./scripts/package-unofficial.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unofficial-zip
+          path: dist/*.zip
+          retention-days: 30
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: false
